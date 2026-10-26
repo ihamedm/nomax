@@ -9,6 +9,14 @@ import { DevOtpsPage } from "@/features/admin/DevOtpsPage";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { BusinessDetailPage } from "@/features/business/BusinessDetailPage";
 import { SearchPage } from "@/features/business/SearchPage";
+import CreateBusinessPage from "@/features/business/CreateBusinessPage";
+import OwnerPage from "@/features/owner/OwnerPage";
+import StaticPage from "@/features/static/StaticPage";
+import CategoriesPage from "@/features/category/CategoriesPage";
+import QuoteNewPage from "@/features/quote/QuoteNewPage";
+import QuoteMinePage from "@/features/quote/QuoteMinePage";
+import AdminBusinessesPage from "@/features/admin/AdminBusinessesPage";
+import AdminReviewsPage from "@/features/admin/AdminReviewsPage";
 import { HomePage } from "@/features/home/HomePage";
 import { useAuth } from "@/stores/auth";
 
@@ -51,13 +59,21 @@ export function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/search" element={<SearchPage />} />
+        <Route path="/categories" element={<CategoriesPage />} />
+        <Route path="/quote/new" element={<QuoteNewPage />} />
+        <Route path="/quote/mine" element={<QuoteMinePage />} />
+        <Route path="/businesses/new" element={<CreateBusinessPage />} />
         <Route path="/businesses/:slug" element={<BusinessDetailPage />} />
+        <Route path="/owner" element={<OwnerPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminHomePage />} />
+          <Route path="businesses" element={<AdminBusinessesPage />} />
+          <Route path="reviews" element={<AdminReviewsPage />} />
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="dev-otps" element={<DevOtpsPage />} />
         </Route>
+        <Route path="/pages/:page" element={<StaticPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </>

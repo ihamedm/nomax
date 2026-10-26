@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
-from app.core.deps import get_current_user, get_otp_service, require_superadmin
+from app.core.deps import get_current_user, get_otp_service, require_permissions, require_superadmin
 from app.core.errors import AppError
 from app.core.permissions import permission_catalog, validate_permission_codes
 from app.db.session import get_db
@@ -61,6 +61,198 @@ def _to_admin_response(user: User) -> dict:
 @router.get("/me")
 async def admin_me(user: User = Depends(get_current_user)) -> dict:
     return {"data": {"user": _to_admin_response(user), "is_superadmin": user.role == UserRole.SUPERADMIN}}
+
+
+@router.get("/businesses")
+async def list_admin_businesses(
+    status: Optional[str] = None,
+    actor: User = Depends(require_permissions("business.read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    del actor
+    from app.models.business import Business
+
+    stmt = select(Business).where(Business.deleted_at.is_(None))
+    if status:
+        stmt = stmt.where(Business.status == status)
+    rows = (await session.execute(stmt.order_by(Business.created_at.desc()).limit(100))).scalars().all()
+    return {"data": {"items": [
+        {
+            "id": str(b.id),
+            "name": b.name,
+            "slug": b.slug,
+            "status": b.status.value if hasattr(b.status, "value") else str(b.status),
+            "is_verified": b.is_verified,
+            "is_24h": b.is_24h,
+            "owner_id": str(b.owner_id),
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+        }
+        for b in rows
+    ]}}
+
+
+@router.patch("/businesses/{business_id}/verify-license")
+async def verify_license(
+    business_id: str,
+    actor: User = Depends(require_permissions("business.license.verify")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.models.business import Business
+    from app.models.license import License
+
+    try:
+        from uuid import UUID as _UUID
+
+        bid = _UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    business = await session.get(Business, bid)
+    if business is None:
+        raise AppError("not_found", "business_not_found", 404)
+    license_row = (
+        await session.execute(
+            select(License).where(License.business_id == bid, License.deleted_at.is_(None))
+        )
+    ).scalars().first()
+    if license_row is None:
+        raise AppError("not_found", "license_not_found", 404)
+    license_row.is_verified_by_admin = True
+    business.is_verified = True
+    await _write_audit(session, actor.id, "business.license.verify", "business", str(bid), after={"verified": True})
+    await session.commit()
+    return {"data": {"id": str(bid), "is_verified": True}}
+
+
+@router.patch("/businesses/{business_id}/toggle-24h")
+async def toggle_24h(
+    business_id: str,
+    actor: User = Depends(require_permissions("business.approve")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.models.business import Business
+
+    try:
+        from uuid import UUID as _UUID
+
+        bid = _UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    business = await session.get(Business, bid)
+    if business is None:
+        raise AppError("not_found", "business_not_found", 404)
+    business.is_24h = not business.is_24h
+    await _write_audit(session, actor.id, "business.toggle_24h", "business", str(bid), after={"is_24h": business.is_24h})
+    await session.commit()
+    return {"data": {"id": str(bid), "is_24h": business.is_24h}}
+
+
+@router.patch("/businesses/{business_id}/approve")
+async def approve_business(
+    business_id: str,
+    actor: User = Depends(require_permissions("business.approve")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.models.business import Business, BusinessStatus
+    from uuid import UUID as _UUID
+
+    bid = _UUID(business_id)
+    business = await session.get(Business, bid)
+    if business is None:
+        raise AppError("not_found", "business_not_found", 404)
+    business.status = BusinessStatus.APPROVED
+    business.rejection_reason = None
+    await _write_audit(session, actor.id, "business.approve", "business", str(bid), after={"status": "approved"})
+    await session.commit()
+    return {"data": {"id": str(bid), "status": "approved"}}
+
+
+@router.patch("/businesses/{business_id}/reject")
+async def reject_business(
+    business_id: str,
+    payload: dict,
+    actor: User = Depends(require_permissions("business.approve")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.models.business import Business, BusinessStatus
+    from uuid import UUID as _UUID
+
+    bid = _UUID(business_id)
+    business = await session.get(Business, bid)
+    if business is None:
+        raise AppError("not_found", "business_not_found", 404)
+    business.status = BusinessStatus.REJECTED
+    business.rejection_reason = payload.get("reason")
+    await _write_audit(session, actor.id, "business.reject", "business", str(bid), after={"reason": business.rejection_reason})
+    await session.commit()
+    return {"data": {"id": str(bid), "status": "rejected"}}
+
+
+@router.get("/reviews")
+async def list_admin_reviews(
+    status: Optional[str] = None,
+    actor: User = Depends(require_permissions("review.read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    del actor
+    from app.models.review import Review
+
+    stmt = select(Review).where(Review.deleted_at.is_(None))
+    if status:
+        stmt = stmt.where(Review.status == status)
+    rows = (await session.execute(stmt.order_by(Review.created_at.desc()).limit(100))).scalars().all()
+    return {"data": {"items": [
+        {"id": str(r.id), "business_id": str(r.business_id), "rating": r.rating,
+         "text": r.text, "status": r.status}
+        for r in rows
+    ]}}
+
+
+@router.get("/stats/overview")
+async def stats_overview(
+    actor: User = Depends(require_permissions("stats.read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    del actor
+    from app.models.business import Business
+
+    async def count(condition=None):
+        stmt = select(func.count(Business.id))
+        if condition is not None:
+            stmt = stmt.where(condition)
+        return int((await session.execute(stmt)).scalar() or 0)
+
+    return {"data": {
+        "pending": await count(Business.status == "pending"),
+        "approved": await count(Business.status == "approved"),
+        "rejected": await count(Business.status == "rejected"),
+        "urgent": await count(Business.is_24h.is_(True)),
+    }}
+
+
+@router.get("/audit-log")
+async def list_audit_log(
+    actor: User = Depends(require_permissions("admin.audit.read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    del actor
+    rows = (
+        await session.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(100))
+    ).scalars().all()
+    return {
+        "data": {
+            "items": [
+                {
+                    "id": row.id,
+                    "actor_id": str(row.actor_id),
+                    "action": row.action,
+                    "entity_type": row.entity_type,
+                    "entity_id": row.entity_id,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ]
+        }
+    }
 
 
 @router.get("/permissions")

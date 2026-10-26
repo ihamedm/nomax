@@ -8,6 +8,8 @@ import { isAdmin, useAuth } from "@/stores/auth";
 
 const NAV = [
   { to: "/admin", label: "داشبورد", end: true, superadminOnly: false },
+  { to: "/admin/businesses", label: "کسب‌وکارها", end: false, superadminOnly: false },
+  { to: "/admin/reviews", label: "نظرات", end: false, superadminOnly: false },
   { to: "/admin/users", label: "کاربران", end: false, superadminOnly: true },
   { to: "/admin/dev-otps", label: "کدهای ورود", end: false, superadminOnly: true },
 ];

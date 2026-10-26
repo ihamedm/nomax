@@ -6,6 +6,11 @@ from fastapi.responses import JSONResponse
 from app.api.v1.admin import admin_router, dev_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.businesses import router as businesses_router
+from app.api.v1.quotes import router as quotes_router
+from app.api.v1.notifications import router as notifications_router
+from app.api.v1.ads import router as ads_router
+from app.api.v1.reviews import router as reviews_router
+from app.api.v1.utility import router as utility_router
 from app.api.v1.categories import router as categories_router
 from app.api.v1.health import router as health_router
 from app.core.api_response import build_error_response
@@ -50,6 +55,11 @@ def create_app() -> FastAPI:
     application.include_router(auth_router, prefix="/api/v1")
     application.include_router(categories_router, prefix="/api/v1")
     application.include_router(businesses_router, prefix="/api/v1")
+    application.include_router(quotes_router, prefix="/api/v1")
+    application.include_router(notifications_router, prefix="/api/v1")
+    application.include_router(ads_router, prefix="/api/v1")
+    application.include_router(reviews_router, prefix="/api/v1")
+    application.include_router(utility_router, prefix="/api/v1")
     application.include_router(admin_router, prefix="/api/v1")
     if settings.APP_ENV != "production" and settings.DEV_OTP_ENABLED:
         application.include_router(dev_router, prefix="/api/v1")

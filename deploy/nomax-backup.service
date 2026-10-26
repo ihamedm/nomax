@@ -1,0 +1,10 @@
+[Unit]
+Description=NOMAX nightly Postgres backup
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nomax
+EnvironmentFile=/opt/nomax/.env.prod
+ExecStart=/opt/nomax/deploy/backup.sh /opt/nomax/backups
+ExecStartPost=/bin/sh -c 'find /opt/nomax/backups -name "nomax-*.dump" -mtime +30 -delete'

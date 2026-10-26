@@ -125,6 +125,17 @@ async def db_engine():
 async def _clean_state(db_engine):
     """Give every test a clean database and a clean fake Redis."""
     async with engine.begin() as connection:
+        for table in (
+            "notification_deliveries",
+            "notifications",
+            "device_tokens",
+            "scheduled_jobs",
+            "offers",
+            "quote_requests",
+            "reviews",
+            "ads",
+        ):
+            await connection.execute(sa.text(f"DELETE FROM {table}"))
         await connection.execute(sa.text("DELETE FROM sms_logs"))
         await connection.execute(sa.text("DELETE FROM admin_audit_logs"))
         await connection.execute(sa.text("DELETE FROM businesses"))

@@ -32,6 +32,49 @@ services:
       timeout: 3s
       retries: 10
 
+  api:
+    build: ./backend
+    container_name: nomax-api
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DATABASE_URL: postgresql+asyncpg://nomax:secret@db:5432/nomax
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-nomax-local-dev-secret-change-me-please-0123456789abcdef}
+      UPLOAD_DIR: /data/uploads
+      CORS_ORIGINS: '["http://localhost:5175","http://localhost:8080"]'
+    volumes:
+      - nomax_uploads:/data/uploads
+    ports:
+      - "8002:8001"
+
+  worker:
+    build: ./backend
+    container_name: nomax-worker
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DATABASE_URL: postgresql+asyncpg://nomax:secret@db:5432/nomax
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-nomax-local-dev-secret-change-me-please-0123456789abcdef}
+
+  web:
+    build: ./frontend
+    container_name: nomax-web
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
   # Object storage is opt-in because the MinIO image must be pulled from an
   # accessible registry (ArvanCloud mirror in Iran). The API does not need it
   # until Phase 3 uploads.
@@ -76,3 +119,4 @@ volumes:
   nomax_pgdata:
   nomax_redisdata:
   nomax_miniodata:
+  nomax_uploads:

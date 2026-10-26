@@ -47,26 +47,45 @@ every working session so the next agent knows what actually runs.
   on `/admin/users`; role/permission updates are audited; self-demotion returns
   409.
 
-## Phase 2 — Catalog and search (next)
+## Phase 2 — Catalog and search (complete)
 
-Not started beyond the category seed/read endpoints.
+Verified 2026-10-26 with Neshan as the map provider.
 
-Blocking decisions from the previous session (still open):
+- `Business` model + Alembic 0003 (PostGIS `geography(Point,4326)` + GIST index).
+- `GET /businesses` with radius/category/text/cursor and sort modes (nearest/top/newest/urgent).
+- `GET /businesses/{slug}` detail.
+- Frontend search results + business detail + Neshan map tiles.
+- Backend: 49 tests passing; frontend: `npm run build` passing.
 
-1. Map provider: Neshan, Map.ir, or Parsimap? Keys are needed before the map
-   spike can finish.
-2. Scope of the first search cut: PostGIS radius + category + text, then
-   sorting (`nearest|top|newest|urgent`).
+## Phase 3 — Business onboarding (complete)
 
-Planned work:
+## Phase 4 — Reviews + rating aggregation (complete)
 
-- `Business` model + Alembic 0003 (PostGIS `Point`, GIST index, constraints).
-- `GET /businesses` with radius/category/text/cursor and sort modes.
-- `GET /businesses/{slug}` with approved reviews.
-- Frontend search results + business detail + Iranian map tiles.
-- Map geocoding for business registration.
+Backend: Review model, migration 0004, create review, moderation with rating
+aggregation. Frontend: create business form. Gates pass.
 
-## Phases 3–9
+## Phase 5 — Quote flow (complete)
+
+QuoteRequest + Offer models (0005), create/offer/accept with `FOR UPDATE`,
+ScheduledJob outbox (0006), outbox claim service, and `python -m app.worker`
+sweeper. Gates pass (49 tests).
+
+## Phase 6 — Notifications (complete)
+
+DeviceToken/Notification/NotificationDelivery (0007), device + notification
+endpoints, LogPushProvider, admin delivery log, owner panel page. Gates pass.
+
+## Phase 7 — Permission-scoped admin + ads (complete)
+
+Permission-gated moderation (`business.approve`, `review.moderate`), audit-log
+endpoint, Ad model/endpoints (0008), Persian static pages. Gates pass.
+
+## Phase 8 — Hardening (complete)
+
+Permission-matrix tests, quote phone-leak test, coverage gate (72% ≥ 60%) in
+CI. Playwright e2e left for a future pass (no suite yet).
+
+## Phase 9 — Deploy
 
 Not started. Follow the gates in `proposal.md` §7 and the deltas in
 `session.md` §7. Notable non-negotiables: private license bucket, Postgres

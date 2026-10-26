@@ -1,0 +1,44 @@
+name: nomax-observability
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - uptime_data:/app/data
+
+  glitchtip-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: glitchtip
+      POSTGRES_PASSWORD: ${GLITCHTIP_DB_PASSWORD:-change-me}
+      POSTGRES_DB: glitchtip
+    volumes:
+      - glitchtip_db:/var/lib/postgresql/data
+
+  glitchtip-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  glitchtip:
+    image: glitchtip/glitchtip:latest
+    restart: unless-stopped
+    depends_on:
+      - glitchtip-db
+      - glitchtip-redis
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:-change-me}@glitchtip-db:5432/glitchtip
+      REDIS_URL: redis://glitchtip-redis:6379/0
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:?set GLITCHTIP_SECRET_KEY}
+      GLITCHTIP_DOMAIN: ${GLITCHTIP_DOMAIN:-http://localhost:8002}
+      DEFAULT_FROM_EMAIL: ${GLITCHTIP_EMAIL:-noreply@nomax.local}
+      EMAIL_URL: consolemail://
+
+volumes:
+  uptime_data:
+  glitchtip_db:
