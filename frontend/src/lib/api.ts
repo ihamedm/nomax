@@ -20,7 +20,12 @@ interface ErrorBody {
   error?: { code?: string; message?: string; details?: unknown };
 }
 
-async function refreshTokens(): Promise<boolean> {
+function expireSession(): void {
+  tokens.clear();
+  window.dispatchEvent(new Event("nomax:session-expired"));
+}
+
+async function doRefresh(): Promise<boolean> {
   if (!tokens.refresh) return false;
   try {
     const response = await fetch(`${BASE}/auth/refresh`, {
@@ -28,17 +33,41 @@ async function refreshTokens(): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh: tokens.refresh }),
     });
-    if (!response.ok) return false;
+    if (!response.ok) {
+      expireSession();
+      return false;
+    }
     const body = (await response.json()) as { data?: { access: string; refresh: string } };
-    if (!body.data) return false;
+    if (!body.data) {
+      expireSession();
+      return false;
+    }
     tokens.set(body.data.access, body.data.refresh);
     return true;
   } catch {
+    // Network failure while refreshing: keep the refresh token so a retry can
+    // still succeed when connectivity returns.
     return false;
   }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+let refreshing: Promise<boolean> | null = null;
+
+/** Single-flight refresh: concurrent 401s must not rotate the same token twice. */
+function refreshTokens(): Promise<boolean> {
+  if (!refreshing) {
+    refreshing = doRefresh().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
+}
+
+async function request<T, M>(
+  path: string,
+  init: RequestInit,
+  retry: boolean,
+): Promise<{ data: T; meta: M | undefined }> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (tokens.access) headers.set("Authorization", `Bearer ${tokens.access}`);
@@ -51,10 +80,12 @@ export async function api<T>(path: string, init: RequestInit = {}, retry = true)
   }
 
   if (response.status === 401 && retry && tokens.refresh) {
-    if (await refreshTokens()) return api<T>(path, init, false);
+    if (await refreshTokens()) return request<T, M>(path, init, false);
   }
 
-  const body = (await response.json().catch(() => null)) as ({ data?: T } & ErrorBody) | null;
+  const body = (await response.json().catch(() => null)) as
+    | ({ data?: T; meta?: M } & ErrorBody)
+    | null;
   if (!response.ok || !body || body.data === undefined) {
     const error = body?.error;
     throw new ApiError(
@@ -64,7 +95,21 @@ export async function api<T>(path: string, init: RequestInit = {}, retry = true)
       error?.details,
     );
   }
-  return body.data;
+  return { data: body.data, meta: body.meta };
+}
+
+export async function api<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const { data } = await request<T, never>(path, init, retry);
+  return data;
+}
+
+/** Like `api`, but keeps the envelope `meta` (used by cursor-paginated lists). */
+export async function apiWithMeta<T, M>(
+  path: string,
+  init: RequestInit = {},
+  retry = true,
+): Promise<{ data: T; meta: M | undefined }> {
+  return request<T, M>(path, init, retry);
 }
 
 const MESSAGES: Record<string, string> = {
@@ -78,6 +123,8 @@ const MESSAGES: Record<string, string> = {
   account_disabled: "این حساب غیرفعال شده است.",
   not_found: "موردی پیدا نشد.",
   conflict: "این اطلاعات قبلاً ثبت شده است.",
+  sms_provider_unavailable: "ارسال پیامک در حال حاضر ممکن نیست. کمی بعد تلاش کنید.",
+  not_ready: "سرویس موقتاً آماده نیست.",
 };
 
 export function errorMessage(error: unknown): string {

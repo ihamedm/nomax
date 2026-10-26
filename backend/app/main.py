@@ -5,6 +5,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.admin import admin_router, dev_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.businesses import router as businesses_router
+from app.api.v1.categories import router as categories_router
 from app.api.v1.health import router as health_router
 from app.core.api_response import build_error_response
 from app.core.config import settings
@@ -46,14 +48,12 @@ def create_app() -> FastAPI:
         )
 
     application.include_router(auth_router, prefix="/api/v1")
+    application.include_router(categories_router, prefix="/api/v1")
+    application.include_router(businesses_router, prefix="/api/v1")
     application.include_router(admin_router, prefix="/api/v1")
     if settings.APP_ENV != "production" and settings.DEV_OTP_ENABLED:
         application.include_router(dev_router, prefix="/api/v1")
     application.include_router(health_router)
-
-    @application.get("/health")
-    async def health_root() -> dict:
-        return {"data": {"status": "ok"}}
 
     return application
 

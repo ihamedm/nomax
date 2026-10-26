@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
@@ -75,7 +75,9 @@ async def list_users(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     del actor  # superadmin gate already enforced via dependency
-    result = await session.execute(select(User))
+    result = await session.execute(
+        select(User).where(User.deleted_at.is_(None)).order_by(User.created_at)
+    )
     users = list(result.scalars().all())
     return {"data": {"items": [_to_admin_response(u) for u in users]}}
 
@@ -91,9 +93,30 @@ async def patch_user_role(
     target = await session.get(User, UUID(user_id))
     if target is None:
         raise AppError("not_found", "user_not_found", 404)
+
+    if payload.role is not None:
+        if target.id == actor.id and payload.role != UserRole.SUPERADMIN:
+            raise AppError("conflict", "cannot_change_own_role", 409)
+        if target.role == UserRole.SUPERADMIN and payload.role != UserRole.SUPERADMIN:
+            remaining = await session.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(
+                    User.role == UserRole.SUPERADMIN,
+                    User.deleted_at.is_(None),
+                    User.id != target.id,
+                )
+            )
+            if not remaining:
+                raise AppError("conflict", "last_superadmin_required", 409)
+
     before = {"role": target.role.value, "permissions": list(target.permissions or [])}
     if payload.role is not None:
         target.role = payload.role
+        # Drop dormant grants: a re-promoted admin must start from an explicit
+        # set, not from permissions left over before demotion.
+        if payload.role != UserRole.ADMIN:
+            target.permissions = []
     if payload.permissions is not None:
         target.permissions = validate_permission_codes(payload.permissions)
     after = {"role": target.role.value, "permissions": list(target.permissions or [])}

@@ -32,6 +32,47 @@ services:
       timeout: 3s
       retries: 10
 
+  # Object storage is opt-in because the MinIO image must be pulled from an
+  # accessible registry (ArvanCloud mirror in Iran). The API does not need it
+  # until Phase 3 uploads.
+  #   MINIO_IMAGE=docker.arvancloud.ir/minio/minio:... docker compose --profile storage up -d
+  minio:
+    profiles: ["storage"]
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2024-09-13T20-26-02Z}
+    container_name: nomax-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nomax}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-nomax-minio-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - nomax_miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates the two buckets required by the storage ADR: public images and
+  # private license scans.
+  minio-init:
+    profiles: ["storage"]
+    image: ${MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-09-16T17-43-14Z}
+    container_name: nomax-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-nomax} ${MINIO_ROOT_PASSWORD:-nomax-minio-secret};
+      mc mb --ignore-existing local/nomax-public;
+      mc mb --ignore-existing local/nomax-private;
+      mc anonymous set download local/nomax-public;
+      exit 0;"
+
 volumes:
   nomax_pgdata:
   nomax_redisdata:
+  nomax_miniodata:

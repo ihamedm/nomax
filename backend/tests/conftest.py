@@ -11,8 +11,8 @@ from app.core.redis import get_redis
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models.admin import AuditLog  # noqa: F401
-from app.models.user import User, UserRole  # noqa: F401
+from app import models  # noqa: F401  (register every table on Base.metadata)
+from app.models.user import User, UserRole
 from app.services.otp_service import OtpService
 from app.services.sms_provider import ConsoleSmsProvider
 
@@ -125,8 +125,12 @@ async def db_engine():
 async def _clean_state(db_engine):
     """Give every test a clean database and a clean fake Redis."""
     async with engine.begin() as connection:
+        await connection.execute(sa.text("DELETE FROM sms_logs"))
         await connection.execute(sa.text("DELETE FROM admin_audit_logs"))
+        await connection.execute(sa.text("DELETE FROM businesses"))
         await connection.execute(sa.text("DELETE FROM users"))
+        await connection.execute(sa.text("DELETE FROM subcategories"))
+        await connection.execute(sa.text("DELETE FROM categories"))
     _fake_redis_instance.data.clear()
     _fake_redis_instance.sets.clear()
     _fake_redis_instance.ttls.clear()

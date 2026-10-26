@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
+import { normalizeDigits } from "@/lib/digits";
 import { fa } from "@/lib/format";
+import { isLocal } from "@/lib/platform";
 import { isAdmin, useAuth } from "@/stores/auth";
 import type { LoginResult } from "@/types";
 
@@ -26,7 +28,7 @@ export function LoginPage() {
   if (user) return <Navigate to={isAdmin(user) ? "/admin" : "/"} replace />;
 
   async function sendOtp() {
-    const normalized = phone.replace(/[\s-]/g, "");
+    const normalized = normalizeDigits(phone);
     if (!PHONE_PATTERN.test(normalized)) {
       toast("شماره موبایل معتبر نیست.");
       return;
@@ -145,13 +147,13 @@ export function LoginPage() {
                   placeholder="– – – – – –"
                   className="text-center text-xl tracking-[0.5em]"
                   value={code}
-                  onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onChange={(event) => setCode(normalizeDigits(event.target.value).replace(/\D/g, "").slice(0, 6))}
                   autoFocus
                 />
                 <p className="mt-3 text-center text-xs text-slate-500">
                   کد به شماره {fa(phone)} ارسال شد.
                 </p>
-                {devCode && (
+                {devCode && isLocal && (
                   <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-center text-xs text-amber-700">
                     محیط توسعه: کد ورود {fa(devCode)} است و به‌صورت خودکار پر شده.
                   </p>

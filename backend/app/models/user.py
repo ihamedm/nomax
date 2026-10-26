@@ -47,4 +47,6 @@ class User(Base):
     def has_permission(self, code: str) -> bool:
         if self.role == UserRole.SUPERADMIN:
             return True
+        if self.role != UserRole.ADMIN:
+            return False
         return code in (self.permissions or [])

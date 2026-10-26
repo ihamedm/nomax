@@ -27,20 +27,24 @@ class Settings(BaseSettings):
     OTP_MAX_ATTEMPTS: int = 5
 
     SMS_PROVIDER: str = "console"
-    SMS_API_URL: str = "https://rest.payamak-panel.com/api/SendSMS/SendSMS"
-    SMS_API_KEY: str = ""
-    SMS_SENDER_NUMBER: str = ""
-    SMS_OTP_TEMPLATE_ID: int = 0
+    # Mellipayamak shared-service (pattern) endpoint. The message body is a
+    # pre-approved template identified by SMS_OTP_BODY_ID.
+    SMS_API_URL: str = "https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber"
+    SMS_USERNAME: str = ""
+    SMS_PASSWORD: str = ""
+    SMS_OTP_BODY_ID: int = 0
+    SMS_TIMEOUT_SECONDS: float = 8.0
+    SMS_MAX_ATTEMPTS: int = 2
 
     DEV_OTP_ENABLED: bool = True
-
-    SUPERADMIN_PHONE: str = ""
-    SUPERADMIN_PASSWORD: str = ""
 
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:5175",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
     ]
 
 

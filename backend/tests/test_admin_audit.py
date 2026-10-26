@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from app.core.security import create_access_token
 from app.models.admin import AuditLog
-from app.models.user import UserRole
+from app.models.user import User, UserRole
 
 
 @pytest.mark.asyncio
@@ -68,6 +68,42 @@ async def test_permission_catalog_for_superadmin(client, create_user):
 
     response = await client.get("/api/v1/admin/permissions", headers=customer_headers)
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_demoting_an_admin_clears_dormant_permissions(client, create_user, db_session):
+    actor = await create_user("9110000015", role=UserRole.SUPERADMIN)
+    target = await create_user(
+        "9120000015",
+        role=UserRole.ADMIN,
+        permissions=["business.approve", "user.manage"],
+    )
+    headers = {"Authorization": f"Bearer {create_access_token(actor.id, actor.role.value)}"}
+
+    response = await client.patch(
+        f"/api/v1/admin/users/{target.id}/role",
+        json={"role": "customer"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+    refreshed = (await db_session.execute(select(User).where(User.id == target.id))).scalar_one()
+    assert refreshed.permissions == []
+
+
+@pytest.mark.asyncio
+async def test_superadmin_cannot_demote_self(client, create_user):
+    admin = await create_user("9110000014", role=UserRole.SUPERADMIN)
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id, admin.role.value)}"}
+
+    response = await client.patch(
+        f"/api/v1/admin/users/{admin.id}/role",
+        json={"role": "customer"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "conflict"
+    assert response.json()["error"]["message"] == "cannot_change_own_role"
 
 
 @pytest.mark.asyncio

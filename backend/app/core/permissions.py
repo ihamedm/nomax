@@ -48,6 +48,10 @@ def has_permission(user: User | None, code: str) -> bool:
         return False
     if user.role == UserRole.SUPERADMIN:
         return True
+    # Granular permissions are only meaningful for the admin role. A demoted
+    # admin must not keep endpoint access through a stale permission list.
+    if user.role != UserRole.ADMIN:
+        return False
     return code in (user.permissions or [])
 
 

@@ -26,10 +26,15 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("/otp/request")
-async def otp_request(payload: OtpRequest, request: Request, otp_service: OtpService = Depends(get_otp_service)) -> dict:
+async def otp_request(
+    payload: OtpRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    otp_service: OtpService = Depends(get_otp_service),
+) -> dict:
     phone = security.normalize_phone(payload.phone)
     client_ip = _client_ip(request)
-    code = await otp_service.issue(phone, ip=client_ip)
+    code = await otp_service.issue(phone, ip=client_ip, session=session)
     if code is None:
         return {"data": {"status": "sent"}}
     return {"data": {"status": "issued", "dev_otp": code, "expires_in": settings.OTP_TTL_SECONDS}}

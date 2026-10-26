@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
 from app.db.base import Base  # noqa: F401
-from app.models.admin import AuditLog  # noqa: F401
-from app.models.user import User  # noqa: F401
+from app import models  # noqa: F401  (import every model so metadata is complete)
 
 config = context.config
 

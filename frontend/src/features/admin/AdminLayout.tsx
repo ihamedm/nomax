@@ -1,26 +1,22 @@
-import { useEffect } from "react";
 import { Link, NavLink, Navigate, Outlet, useNavigate } from "react-router-dom";
 
 import { Button, Spinner } from "@/components/ui/button";
+import { RoleBadge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
-import { formatPhone } from "@/lib/format";
+import { formatPhone, ROLE_LABELS } from "@/lib/format";
 import { isAdmin, useAuth } from "@/stores/auth";
 
 const NAV = [
-  { to: "/admin/users", label: "کاربران", superadminOnly: true },
-  { to: "/admin/dev-otps", label: "کدهای ورود", superadminOnly: true },
+  { to: "/admin", label: "داشبورد", end: true, superadminOnly: false },
+  { to: "/admin/users", label: "کاربران", end: false, superadminOnly: true },
+  { to: "/admin/dev-otps", label: "کدهای ورود", end: false, superadminOnly: true },
 ];
 
 export function AdminLayout() {
   const user = useAuth((state) => state.user);
   const ready = useAuth((state) => state.ready);
-  const hydrate = useAuth((state) => state.hydrate);
   const logout = useAuth((state) => state.logout);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!ready) void hydrate();
-  }, [ready, hydrate]);
 
   if (!ready) {
     return (
@@ -33,14 +29,17 @@ export function AdminLayout() {
   if (!isAdmin(user)) return <Navigate to="/" replace />;
 
   return (
-    <div className="min-h-[100dvh] bg-slate-50 pb-24">
+    <div className="min-h-[100dvh] bg-slate-50 pb-28">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-5 py-3">
-          <div>
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-5 py-3">
+          <div className="min-w-0">
             <p className="text-[11px] text-slate-400">پنل مدیریت نومکس</p>
-            <p className="text-sm font-bold text-slate-900" dir="ltr">
-              {formatPhone(user.phone)}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="truncate text-sm font-bold text-slate-900" dir="ltr">
+                {user.full_name || formatPhone(user.phone)}
+              </p>
+              <RoleBadge role={user.role} label={ROLE_LABELS[user.role]} />
+            </div>
           </div>
           <Button
             size="sm"
@@ -65,26 +64,30 @@ export function AdminLayout() {
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.end}
               className={({ isActive }) =>
                 cn(
-                  "flex min-w-24 flex-col items-center rounded-xl px-3 py-1.5 text-xs",
-                  isActive ? "text-brand-600" : "text-slate-400",
+                  "flex min-w-16 flex-col items-center rounded-xl px-3 py-1.5 text-xs transition-colors",
+                  isActive ? "font-bold text-brand-600" : "text-slate-400",
                 )
               }
             >
-              <span
-                className={cn(
-                  "mb-1 h-1.5 w-1.5 rounded-full",
-                  "bg-current opacity-0",
-                  "aria-[current=page]:opacity-100",
-                )}
-              />
-              {item.label}
+              {({ isActive }) => (
+                <>
+                  <span
+                    className={cn(
+                      "mb-1 h-1.5 w-1.5 rounded-full bg-current transition-opacity",
+                      isActive ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  {item.label}
+                </>
+              )}
             </NavLink>
           ))}
           <Link
             to="/"
-            className="flex min-w-24 flex-col items-center rounded-xl px-3 py-1.5 text-xs text-slate-400"
+            className="flex min-w-16 flex-col items-center rounded-xl px-3 py-1.5 text-xs text-slate-400"
           >
             <span className="mb-1 h-1.5 w-1.5 rounded-full bg-current opacity-0" />
             سایت
