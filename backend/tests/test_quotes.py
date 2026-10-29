@@ -43,6 +43,27 @@ async def test_urgent_expiry_is_two_hours(client, db_session, create_user):
     assert 7000 < delta < 7400
 
 
+async def test_my_quotes_lists_only_own_requests(client, db_session, create_user):
+    customer = await create_user("09120000011")
+    other = await create_user("09120000012")
+    category = await _category(db_session)
+    created = await client.post(
+        "/api/v1/quotes/requests",
+        json={"title": "تعمیر", "category_id": category.id, "address": "بهبهان"},
+        headers=auth(customer),
+    )
+    assert created.status_code == 200
+
+    mine = await client.get("/api/v1/quotes/requests/mine", headers=auth(customer))
+    assert mine.status_code == 200
+    items = mine.json()["data"]["items"]
+    assert [item["id"] for item in items] == [created.json()["data"]["id"]]
+    assert "customer_phone" not in mine.text
+
+    empty = await client.get("/api/v1/quotes/requests/mine", headers=auth(other))
+    assert empty.json()["data"]["items"] == []
+
+
 async def test_phone_revealed_only_after_acceptance(client, db_session, create_user):
     customer = await create_user("09120000003")
     owner = await create_user("09120000004", UserRole.OWNER)

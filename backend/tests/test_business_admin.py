@@ -33,6 +33,27 @@ async def test_admin_approves_business(client, db_session, create_user):
     assert business.status == BusinessStatus.APPROVED
 
 
+async def test_admin_rejects_business_with_reason(client, db_session, create_user):
+    owner, business = await _setup(db_session, create_user)
+    admin = await create_user("09140000006", UserRole.ADMIN, permissions=["business.approve"])
+
+    rejected = await client.patch(
+        f"/api/v1/admin/businesses/{business.id}/reject",
+        json={"reason": "مدرک ناقص"},
+        headers=auth(admin),
+    )
+    assert rejected.status_code == 200
+    await db_session.refresh(business)
+    assert business.status == BusinessStatus.REJECTED
+    assert business.rejection_reason == "مدرک ناقص"
+
+    approved = await client.patch(f"/api/v1/admin/businesses/{business.id}/approve", headers=auth(admin))
+    assert approved.status_code == 200
+    await db_session.refresh(business)
+    assert business.status == BusinessStatus.APPROVED
+    assert business.rejection_reason is None
+
+
 async def test_is_verified_requires_admin_verified_license(client, db_session, create_user):
     owner, business = await _setup(db_session, create_user)
 
@@ -56,11 +77,67 @@ async def test_is_verified_requires_admin_verified_license(client, db_session, c
     assert business.is_verified is True
 
 
-async def test_max_three_custom_tags(client, db_session, create_user):
+async def test_tag_list_accepts_four_and_caps_total(client, db_session, create_user):
     owner, business = await _setup(db_session, create_user)
-    ok = await client.post(f"/api/v1/businesses/{business.id}/tags",
-                           json={"tags": ["a", "b", "c"]}, headers=auth(owner))
+    ok = await client.post(
+        f"/api/v1/businesses/{business.id}/tags",
+        json={"tags": ["a", "b", "c", "d"]},
+        headers=auth(owner),
+    )
     assert ok.status_code == 200
-    too_many = await client.post(f"/api/v1/businesses/{business.id}/tags",
-                                 json={"tags": ["a", "b", "c", "d"]}, headers=auth(owner))
+    too_many = await client.post(
+        f"/api/v1/businesses/{business.id}/tags",
+        json={"tags": [f"tag-{index}" for index in range(31)]},
+        headers=auth(owner),
+    )
     assert too_many.status_code == 422
+
+
+async def test_admin_business_cms_crud_and_pagination(client, db_session, create_user):
+    owner, existing = await _setup(db_session, create_user)
+    cms_owner = await create_user("9140000008", UserRole.OWNER)
+    admin = await create_user(
+        "09140000007",
+        UserRole.ADMIN,
+        permissions=["business.read", "business.create", "business.update", "business.delete"],
+    )
+
+    created = await client.post(
+        "/api/v1/admin/businesses",
+        json={
+            "name": "کسب‌وکار جدید",
+            "category_id": existing.category_id,
+            "address": "بهبهان، خیابان اصلی",
+            "owner_phone": "09140000008",
+        },
+        headers=auth(admin),
+    )
+    assert created.status_code == 200
+    created_data = created.json()["data"]
+    business_id = created_data["id"]
+    assert created_data["status"] == "pending"
+    assert created_data["owner"]["phone"] == "9140000008"
+
+    listed = await client.get(
+        "/api/v1/admin/businesses?status=pending&page=1&per_page=1", headers=auth(admin)
+    )
+    assert listed.status_code == 200
+    assert listed.json()["meta"] == {"page": 1, "per_page": 1, "total": 2, "pages": 2}
+
+    detail = await client.get(f"/api/v1/admin/businesses/{business_id}", headers=auth(admin))
+    assert detail.status_code == 200
+    assert detail.json()["data"]["category"]["id"] == existing.category_id
+
+    updated = await client.patch(
+        f"/api/v1/admin/businesses/{business_id}",
+        json={"name": "نام ویرایش‌شده", "status": "approved"},
+        headers=auth(admin),
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["name"] == "نام ویرایش‌شده"
+    assert updated.json()["data"]["status"] == "approved"
+
+    deleted = await client.delete(f"/api/v1/admin/businesses/{business_id}", headers=auth(admin))
+    assert deleted.status_code == 200
+    missing = await client.get(f"/api/v1/admin/businesses/{business_id}", headers=auth(admin))
+    assert missing.status_code == 404

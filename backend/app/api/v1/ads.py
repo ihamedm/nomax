@@ -12,7 +12,9 @@ router = APIRouter(prefix="/ads", tags=["ads"])
 
 @router.get("")
 async def list_ads(session: AsyncSession = Depends(get_db)) -> dict:
-    rows = (await session.execute(sa.select(Ad).where(Ad.is_active.is_(True)))).scalars().all()
+    rows = (
+        await session.execute(sa.select(Ad).where(Ad.is_active.is_(True), Ad.deleted_at.is_(None)))
+    ).scalars().all()
     return {"data": {"items": [
         {"id": str(a.id), "title": a.title, "image_url": a.image_url,
          "target_url": a.target_url, "body": a.body}

@@ -69,7 +69,9 @@ async function request<T, M>(
   retry: boolean,
 ): Promise<{ data: T; meta: M | undefined }> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (init.body && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
   if (tokens.access) headers.set("Authorization", `Bearer ${tokens.access}`);
 
   let response: Response;
@@ -125,6 +127,20 @@ const MESSAGES: Record<string, string> = {
   conflict: "این اطلاعات قبلاً ثبت شده است.",
   sms_provider_unavailable: "ارسال پیامک در حال حاضر ممکن نیست. کمی بعد تلاش کنید.",
   not_ready: "سرویس موقتاً آماده نیست.",
+  storage_not_configured: "اتصال ArvanCloud S3 هنوز تنظیم نشده است.",
+  storage_error: "عملیات روی فضای ابری آروان انجام نشد.",
+  geocoder_unavailable: "جستجوی آدرس در حال حاضر ممکن نیست. کمی بعد دوباره تلاش کنید.",
+  geocoder_not_found: "آدرسی برای این موقعیت پیدا نشد.",
+  geocoder_invalid_response: "پاسخ سرویس آدرس نامعتبر بود.",
+  invalid_phone_business: "شماره تماس فروشگاه معتبر نیست.",
+  invalid_coordinates: "موقعیت انتخاب‌شده معتبر نیست.",
+  subcategory_category_mismatch: "زیردسته با دسته‌بندی انتخاب‌شده هم‌خوان نیست.",
+  business_limit_reached: "شما به سقف مجاز ثبت کسب‌وکار رسیده‌اید.",
+  rejection_reason_required: "دلیل رد کسب‌وکار را وارد کنید.",
+  user_id_required: "شناسه کاربر گیرنده را وارد کنید.",
+  review_already_exists: "شما قبلاً برای این کسب‌وکار نظر ثبت کرده‌اید.",
+  cannot_review_own_business: "شما نمی‌توانید برای کسب‌وکار خود نظر ثبت کنید.",
+  review_too_long: "متن نظر حداکثر ۳۰۰ نویسه است.",
 };
 
 export function errorMessage(error: unknown): string {

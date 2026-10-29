@@ -11,6 +11,8 @@ from app.models.suggestion import CategorySuggestion
 from app.models.contact import ContactMessage
 from app.models.category import Category, Subcategory
 from app.models.sms import SmsLog
+from app.models.setting import AppSetting
+from app.models.bookmark import Bookmark
 from app.models.user import User, UserRole
 
 __all__ = [
@@ -35,4 +37,6 @@ __all__ = [
     "BusinessTag",
     "CategorySuggestion",
     "ContactMessage",
+    "AppSetting",
+    "Bookmark",
 ]

@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from sqlalchemy import select
 
@@ -119,3 +121,50 @@ async def test_unknown_permission_code_is_rejected(client, create_user):
     )
     assert response.status_code == 422
     assert response.json()["error"]["details"]["permissions"] == ["made.up.permission"]
+
+
+@pytest.mark.asyncio
+async def test_superadmin_creates_admin_with_permissions(client, create_user, db_session):
+    superadmin = await create_user("9110000014", role=UserRole.SUPERADMIN)
+    headers = {"Authorization": f"Bearer {create_access_token(superadmin.id, superadmin.role.value)}"}
+
+    response = await client.post(
+        "/api/v1/admin/users",
+        json={
+            "phone": "09125550000",
+            "full_name": "مدیر محتوا",
+            "permissions": ["business.approve", "review.read"],
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["role"] == "admin"
+    assert data["phone"] == "9125550000"
+    assert data["permissions"] == ["business.approve", "review.read"]
+
+    created = await db_session.get(User, uuid.UUID(data["id"]))
+    assert created is not None
+    assert created.role == UserRole.ADMIN
+
+    duplicate = await client.post(
+        "/api/v1/admin/users",
+        json={"phone": "09125550000"},
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+
+    regular_admin = await create_user(
+        "9110000015", role=UserRole.ADMIN, permissions=["user.manage"]
+    )
+    forbidden = await client.post(
+        "/api/v1/admin/users",
+        json={"phone": "09125550001"},
+        headers={
+            "Authorization": f"Bearer {create_access_token(regular_admin.id, regular_admin.role.value)}"
+        },
+    )
+    assert forbidden.status_code == 403
+
+    logs = (await db_session.execute(select(AuditLog))).scalars().all()
+    assert any(log.action == "admin.user.created" for log in logs)

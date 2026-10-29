@@ -469,8 +469,9 @@ async def seed_demo_businesses(session: AsyncSession, reset: bool = False) -> di
         business.geo_lng = item["lng"]
         business.status = item.get("status", BusinessStatus.APPROVED)
         business.rejection_reason = item.get("rejection_reason")
-        business.rating_avg = item["rating"]
-        business.rating_count = item["rating_count"]
+        # Ratings are derived from approved public reviews only.
+        business.rating_avg = 0
+        business.rating_count = 0
         business.is_24h = item["is_24h"]
         business.is_verified = item["is_verified"]
         business.deleted_at = None

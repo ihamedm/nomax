@@ -7,7 +7,7 @@
 |---|---|---|
 | 1 | Tailwind + shadcn/ui | Already assumed; now explicit. shadcn components are vendored into `components/ui` |
 | 2 | Mellipayamak; **dev bypass** with code read from admin dashboard | New `SmsProvider` interface; `DevOtpPage` in admin (superadmin + non-prod only); plaintext OTP mirrored in Redis only in dev |
-| 3 | ArvanCloud S3 (prod) + MinIO (dev) | Single `StorageBackend` interface; two buckets: public images / **private licenses** |
+| 3 | ArvanCloud S3 (dev + prod) | Single S3 storage adapter; two buckets: public images / **private licenses** |
 | 4 | No web push; Android-native push in prod, log/delivery table in dev | Delete VAPID, `pywebpush`, `sw.js`, `DeviceSubscription`; add `DeviceToken` + `NotificationDelivery` + `PushProvider` |
 | 5 | Broker + workers for quote flow | **Yes, but minimal**: Redis + `arq` (or Celery), one worker, no Kafka/RabbitMQ. Capacity math below |
 | 6 | superadmin / admin / customer / owner | New RBAC layer, permission-scoped admin dashboard, audit log, admin shell needed in Phase 1 (dev OTP viewer lives there) |
@@ -26,7 +26,7 @@
 | Need | Production | Dev/test | Rejected |
 |---|---|---|---|
 | SMS / OTP | Mellipayamak (pattern SMS) | `ConsoleProvider` — no network | Twilio, Kavenegar optional secondary |
-| Object storage | ArvanCloud S3 | MinIO container, or `LocalStorage` for unit tests | **Storj**, AWS S3 |
+| Object storage | ArvanCloud S3 | ArvanCloud S3, or `LocalStorage` for unit tests | **Storj**, AWS S3, MinIO |
 | Push | Iranian provider (Pushe / Najva / Chabok) via adapter | `LogPushProvider` → `notification_deliveries` table + logs | FCM/Firebase, Web Push |
 | Map tiles + geocode + routing | Neshan / Map.ir / Parsimap — **spike in Phase 0**, provider behind config | same adapter, or self-hosted fallback | Google Maps, Mapbox, OSM tiles as primary |
 | Error tracking | GlitchTip (Sentry-SDK compatible, self-hosted) | local logs | Sentry SaaS |
@@ -167,7 +167,7 @@ Rules enforced by `eslint-plugin-boundaries`: features import only through `inde
 | 0 | 1 | Foundations, design system, provider ADRs | Compose up; seeded categories render; BottomSheet/Toast/Vazirmatn live |
 | 1 | 1–2 | Auth, Mellipayamak, RBAC, admin shell, **dev OTP** | Login via dashboard-read OTP; permissions enforced |
 | 2 | 3–4 | Catalog, seed, PostGIS search, **Iranian map provider** | Geo search works with Neshan/Map.ir tiles |
-| 3 | 5–6 | Business onboarding, uploads (MinIO→Arvan), moderation | Register → approve → search, with audit log |
+| 3 | 5–6 | Business onboarding, uploads (Arvan S3), moderation | Register → approve → search, with audit log |
 | 4 | 7–8 | Reviews + rating aggregation | Cached rating correct after approve/reject |
 | 5 | 9–10 | Quote flow + worker/outbox | All quote tests + phone-leak test pass |
 | 6 | 11 | Notification center, provider adapter, owner panel | Push logged/delivered; no web-push anywhere |
@@ -179,7 +179,7 @@ Free time from dropping web push (~3–4 days) goes into RBAC, admin shell, and 
 
 ### Phase deltas vs v1
 
-- **Phase 0:** Storage/SMS/Push/Map provider interfaces + ADRs; local fonts; BottomSheet + Toast primitives; Jalali/digit utilities; MinIO init job; registry mirror config; validate boto3 against Arvan S3 (path-style, presign host quirks).
+- **Phase 0:** Storage/SMS/Push/Map provider interfaces + ADRs; local fonts; BottomSheet + Toast primitives; Jalali/digit utilities; Arvan S3 bucket setup; registry mirror config; validate boto3 against Arvan S3 (path-style, presign host quirks).
 - **Phase 1:** now includes RBAC and the admin shell, because the dev OTP viewer needs it; Mellipayamak provider + console provider + `SmsLog`; superadmin CLI.
 - **Phase 2:** map provider spike and Leaflet tile configuration replace hardcoded OSM; geocoding for business location; routing button → Iranian provider link.
 - **Phase 3:** `StorageBackend` with public/private buckets; license presigned URLs for admins only; upload goes through API (compression) with `client_max_body_size 6m`; audit log on approve/reject/toggle-24h.
@@ -198,7 +198,7 @@ Free time from dropping web push (~3–4 days) goes into RBAC, admin shell, and 
 3. **Dev OTP endpoint is a production footgun** — mitigate with router-level exclusion, not just a permission check.
 4. **RBAC drift** — permission strings in one module, tested against the route table; a test asserts no admin route lacks a permission dependency.
 5. **Queue reliability** — delayed jobs in Redis alone can be lost; the Postgres outbox is non-optional.
-6. **Arvan S3 client quirks** — signature/path-style/presign host differences vs MinIO; validate in Phase 0, not deploy week.
+6. **Arvan S3 client quirks** — signature/path-style/presign host differences; validate in Phase 0, not deploy week.
 7. **Iran-network package installs** — pin lockfiles, mirror config, and pre-pull Docker images to avoid a deploy blocked by a registry.
 8. **License image privacy** — a public bucket leak would expose trade documents; separate buckets and no public serializer for license keys.
 9. **Owner role flapping** — define downgrade behavior explicitly (recommend: downgrade only when no non-deleted business remains).
@@ -208,7 +208,7 @@ Free time from dropping web push (~3–4 days) goes into RBAC, admin shell, and 
 
 ## 9. Week-1 backlog (updated)
 
-1. Scaffold + Compose (`db`, `redis`, `minio`, `api`, `worker`, `web`) + Alembic + CI.
+1. Scaffold + Compose (`db`, `redis`, `api`, `worker`, `web`) + Alembic + CI.
 2. Provider interfaces and ADRs: storage, SMS, push, map, queue.
 3. `core/config.py` with environment profiles (`local|test|staging|production`), response envelope, `/health`, `/ready`.
 4. Design system: Tailwind config, RTL setup, local Vazirmatn, BottomSheet, Toast, Jalali/digit utils.

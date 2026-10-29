@@ -74,6 +74,7 @@ class Business(Base):
     rejection_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rating_avg: Mapped[float] = mapped_column(Float, nullable=False, default=0, server_default=sa.text("0"))
     rating_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa.text("0"))
+    view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa.text("0"))
     profile_image_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False

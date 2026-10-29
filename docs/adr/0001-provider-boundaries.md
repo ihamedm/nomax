@@ -16,13 +16,15 @@ swapped without touching feature code.
 ### Object storage
 
 - `StorageBackend` interface with `put`, `get_presigned_url`, `delete`.
-- Production: ArvanCloud S3. Development/test: MinIO, or local disk for unit
-  tests.
+- Development and production: ArvanCloud S3 (S3-compatible, path-style).
+  Unit tests and unconfigured local runs fall back to local disk.
 - Two buckets: `nomax-public` (business images, ads) and `nomax-private`
   (license scans). License keys are never serialized in public responses;
   admins receive short-lived presigned URLs.
-- Arvan S3 is validated early for path-style addressing and presign-host
-  differences versus MinIO. Do not assume AWS S3 behaviour.
+- Arvan S3 uses path-style addressing and a region-specific endpoint
+  (`s3.ir-thr-at1.arvanstorage.ir` by default). Do not assume AWS S3 behaviour.
+- `/ready` checks S3 connectivity when credentials are configured. The admin
+  file manager can list, create and delete files/folders in either bucket.
 
 ### SMS / OTP
 
@@ -59,6 +61,5 @@ swapped without touching feature code.
 
 - Provider outages degrade one capability only and are visible through audit
   tables (`sms_logs`, `notification_deliveries`).
-- Deployments can switch to an Arvan registry mirror by overriding image names
-  (`MINIO_IMAGE`, `MINIO_MC_IMAGE`).
+- Deployments can switch to an Arvan registry mirror by overriding image names.
 - Phase 3 must not expose a public serializer for license object keys.

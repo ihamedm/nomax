@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import get_redis
 from app.db.session import get_db
+from app.services.storage import health as storage_health
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,9 @@ async def ready(
         logger.warning("readiness redis check failed: %s", exc)
         checks["redis"] = "error"
 
-    if any(value != "ok" for value in checks.values()):
+    checks["storage"] = await storage_health()
+
+    if any(value not in ("ok", "not_configured") for value in checks.values()):
         return JSONResponse(
             status_code=503,
             content={

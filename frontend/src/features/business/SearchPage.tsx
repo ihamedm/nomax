@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button, Spinner } from "@/components/ui/button";
+import { SearchIcon } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { api, apiWithMeta, errorMessage } from "@/lib/api";
+import { apiWithMeta, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { fa } from "@/lib/format";
 import { getCurrentPosition } from "@/lib/geolocation";
+import { useApi } from "@/lib/query";
 import { useUi } from "@/stores/ui";
 import { BusinessCard } from "@/features/business/BusinessCard";
 import { NeshanMap, type MapMarker } from "@/features/map/NeshanMap";
@@ -26,6 +29,7 @@ const SORT_OPTIONS: Array<{ value: BusinessSort; label: string; hint: string }> 
   { value: "top", label: "بهترین امتیاز", hint: "بیشترین امتیاز و تعداد نظر" },
   { value: "newest", label: "جدیدترین", hint: "تازه‌ترین کسب‌وکارهای تأییدشده" },
   { value: "urgent", label: "۲۴ ساعته", hint: "کسب‌وکارهای فعال در تمام ساعات" },
+  { value: "visited", label: "پربازدیدترین", hint: "بیشترین بازدید صفحه کسب‌وکار" },
 ];
 
 const RADIUS_OPTIONS = [2, 5, 10, 25];
@@ -64,15 +68,12 @@ export function SearchPage() {
   const radius = parseRadius(params.get("radius"));
 
   const [query, setQuery] = useState(qParam);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [activeSubcategories, setActiveSubcategories] = useState<Subcategory[]>([]);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const focusParam = params.get("focus");
+  const categoriesQuery = useApi<{ items: Category[] }>(["categories"], "/categories");
+  const categories = categoriesQuery.data?.items ?? [];
+  const trendingQuery = useApi<{ items: string[] }>(["search", "trending"], "/search/trending");
 
-  const [items, setItems] = useState<BusinessListItem[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "map">("list");
 
   const [locating, setLocating] = useState(false);
@@ -80,9 +81,7 @@ export function SearchPage() {
   const [sortOpen, setSortOpen] = useState(false);
   const [draftCat, setDraftCat] = useState(catParam);
   const [draftSubcat, setDraftSubcat] = useState(subcatParam);
-  const [sheetSubcategories, setSheetSubcategories] = useState<Subcategory[]>([]);
 
-  const requestIdRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -90,116 +89,77 @@ export function SearchPage() {
   }, [qParam]);
 
   useEffect(() => {
-    let active = true;
-    api<{ items: Category[] }>("/categories")
-      .then((result) => {
-        if (active) setCategories(result.items);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (focusParam) searchInputRef.current?.focus();
+  }, [focusParam]);
+
+  // Real-time/AJAX search: debounce typing into the URL query.
+  useEffect(() => {
+    const term = query.trim();
+    if (term === qParam) return;
+    const timer = window.setTimeout(() => {
+      updateParams({ q: term || null });
+    }, 350);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, qParam]);
 
   const selectedCategory = categories.find((category) => category.slug === catParam);
-
-  useEffect(() => {
-    if (!selectedCategory) {
-      setActiveSubcategories([]);
-      return;
-    }
-    let active = true;
-    api<{ items: Subcategory[] }>(`/categories/${selectedCategory.id}/subcategories`)
-      .then((result) => {
-        if (active) setActiveSubcategories(result.items);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [selectedCategory]);
-
-  useEffect(() => {
-    if (!draftCat) {
-      setSheetSubcategories([]);
-      return;
-    }
-    const draftCategory = categories.find((category) => category.slug === draftCat);
-    if (!draftCategory) return;
-    let active = true;
-    api<{ items: Subcategory[] }>(`/categories/${draftCategory.id}/subcategories`)
-      .then((result) => {
-        if (active) setSheetSubcategories(result.items);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [draftCat, categories]);
-
-  const fetchPage = useCallback(
-    async (cursorValue: string | null, append: boolean) => {
-      const requestId = ++requestIdRef.current;
-      if (append) {
-        setLoadingMore(true);
-      } else {
-        setLoading(true);
-        setError(null);
-        setItems([]);
-        setCursor(null);
-        setHasMore(false);
-      }
-
-      try {
-        const search = new URLSearchParams({
-          limit: "12",
-          sort,
-          radius_km: String(radius),
-          lat: String(location.lat),
-          lng: String(location.lng),
-        });
-        if (qParam) search.set("q", qParam);
-        if (catParam) search.set("cat", catParam);
-        if (subcatParam) search.set("subcat", subcatParam);
-        if (cursorValue) search.set("cursor", cursorValue);
-
-        const result = await apiWithMeta<{ items: BusinessListItem[] }, SearchMeta>(
-          `/businesses?${search.toString()}`,
-        );
-        if (requestId !== requestIdRef.current) return;
-
-        setItems((current) => (append ? [...current, ...result.data.items] : result.data.items));
-        setHasMore(result.meta?.has_more ?? false);
-        setCursor(result.meta?.next_cursor ?? null);
-      } catch (loadError) {
-        if (requestId !== requestIdRef.current) return;
-        setError(errorMessage(loadError));
-      } finally {
-        if (requestId === requestIdRef.current) {
-          setLoading(false);
-          setLoadingMore(false);
-        }
-      }
-    },
-    [qParam, catParam, subcatParam, sort, radius, location.lat, location.lng],
+  const activeSubcategoriesQuery = useApi<{ items: Subcategory[] }>(
+    ["subcategories", selectedCategory?.id],
+    `/categories/${selectedCategory?.id}/subcategories`,
+    { enabled: Boolean(selectedCategory) },
   );
+  const activeSubcategories = activeSubcategoriesQuery.data?.items ?? [];
 
-  useEffect(() => {
-    void fetchPage(null, false);
-  }, [fetchPage]);
+  const draftCategory = categories.find((category) => category.slug === draftCat);
+  const sheetSubcategoriesQuery = useApi<{ items: Subcategory[] }>(
+    ["subcategories", draftCategory?.id],
+    `/categories/${draftCategory?.id}/subcategories`,
+    { enabled: Boolean(draftCategory) },
+  );
+  const sheetSubcategories = sheetSubcategoriesQuery.data?.items ?? [];
+
+  const searchQuery = useInfiniteQuery({
+    queryKey: ["businesses", { q: qParam, cat: catParam, subcat: subcatParam, sort, radius, lat: location.lat, lng: location.lng }],
+    queryFn: async ({ pageParam }) => {
+      const search = new URLSearchParams({
+        limit: "12",
+        sort,
+        radius_km: String(radius),
+        lat: String(location.lat),
+        lng: String(location.lng),
+      });
+      if (qParam) search.set("q", qParam);
+      if (catParam) search.set("cat", catParam);
+      if (subcatParam) search.set("subcat", subcatParam);
+      if (pageParam) search.set("cursor", pageParam);
+      return apiWithMeta<{ items: BusinessListItem[] }, SearchMeta>(`/businesses?${search.toString()}`);
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.meta?.next_cursor ?? null,
+  });
+
+  const items = useMemo(
+    () => searchQuery.data?.pages.flatMap((page) => page.data.items) ?? [],
+    [searchQuery.data],
+  );
+  const loading = searchQuery.isLoading;
+  const loadingMore = searchQuery.isFetchingNextPage;
+  const hasMore = searchQuery.hasNextPage;
+  const error = searchQuery.error ? errorMessage(searchQuery.error) : null;
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore || loading || loadingMore || !cursor) return;
+    if (!sentinel || !hasMore || loading || loadingMore) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) void fetchPage(cursor, true);
+        if (entries[0]?.isIntersecting) void searchQuery.fetchNextPage();
       },
       { rootMargin: "320px" },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [cursor, hasMore, loading, loadingMore, fetchPage]);
+  }, [hasMore, loading, loadingMore, searchQuery]);
 
   const activeSubcategoryName =
     activeSubcategories.find((subcategory) => subcategory.slug === subcatParam)?.name ?? subcatParam;
@@ -266,30 +226,27 @@ export function SearchPage() {
   }
 
   return (
-    <main className="mx-auto min-h-[100dvh] w-full max-w-xl pb-16">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 pb-3 pt-4 backdrop-blur">
-        <div className="flex items-center gap-2">
-          <Link
-            to="/"
-            aria-label="بازگشت به خانه"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg text-slate-500 hover:bg-slate-100"
+    <main className="mx-auto w-full max-w-5xl pb-10">
+      <section className="sticky top-14 z-20 border-b border-slate-200 bg-slate-50/95 px-4 pb-3 pt-3 backdrop-blur">
+        <form onSubmit={submitSearch} className="flex items-center gap-2">
+          <Input
+            ref={searchInputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="جستجوی کسب‌وکار یا خدمت…"
+            aria-label="جستجوی کسب‌وکار"
+            className="h-11 flex-1 text-sm"
+            enterKeyHint="search"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            aria-label="جستجو"
+            className="h-11 w-11 shrink-0 px-0"
           >
-            →
-          </Link>
-          <form onSubmit={submitSearch} className="flex flex-1 items-center gap-2">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="جستجوی کسب‌وکار یا خدمت…"
-              aria-label="جستجوی کسب‌وکار"
-              className="h-10 flex-1 text-sm"
-              enterKeyHint="search"
-            />
-            <Button type="submit" size="sm" className="shrink-0">
-              جستجو
-            </Button>
-          </form>
-        </div>
+            <SearchIcon />
+          </Button>
+        </form>
 
         <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-0.5">
           <button
@@ -357,7 +314,24 @@ export function SearchPage() {
             <FilterChip label={`تا ${fa(radius)} کیلومتر`} onClear={() => updateParams({ radius: null })} />
           </div>
         )}
-      </header>
+      </section>
+
+      {!qParam && !catParam && !subcatParam && (
+        <section className="px-4 pt-4">
+          <p className="text-xs font-bold text-slate-500">جستجوهای پرطرفدار</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(trendingQuery.data?.items ?? []).map((term) => (
+              <Link
+                key={term}
+                to={`/search?q=${encodeURIComponent(term)}&focus=1`}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-brand-300 hover:text-brand-700"
+              >
+                {term}
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="px-4 py-4">
         {view === "map" ? (
@@ -393,7 +367,7 @@ export function SearchPage() {
             {!loading && error && (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
                 <p>{error}</p>
-                <Button size="sm" variant="outline" className="mt-3" onClick={() => void fetchPage(null, false)}>
+                <Button size="sm" variant="outline" className="mt-3" onClick={() => void searchQuery.refetch()}>
                   تلاش دوباره
                 </Button>
               </div>
@@ -413,7 +387,7 @@ export function SearchPage() {
             )}
 
             {!loading && !error && items.length > 0 && (
-              <div className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 {items.map((business) => (
                   <BusinessCard key={business.id} business={business} />
                 ))}

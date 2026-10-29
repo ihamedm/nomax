@@ -28,7 +28,7 @@ export function BottomSheet({ open, title, onClose, children, className }: Botto
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col justify-end" role="dialog" aria-modal>
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal>
       <button
         type="button"
         aria-label="بستن"

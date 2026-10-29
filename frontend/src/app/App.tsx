@@ -1,22 +1,40 @@
 import { useEffect } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { AppLayout } from "@/app/AppLayout";
 import { AdminHomePage } from "@/features/admin/AdminHomePage";
 import { AdminLayout } from "@/features/admin/AdminLayout";
 import { AdminUsersPage } from "@/features/admin/AdminUsersPage";
 import { DevOtpsPage } from "@/features/admin/DevOtpsPage";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { RequireAuth } from "@/features/auth/RequireAuth";
 import { BusinessDetailPage } from "@/features/business/BusinessDetailPage";
 import { SearchPage } from "@/features/business/SearchPage";
 import CreateBusinessPage from "@/features/business/CreateBusinessPage";
-import OwnerPage from "@/features/owner/OwnerPage";
+import { MeLayout } from "@/features/me/MeLayout";
+import MeHomePage from "@/features/me/MeHomePage";
+import MeBusinessesPage from "@/features/me/MeBusinessesPage";
+import MeBusinessEditPage from "@/features/me/MeBusinessEditPage";
+import MeNotificationsPage from "@/features/me/MeNotificationsPage";
+import MeReviewsPage from "@/features/me/MeReviewsPage";
+import MeAnalyticsPage from "@/features/me/MeAnalyticsPage";
+import MeQuotesPage from "@/features/me/MeQuotesPage";
+import MeCustomersPage from "@/features/me/MeCustomersPage";
+import MeSavedPage from "@/features/me/MeSavedPage";
 import StaticPage from "@/features/static/StaticPage";
 import CategoriesPage from "@/features/category/CategoriesPage";
 import QuoteNewPage from "@/features/quote/QuoteNewPage";
 import QuoteMinePage from "@/features/quote/QuoteMinePage";
 import AdminBusinessesPage from "@/features/admin/AdminBusinessesPage";
 import AdminReviewsPage from "@/features/admin/AdminReviewsPage";
+import AdminCategoriesPage from "@/features/admin/AdminCategoriesPage";
+import AdminTagsPage from "@/features/admin/AdminTagsPage";
+import AdminAdsPage from "@/features/admin/AdminAdsPage";
+import AdminSettingsPage from "@/features/admin/AdminSettingsPage";
+import AdminDataPage from "@/features/admin/AdminDataPage";
+import AdminFilesPage from "@/features/admin/AdminFilesPage";
+import AdminNotificationsPage from "@/features/admin/AdminNotificationsPage";
 import { HomePage } from "@/features/home/HomePage";
 import { useAuth } from "@/stores/auth";
 
@@ -57,23 +75,71 @@ export function App() {
     <>
       <SessionBootstrap />
       <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/search" element={<SearchPage />} />
-        <Route path="/categories" element={<CategoriesPage />} />
-        <Route path="/quote/new" element={<QuoteNewPage />} />
-        <Route path="/quote/mine" element={<QuoteMinePage />} />
-        <Route path="/businesses/new" element={<CreateBusinessPage />} />
-        <Route path="/businesses/:slug" element={<BusinessDetailPage />} />
-        <Route path="/owner" element={<OwnerPage />} />
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/categories" element={<CategoriesPage />} />
+          <Route
+            path="/quote/new"
+            element={
+              <RequireAuth>
+                <QuoteNewPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/quote/mine"
+            element={
+              <RequireAuth>
+                <QuoteMinePage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/businesses/new"
+            element={
+              <RequireAuth>
+                <CreateBusinessPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/businesses/:id/edit"
+            element={
+              <RequireAuth>
+                <MeBusinessEditPage />
+              </RequireAuth>
+            }
+          />
+          <Route path="/businesses/:slug" element={<BusinessDetailPage />} />
+          <Route path="/me" element={<MeLayout />}>
+            <Route index element={<MeHomePage />} />
+            <Route path="businesses" element={<MeBusinessesPage />} />
+            <Route path="notifications" element={<MeNotificationsPage />} />
+            <Route path="reviews" element={<MeReviewsPage />} />
+            <Route path="analytics" element={<MeAnalyticsPage />} />
+            <Route path="quotes" element={<MeQuotesPage />} />
+            <Route path="customers" element={<MeCustomersPage />} />
+            <Route path="saved" element={<MeSavedPage />} />
+          </Route>
+          <Route path="/owner" element={<Navigate to="/me" replace />} />
+          <Route path="/pages/:page" element={<StaticPage />} />
+        </Route>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminHomePage />} />
           <Route path="businesses" element={<AdminBusinessesPage />} />
+          <Route path="notifications" element={<AdminNotificationsPage />} />
           <Route path="reviews" element={<AdminReviewsPage />} />
+          <Route path="categories" element={<AdminCategoriesPage />} />
+          <Route path="tags" element={<AdminTagsPage />} />
+          <Route path="ads" element={<AdminAdsPage />} />
+          <Route path="settings" element={<AdminSettingsPage />} />
+          <Route path="data" element={<AdminDataPage />} />
+          <Route path="files" element={<AdminFilesPage />} />
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="dev-otps" element={<DevOtpsPage />} />
         </Route>
-        <Route path="/pages/:page" element={<StaticPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </>

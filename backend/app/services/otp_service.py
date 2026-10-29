@@ -23,6 +23,9 @@ class OtpService:
         return settings.SMS_PROVIDER == "console" or settings.APP_ENV in ("local", "test")
 
     async def _rate_check(self, key: str) -> int:
+        # A non-positive limit disables OTP request throttling (development).
+        if settings.OTP_RATE_LIMIT_PER_HOUR <= 0:
+            return 0
         count = await self.redis.incr(key)
         ttl = await self.redis.ttl(key)
         if ttl < 0:

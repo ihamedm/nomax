@@ -8,7 +8,7 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
   return (
     <Link
       to={`/businesses/${business.slug}`}
-      className="block rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 active:bg-brand-50/40"
+      className="flex h-full w-full flex-col rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 active:bg-brand-50/40"
     >
       <div className="flex gap-3">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-brand-50 text-2xl">

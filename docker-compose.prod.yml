@@ -36,9 +36,24 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       CORS_ORIGINS: '["https://${DOMAIN:?set DOMAIN}"]'
-      UPLOAD_DIR: /data/uploads
-    volumes:
-      - uploads:/data/uploads
+      MAX_BUSINESSES_PER_OWNER: ${MAX_BUSINESSES_PER_OWNER:-1}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-https://s3.ir-thr-at1.arvanstorage.ir}
+      S3_REGION: ${S3_REGION:-ir-thr-at1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
+      S3_BUCKET_PUBLIC: ${S3_BUCKET_PUBLIC:-nomax-public}
+      S3_BUCKET_PRIVATE: ${S3_BUCKET_PRIVATE:-nomax-private}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_PUBLIC_READ_ACL: ${S3_PUBLIC_READ_ACL:-true}
+      S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-900}
+      S3_HEALTHCHECK_TTL_SECONDS: ${S3_HEALTHCHECK_TTL_SECONDS:-30}
+      GEOCODER_URL: ${GEOCODER_URL:-https://nominatim.openstreetmap.org}
+      GEOCODER_USER_AGENT: "${GEOCODER_USER_AGENT:-NOMAX/1.0 (+https://nomax.ir)}"
+      GEOCODER_TIMEOUT_SECONDS: ${GEOCODER_TIMEOUT_SECONDS:-8}
+      GEOCODER_COUNTRY_CODES: ${GEOCODER_COUNTRY_CODES:-ir}
+      GEOCODER_VIEWBOX: ${GEOCODER_VIEWBOX:-50.18,30.65,50.30,30.54}
+      GEOCODER_BOUNDED: ${GEOCODER_BOUNDED:-true}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8001/ready')"]
       interval: 30s
@@ -55,11 +70,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      api:
+        condition: service_healthy
     environment:
       APP_ENV: production
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nomax}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-nomax}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-https://s3.ir-thr-at1.arvanstorage.ir}
+      S3_REGION: ${S3_REGION:-ir-thr-at1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
+      S3_BUCKET_PUBLIC: ${S3_BUCKET_PUBLIC:-nomax-public}
+      S3_BUCKET_PRIVATE: ${S3_BUCKET_PRIVATE:-nomax-private}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_PUBLIC_READ_ACL: ${S3_PUBLIC_READ_ACL:-true}
+      S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-900}
 
   web:
     build: ./frontend
@@ -96,6 +123,5 @@ services:
 volumes:
   pgdata:
   redisdata:
-  uploads:
   caddy_data:
   caddy_config:

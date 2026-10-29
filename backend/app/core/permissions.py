@@ -25,6 +25,7 @@ ADMIN_PERMISSION_CATALOG: list[str] = [
     "quote.create",
     "quote.manage",
     "ad.manage",
+    "storage.manage",
     "stats.read",
     "notification.manage",
     "user.read",

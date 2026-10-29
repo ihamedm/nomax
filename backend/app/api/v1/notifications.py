@@ -4,11 +4,18 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_permissions
 from app.core.errors import AppError
 from app.db.session import get_db
+from app.models.admin import AuditLog
 from app.models.notification import DeviceToken, Notification, NotificationDelivery
 from app.models.user import User, UserRole
+from app.services.inapp_notifications import (
+    AUDIENCES,
+    broadcast,
+    serialize_notification,
+    unread_count,
+)
 
 router = APIRouter(tags=["notifications"])
 
@@ -66,7 +73,12 @@ async def delete_device(
     return {"data": {"id": str(device.id), "is_active": False}}
 
 
+async def _unread_count_response(session: AsyncSession, user: User) -> dict:
+    return {"data": {"count": await unread_count(session, user.id)}}
+
+
 @router.get("/notifications")
+@router.get("/me/notifications")
 async def list_notifications(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
@@ -74,25 +86,48 @@ async def list_notifications(
     items = (
         await session.execute(
             sa.select(Notification)
-            .where(Notification.user_id == user.id)
+            .where(
+                Notification.user_id == user.id,
+                Notification.deleted_at.is_(None),
+            )
             .order_by(Notification.created_at.desc())
             .limit(50)
         )
     ).scalars().all()
     return {
         "data": {
-            "items": [
-                {
-                    "id": str(n.id),
-                    "title": n.title,
-                    "body": n.body,
-                    "is_read": n.is_read,
-                    "created_at": n.created_at.isoformat() if n.created_at else None,
-                }
-                for n in items
-            ]
+            "items": [serialize_notification(notification) for notification in items],
+            "unread_count": await unread_count(session, user.id),
         }
     }
+
+
+@router.get("/notifications/unread-count")
+@router.get("/me/notifications/unread-count")
+async def get_unread_count(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    return await _unread_count_response(session, user)
+
+
+@router.patch("/notifications/read-all")
+@router.patch("/me/notifications/read-all")
+async def mark_all_read(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await session.execute(
+        sa.update(Notification)
+        .where(
+            Notification.user_id == user.id,
+            Notification.is_read.is_(False),
+            Notification.deleted_at.is_(None),
+        )
+        .values(is_read=True)
+    )
+    await session.commit()
+    return {"data": {"updated": result.rowcount or 0, "unread_count": 0}}
 
 
 @router.get("/admin/notification-deliveries")
@@ -124,6 +159,65 @@ async def list_deliveries(
     }
 
 
+@router.post("/admin/notifications/broadcast")
+async def broadcast_notification(
+    payload: dict,
+    user: User = Depends(require_permissions("notification.manage")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    title = (payload.get("title") or "").strip()
+    body = (payload.get("body") or "").strip()
+    if not title:
+        raise AppError("validation_error", "title_required", 422)
+    if len(title) > 160:
+        raise AppError("validation_error", "title_too_long", 422)
+    if not body:
+        raise AppError("validation_error", "body_required", 422)
+    if len(body) > 4000:
+        raise AppError("validation_error", "body_too_long", 422)
+
+    audience = payload.get("audience") or "all"
+    if audience not in AUDIENCES:
+        raise AppError("validation_error", "invalid_audience", 422)
+
+    receiver_id: uuid.UUID | None = None
+    if audience == "user":
+        raw_user_id = payload.get("user_id")
+        if not raw_user_id:
+            raise AppError("user_id_required", "user_id_required", 422)
+        try:
+            receiver_id = uuid.UUID(str(raw_user_id))
+        except ValueError:
+            raise AppError("validation_error", "invalid_user_id", 422)
+        receiver = await session.get(User, receiver_id)
+        if receiver is None or receiver.deleted_at is not None:
+            raise AppError("not_found", "user_not_found", 404)
+
+    action_url = (payload.get("action_url") or "").strip() or None
+    if action_url and (not action_url.startswith("/") or action_url.startswith("//")):
+        raise AppError("validation_error", "invalid_action_url", 422)
+
+    sent = await broadcast(
+        session,
+        title=title,
+        body=body,
+        audience=audience,
+        user_id=receiver_id,
+        action_url=action_url,
+    )
+    session.add(
+        AuditLog(
+            actor_id=user.id,
+            action="notification.broadcast",
+            entity_type="notification",
+            entity_id=None,
+            after={"audience": audience, "sent": sent, "title": title},
+        )
+    )
+    await session.commit()
+    return {"data": {"sent": sent, "audience": audience}}
+
+
 @router.patch("/notifications/{notification_id}/read")
 async def mark_read(
     notification_id: str,
@@ -139,4 +233,11 @@ async def mark_read(
         raise AppError("not_found", "notification_not_found", 404)
     notification.is_read = True
     await session.commit()
-    return {"data": {"id": str(notification.id), "is_read": True}}
+    await session.refresh(notification)
+    return {
+        "data": {
+            "id": str(notification.id),
+            "is_read": True,
+            "unread_count": await unread_count(session, user.id),
+        }
+    }

@@ -48,3 +48,10 @@ async def test_otp_rate_limit_exceeded(otp_service, monkeypatch):
         await otp_service.issue("09123456789", ip="1.2.3.4")
     assert exc_info.value.status_code == 429
     assert exc_info.value.code == "otp_rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_otp_rate_limit_can_be_disabled(otp_service, monkeypatch):
+    monkeypatch.setattr(settings, "OTP_RATE_LIMIT_PER_HOUR", 0)
+    for _ in range(5):
+        assert isinstance(await otp_service.issue("09123456789", ip="1.2.3.4"), str)

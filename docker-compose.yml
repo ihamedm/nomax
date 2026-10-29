@@ -45,12 +45,39 @@ services:
       DATABASE_URL: postgresql+asyncpg://nomax:secret@db:5432/nomax
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-nomax-local-dev-secret-change-me-please-0123456789abcdef}
+      OTP_RATE_LIMIT_PER_HOUR: ${OTP_RATE_LIMIT_PER_HOUR:-0}
+      MAX_BUSINESSES_PER_OWNER: ${MAX_BUSINESSES_PER_OWNER:-1}
       UPLOAD_DIR: /data/uploads
+      # ArvanCloud S3. Empty credentials in local development fall back to
+      # the nomax_uploads volume; fill them in .env to use S3 for uploads.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-https://s3.ir-thr-at1.arvanstorage.ir}
+      S3_REGION: ${S3_REGION:-ir-thr-at1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET_PUBLIC: ${S3_BUCKET_PUBLIC:-nomax-public}
+      S3_BUCKET_PRIVATE: ${S3_BUCKET_PRIVATE:-nomax-private}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_PUBLIC_READ_ACL: ${S3_PUBLIC_READ_ACL:-true}
+      S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-900}
+      S3_HEALTHCHECK_TTL_SECONDS: ${S3_HEALTHCHECK_TTL_SECONDS:-30}
+      GEOCODER_URL: ${GEOCODER_URL:-https://nominatim.openstreetmap.org}
+      GEOCODER_USER_AGENT: "${GEOCODER_USER_AGENT:-NOMAX/1.0 (+https://nomax.ir)}"
+      GEOCODER_TIMEOUT_SECONDS: ${GEOCODER_TIMEOUT_SECONDS:-8}
+      GEOCODER_COUNTRY_CODES: ${GEOCODER_COUNTRY_CODES:-ir}
+      GEOCODER_VIEWBOX: ${GEOCODER_VIEWBOX:-50.18,30.65,50.30,30.54}
+      GEOCODER_BOUNDED: ${GEOCODER_BOUNDED:-true}
       CORS_ORIGINS: '["http://localhost:5175","http://localhost:8080"]'
     volumes:
       - nomax_uploads:/data/uploads
     ports:
       - "8002:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8001/ready')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
   worker:
     build: ./backend
@@ -61,62 +88,35 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
     environment:
       APP_ENV: ${APP_ENV:-local}
       DATABASE_URL: postgresql+asyncpg://nomax:secret@db:5432/nomax
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-nomax-local-dev-secret-change-me-please-0123456789abcdef}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-https://s3.ir-thr-at1.arvanstorage.ir}
+      S3_REGION: ${S3_REGION:-ir-thr-at1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET_PUBLIC: ${S3_BUCKET_PUBLIC:-nomax-public}
+      S3_BUCKET_PRIVATE: ${S3_BUCKET_PRIVATE:-nomax-private}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_PUBLIC_READ_ACL: ${S3_PUBLIC_READ_ACL:-true}
+      S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-900}
 
   web:
     build: ./frontend
     container_name: nomax-web
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "8080:80"
 
-  # Object storage is opt-in because the MinIO image must be pulled from an
-  # accessible registry (ArvanCloud mirror in Iran). The API does not need it
-  # until Phase 3 uploads.
-  #   MINIO_IMAGE=docker.arvancloud.ir/minio/minio:... docker compose --profile storage up -d
-  minio:
-    profiles: ["storage"]
-    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2024-09-13T20-26-02Z}
-    container_name: nomax-minio
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nomax}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-nomax-minio-secret}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - nomax_miniodata:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  # Creates the two buckets required by the storage ADR: public images and
-  # private license scans.
-  minio-init:
-    profiles: ["storage"]
-    image: ${MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-09-16T17-43-14Z}
-    container_name: nomax-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-nomax} ${MINIO_ROOT_PASSWORD:-nomax-minio-secret};
-      mc mb --ignore-existing local/nomax-public;
-      mc mb --ignore-existing local/nomax-private;
-      mc anonymous set download local/nomax-public;
-      exit 0;"
 
 volumes:
   nomax_pgdata:
   nomax_redisdata:
-  nomax_miniodata:
   nomax_uploads:

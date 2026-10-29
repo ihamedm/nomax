@@ -30,11 +30,13 @@ interface NeshanMapProps {
 type Leaflet = Record<string, any>;
 
 function markerIcon(L: Leaflet, picker = false) {
+  // The picker pin has a circular head plus a tail, so it needs a larger
+  // canvas and its anchor sits at the tip of the tail.
   return L.divIcon({
     className: "",
     html: `<span class="nomax-map-pin${picker ? " nomax-map-pin--picker" : ""}"></span>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
+    iconSize: picker ? [46, 58] : [24, 24],
+    iconAnchor: picker ? [23, 56] : [12, 12],
     popupAnchor: [0, -14],
   });
 }
@@ -205,7 +207,7 @@ export function NeshanMap({
   }, [pickerMarker, ready]);
 
   return (
-    <div className={cn("relative overflow-hidden rounded-2xl bg-slate-100", className)}>
+    <div className={cn("relative isolate z-0 overflow-hidden rounded-2xl bg-slate-100", className)}>
       <div ref={containerRef} className="h-full w-full" aria-label="نقشه نشان" role="application" />
       {!ready && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 text-brand-600">

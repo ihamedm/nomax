@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1793018844253" clover="3.2.0">
-  <project timestamp="1793018844253" name="All files">
-    <metrics statements="123" coveredstatements="113" conditionals="26" coveredconditionals="20" methods="12" coveredmethods="10" elements="161" coveredelements="143" complexity="0" loc="123" ncloc="123" packages="1" files="3" classes="3"/>
-    <file name="digits.ts" path="/home/bitbin/Projects/nomax/frontend/src/lib/digits.ts">
+<coverage generated="1793256884913" clover="3.2.0">
+  <project timestamp="1793256884914" name="All files">
+    <metrics statements="125" coveredstatements="115" conditionals="26" coveredconditionals="20" methods="12" coveredmethods="10" elements="163" coveredelements="145" complexity="0" loc="125" ncloc="125" packages="1" files="3" classes="3"/>
+    <file name="digits.ts" path="/Users/hamed/Projects/nomax/frontend/src/lib/digits.ts">
       <metrics statements="16" coveredstatements="16" conditionals="6" coveredconditionals="6" methods="4" coveredmethods="4"/>
       <line num="1" count="1" type="stmt"/>
       <line num="2" count="1" type="stmt"/>
@@ -21,8 +21,8 @@
       <line num="22" count="2" type="stmt"/>
       <line num="23" count="2" type="stmt"/>
     </file>
-    <file name="format.ts" path="/home/bitbin/Projects/nomax/frontend/src/lib/format.ts">
-      <metrics statements="67" coveredstatements="59" conditionals="7" coveredconditionals="4" methods="4" coveredmethods="2"/>
+    <file name="format.ts" path="/Users/hamed/Projects/nomax/frontend/src/lib/format.ts">
+      <metrics statements="69" coveredstatements="61" conditionals="7" coveredconditionals="4" methods="4" coveredmethods="2"/>
       <line num="1" count="1" type="stmt"/>
       <line num="3" count="1" type="stmt"/>
       <line num="6" count="1" type="cond" truecount="1" falsecount="0"/>
@@ -60,7 +60,7 @@
       <line num="43" count="1" type="stmt"/>
       <line num="44" count="1" type="stmt"/>
       <line num="45" count="1" type="stmt"/>
-      <line num="47" count="1" type="stmt"/>
+      <line num="46" count="1" type="stmt"/>
       <line num="48" count="1" type="stmt"/>
       <line num="49" count="1" type="stmt"/>
       <line num="50" count="1" type="stmt"/>
@@ -87,11 +87,13 @@
       <line num="71" count="1" type="stmt"/>
       <line num="72" count="1" type="stmt"/>
       <line num="73" count="1" type="stmt"/>
+      <line num="74" count="1" type="stmt"/>
       <line num="75" count="1" type="stmt"/>
-      <line num="76" count="0" type="stmt"/>
-      <line num="77" count="0" type="stmt"/>
+      <line num="77" count="1" type="stmt"/>
+      <line num="78" count="0" type="stmt"/>
+      <line num="79" count="0" type="stmt"/>
     </file>
-    <file name="jalali.ts" path="/home/bitbin/Projects/nomax/frontend/src/lib/jalali.ts">
+    <file name="jalali.ts" path="/Users/hamed/Projects/nomax/frontend/src/lib/jalali.ts">
       <metrics statements="40" coveredstatements="38" conditionals="13" coveredconditionals="10" methods="4" coveredmethods="4"/>
       <line num="1" count="1" type="stmt"/>
       <line num="3" count="4" type="cond" truecount="1" falsecount="0"/>

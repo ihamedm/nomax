@@ -1,255 +1,241 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { RoleBadge } from "@/components/ui/badge";
-import { BottomSheet } from "@/components/ui/bottom-sheet";
-import { Button, Spinner } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api, errorMessage } from "@/lib/api";
-import { toFa } from "@/lib/digits";
-import { formatPhone, ROLE_LABELS } from "@/lib/format";
-import { isAdmin, useAuth } from "@/stores/auth";
-import type { Category, Subcategory } from "@/types";
+import { SearchIcon } from "@/components/ui/icons";
+import { errorMessage } from "@/lib/api";
+import { useApi } from "@/lib/query";
+import { BusinessCard } from "@/features/business/BusinessCard";
+import type { BusinessListItem, Category } from "@/types";
+
+interface AdItem {
+  id: string;
+  title: string;
+  body?: string | null;
+  image_url?: string | null;
+  target_url?: string | null;
+}
+
+function BannerAd({ ad }: { ad?: AdItem }) {
+  if (ad?.image_url) {
+    return (
+      <a
+        href={ad.target_url || "#"}
+        className="block overflow-hidden rounded-2xl border border-slate-200 bg-white"
+      >
+        <img src={ad.image_url} alt={ad.title} className="h-28 w-full object-cover sm:h-36" />
+      </a>
+    );
+  }
+  return (
+    <div className="flex h-24 items-center justify-between gap-4 rounded-2xl border border-dashed border-brand-200 bg-gradient-to-l from-brand-50 to-white px-5 sm:h-28">
+      <div>
+        <p className="text-xs font-bold text-brand-700">{ad?.title || "جایگاه بنر تبلیغاتی"}</p>
+        <p className="mt-1 text-[11px] text-slate-400">
+          {ad?.body || "این فضا برای بنر تبلیغاتی کسب‌وکارها رزرو شده است."}
+        </p>
+      </div>
+      <span className="shrink-0 rounded-full bg-white px-3 py-1 text-[10px] font-bold text-brand-600 shadow-sm">
+        تبلیغ
+      </span>
+    </div>
+  );
+}
+
+function BusinessCarousel({
+  title,
+  href,
+  items,
+  loading,
+  empty,
+}: {
+  title: string;
+  href: string;
+  items: BusinessListItem[];
+  loading: boolean;
+  empty: string;
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-black text-slate-900">{title}</h2>
+        <Link to={href} className="text-[11px] font-medium text-brand-600">
+          مشاهده همه ←
+        </Link>
+      </div>
+      {loading ? (
+        <div className="flex gap-3 overflow-hidden">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="h-36 w-72 shrink-0 animate-pulse rounded-2xl bg-slate-100" />
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center text-xs text-slate-500">
+          {empty}
+        </p>
+      ) : (
+        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {items.map((business) => (
+            <div key={business.id} className="flex w-[300px] shrink-0 snap-start">
+              <BusinessCard business={business} />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 
 export function HomePage() {
   const navigate = useNavigate();
-  const user = useAuth((state) => state.user);
-  const logout = useAuth((state) => state.logout);
-
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const [activeCategory, setActiveCategory] = useState<Category | null>(null);
-  const [subcategories, setSubcategories] = useState<Record<number, Subcategory[]>>({});
-  const [subLoading, setSubLoading] = useState(false);
+  const categoriesQuery = useApi<{ items: Category[] }>(["categories"], "/categories");
+  const trendingQuery = useApi<{ items: string[] }>(["search", "trending"], "/search/trending");
+  const newestQuery = useApi<{ items: BusinessListItem[] }>(
+    ["businesses", "newest"],
+    "/businesses?sort=newest&limit=10",
+  );
+  const visitedQuery = useApi<{ items: BusinessListItem[] }>(
+    ["businesses", "visited"],
+    "/businesses?sort=visited&limit=10",
+  );
+  const adsQuery = useApi<{ items: AdItem[] }>(["ads"], "/ads");
 
-  const loadCategories = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api<{ items: Category[] }>("/categories");
-      setCategories(result.items);
-    } catch (loadError) {
-      setError(errorMessage(loadError));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadCategories();
-  }, [loadCategories]);
+  const categories = categoriesQuery.data?.items ?? [];
+  const ads = adsQuery.data?.items ?? [];
+  const homeBanner = ads[0];
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     const term = searchTerm.trim();
-    navigate(term ? `/search?q=${encodeURIComponent(term)}` : "/search");
+    navigate(term ? `/search?q=${encodeURIComponent(term)}&focus=1` : "/search?focus=1");
   }
-
-  async function openCategory(category: Category) {
-    setActiveCategory(category);
-    if (subcategories[category.id]) return;
-    setSubLoading(true);
-    try {
-      const result = await api<{ items: Subcategory[] }>(
-        `/categories/${category.id}/subcategories`,
-      );
-      setSubcategories((current) => ({ ...current, [category.id]: result.items }));
-    } catch (loadError) {
-      setActiveCategory(null);
-      setError(errorMessage(loadError));
-    } finally {
-      setSubLoading(false);
-    }
-  }
-
-  const activeSubcategories = activeCategory ? subcategories[activeCategory.id] : undefined;
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] w-full max-w-xl flex-col px-5 py-8">
-      <header className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs text-slate-400">نومکس</p>
-          <h1 className="text-xl font-black text-slate-900">بازار محلی بهبهان</h1>
-        </div>
-        {user && <RoleBadge role={user.role} label={ROLE_LABELS[user.role]} />}
-      </header>
-
-      <section className="mt-6 rounded-3xl bg-gradient-to-l from-brand-600 to-brand-500 p-6 text-white">
-        <h2 className="text-lg font-bold">چه خدمتی لازم دارید؟</h2>
-        <p className="mt-2 text-sm leading-6 text-white/85">
-          بین کسب‌وکارهای تأییدشده بهبهان جستجو کنید؛ نزدیک‌ترین‌ها را ببینید و امتیاز و
-          موقعیت هرکدام را مقایسه کنید.
-        </p>
-        <form onSubmit={submitSearch} className="mt-4 flex gap-2">
-          <Input
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="جستجوی کسب‌وکار، خدمت یا دسته…"
-            aria-label="جستجوی کسب‌وکار"
-            enterKeyHint="search"
-            className="border-white/20 bg-white/15 text-white placeholder:text-white/60 focus:border-white focus:ring-white/30"
-          />
-          <Button type="submit" className="shrink-0 bg-white text-brand-700 hover:bg-white/90">
-            جستجو
-          </Button>
-        </form>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Link
-            to="/search?sort=nearest"
-            className="rounded-full bg-white/15 px-3 py-1 text-[11px] text-white/90"
-          >
-            نزدیک‌ترین‌ها
-          </Link>
-          <Link
-            to="/search?sort=urgent"
-            className="rounded-full bg-white/15 px-3 py-1 text-[11px] text-white/90"
-          >
-            خدمات ۲۴ ساعته
-          </Link>
-          <Link
-            to="/search?sort=top"
-            className="rounded-full bg-white/15 px-3 py-1 text-[11px] text-white/90"
-          >
-            بهترین امتیازها
-          </Link>
+    <main className="mx-auto w-full max-w-5xl px-4 pb-10 pt-4">
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-bl from-brand-700 via-brand-600 to-brand-500 px-5 py-8 text-white sm:px-8 sm:py-10">
+        <div className="pointer-events-none absolute -left-16 -top-16 h-48 w-48 rounded-full bg-white/10" />
+        <div className="pointer-events-none absolute -bottom-20 right-10 h-52 w-52 rounded-full bg-white/10" />
+        <div className="relative">
+          <p className="text-[11px] text-white/70">بازار محلی بهبهان</p>
+          <h1 className="mt-2 max-w-xl text-2xl font-black leading-relaxed sm:text-3xl">
+            کسب‌وکار مورد نظرت رو راحت‌تر پیدا کن
+          </h1>
+          <form onSubmit={submitSearch} className="mt-5 flex max-w-2xl gap-2">
+            <Input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              onFocus={() => navigate("/search?focus=1")}
+              placeholder="چه خدمتی لازم داری؟"
+              aria-label="جستجوی کسب‌وکار"
+              enterKeyHint="search"
+              className="h-12 border-white/20 bg-white/15 text-white placeholder:text-white/70 focus:border-white focus:ring-white/30"
+            />
+            <Button
+              type="submit"
+              size="lg"
+              aria-label="جستجو"
+              className="hero-search-action w-12 shrink-0 bg-white px-0 text-brand-700 hover:bg-white/90"
+            >
+              <SearchIcon />
+            </Button>
+          </form>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(trendingQuery.data?.items ?? []).slice(0, 5).map((term) => (
+              <Link
+                key={term}
+                to={`/search?q=${encodeURIComponent(term)}&focus=1`}
+                className="rounded-full bg-white/15 px-3 py-1 text-[11px] text-white/90 hover:bg-white/25"
+              >
+                {term}
+              </Link>
+            ))}
+          </div>
         </div>
       </section>
 
+      <div className="mt-4">
+        <BannerAd ad={homeBanner} />
+      </div>
+
       <section className="mt-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-800">دسته‌بندی‌ها</h2>
-          {!loading && !error && (
-            <Link to="/search" className="text-[11px] text-brand-600">
-              همه کسب‌وکارها ←
-            </Link>
-          )}
+          <h2 className="text-sm font-black text-slate-900">دسته‌بندی‌ها</h2>
+          <Link to="/categories" className="text-[11px] font-medium text-brand-600">
+            مشاهده همه ←
+          </Link>
         </div>
 
-        {loading && (
-          <div className="flex justify-center py-12 text-brand-600">
-            <Spinner />
+        {categoriesQuery.isLoading ? (
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2, 3, 4, 5].map((index) => (
+              <div key={index} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+            ))}
           </div>
-        )}
-
-        {!loading && error && (
+        ) : categoriesQuery.error ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
-            <p>{error}</p>
-            <Button size="sm" variant="outline" className="mt-3" onClick={() => void loadCategories()}>
+            <p>{errorMessage(categoriesQuery.error)}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              onClick={() => void categoriesQuery.refetch()}
+            >
               تلاش دوباره
             </Button>
           </div>
-        )}
-
-        {!loading && !error && (
-          <div className="grid grid-cols-2 gap-3">
-            {categories.map((category) => (
-              <button
+        ) : (
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {categories.slice(0, 9).map((category) => (
+              <Link
                 key={category.id}
-                type="button"
-                onClick={() => void openCategory(category)}
-                className="flex min-h-24 flex-col items-start gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-right transition-colors hover:border-brand-300 active:bg-brand-50"
+                to={`/search?cat=${category.slug}`}
+                className="flex min-h-24 flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2 py-3 text-center transition-colors hover:border-brand-300 hover:bg-brand-50/40"
               >
                 <span className="text-2xl" aria-hidden>
                   {category.icon}
                 </span>
-                <span className="text-sm font-bold text-slate-900">{category.name}</span>
-                <span className="text-[11px] text-slate-400">
-                  {toFa(category.subcategory_count)} زیردسته
+                <span className="line-clamp-1 text-xs font-bold text-slate-800">
+                  {category.name}
                 </span>
-              </button>
+              </Link>
             ))}
           </div>
         )}
+
+        <Link to="/categories" className="mt-3 block">
+          <Button variant="outline" className="w-full">
+            مشاهده همه دسته‌بندی‌ها
+          </Button>
+        </Link>
       </section>
 
-      {user ? (
-        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500">حساب شما</p>
-          <p className="mt-1 text-lg font-bold text-slate-900" dir="ltr">
-            {formatPhone(user.phone)}
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            {user.is_phone_verified ? "شماره تأیید شده" : "شماره تأیید نشده"}
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {isAdmin(user) && (
-              <Link to="/admin">
-                <Button size="sm">ورود به پنل مدیریت</Button>
-              </Link>
-            )}
-            <Button size="sm" variant="outline" onClick={() => void logout()}>
-              خروج
-            </Button>
-          </div>
-        </section>
-      ) : (
-        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-600">برای استفاده از نومکس وارد شوید.</p>
-          <Link to="/login" className="mt-4 inline-block">
-            <Button>ورود / ثبت‌نام</Button>
-          </Link>
-        </section>
-      )}
+      <div className="mt-6">
+        <BannerAd ad={ads.find((ad) => ad.id !== homeBanner?.id)} />
+      </div>
 
-      <p className="mt-6 text-center text-[11px] leading-6 text-slate-400">
-        فاز ۲: جستجوی جغرافیایی، فهرست و صفحه کسب‌وکار، نقشه نشان
-      </p>
+      <div className="mt-6 space-y-6">
+        <BusinessCarousel
+          title="کسب‌وکارهای تازه"
+          href="/search?sort=newest"
+          items={newestQuery.data?.items ?? []}
+          loading={newestQuery.isLoading}
+          empty="هنوز کسب‌وکار تازه‌ای ثبت نشده است."
+        />
+        <BusinessCarousel
+          title="پربازدیدترین کسب‌وکارها"
+          href="/search?sort=visited"
+          items={visitedQuery.data?.items ?? []}
+          loading={visitedQuery.isLoading}
+          empty="هنوز بازدیدی ثبت نشده است."
+        />
+      </div>
 
-      <BottomSheet
-        open={activeCategory !== null}
-        title={activeCategory ? `${activeCategory.icon} ${activeCategory.name}` : ""}
-        onClose={() => setActiveCategory(null)}
-      >
-        {subLoading && (
-          <div className="flex justify-center py-8 text-brand-600">
-            <Spinner />
-          </div>
-        )}
-
-        {!subLoading && activeSubcategories && activeSubcategories.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">
-            برای این دسته زیردسته‌ای ثبت نشده است.
-          </p>
-        )}
-
-        {!subLoading && activeSubcategories && activeSubcategories.length > 0 && activeCategory && (
-          <div className="space-y-4">
-            <p className="text-xs leading-6 text-slate-500">
-              یک زیردسته انتخاب کنید تا کسب‌وکارهای همان خدمت را ببینید.
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <Link
-                to={`/search?cat=${activeCategory.slug}`}
-                onClick={() => setActiveCategory(null)}
-                className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-3 text-sm font-medium text-brand-700"
-              >
-                همه {activeCategory.name}
-              </Link>
-              {activeSubcategories.map((subcategory) => (
-                <Link
-                  key={subcategory.id}
-                  to={`/search?cat=${activeCategory.slug}&subcat=${subcategory.slug}`}
-                  onClick={() => setActiveCategory(null)}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"
-                >
-                  <span className="text-lg" aria-hidden>
-                    {subcategory.icon}
-                  </span>
-                  <p className="mt-1 text-sm font-medium text-slate-800">{subcategory.name}</p>
-                  {subcategory.standard_tags.length > 0 && (
-                    <p className="mt-1 text-[10px] text-slate-400">
-                      {toFa(subcategory.standard_tags.length)} برچسب خدمت
-                    </p>
-                  )}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-      </BottomSheet>
+      <div className="mt-6">
+        <BannerAd />
+      </div>
     </main>
   );
 }

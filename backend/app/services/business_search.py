@@ -11,7 +11,7 @@ from app.core.errors import AppError
 from app.models.business import Business, BusinessStatus
 from app.models.category import Category, Subcategory
 
-SORT_MODES = ("nearest", "top", "newest", "urgent")
+SORT_MODES = ("nearest", "top", "newest", "urgent", "visited")
 
 
 @dataclass
@@ -119,6 +119,8 @@ def _order_without_geo(sort: str) -> list:
             Business.created_at.desc(),
             Business.id,
         ]
+    if sort == "visited":
+        return [Business.view_count.desc(), Business.rating_avg.desc(), Business.id]
     # `nearest` without coordinates and `newest` both fall back to recency.
     return [Business.created_at.desc(), Business.id]
 
@@ -140,6 +142,15 @@ def _python_sort(hits: list[BusinessHit], sort: str, has_coords: bool) -> list[B
                 not hit.business.is_24h,
                 -(hit.business.rating_avg or 0),
                 -_timestamp(hit.business.created_at),
+                str(hit.business.id),
+            ),
+        )
+    if sort == "visited":
+        return sorted(
+            hits,
+            key=lambda hit: (
+                -(hit.business.view_count or 0),
+                -(hit.business.rating_avg or 0),
                 str(hit.business.id),
             ),
         )
@@ -229,6 +240,10 @@ async def _search_postgres(
     elif params.sort == "urgent":
         statement = statement.order_by(None).order_by(
             Business.is_24h.desc(), Business.rating_avg.desc(), Business.id
+        )
+    elif params.sort == "visited":
+        statement = statement.order_by(None).order_by(
+            Business.view_count.desc(), Business.rating_avg.desc(), Business.id
         )
 
     rows = (await session.execute(statement)).all()

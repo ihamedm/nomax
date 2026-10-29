@@ -71,7 +71,24 @@ async def moderate_suggestion(
     status = payload.get("status")
     if status not in ("approved", "rejected", "pending"):
         raise AppError("validation_error", "invalid_status", 422)
+    was_approved = suggestion.status == "approved"
     suggestion.status = status
+    if status == "approved" and not was_approved:
+        from app.models.category import Category, Subcategory
+
+        slug = f"suggestion-{sid.hex[:8]}"
+        if suggestion.type == "new_category":
+            session.add(Category(name=suggestion.suggested_name, slug=slug))
+        elif suggestion.type == "new_subcategory" and suggestion.parent_category_id:
+            parent = await session.get(Category, suggestion.parent_category_id)
+            if parent is not None:
+                session.add(
+                    Subcategory(
+                        category_id=parent.id,
+                        name=suggestion.suggested_name,
+                        slug=slug,
+                    )
+                )
     await session.commit()
     return {"data": {"id": str(sid), "status": status}}
 

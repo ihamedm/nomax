@@ -133,6 +133,7 @@ async def _clean_state(db_engine):
             "offers",
             "quote_requests",
             "reviews",
+            "bookmarks",
             "ads",
         ):
             await connection.execute(sa.text(f"DELETE FROM {table}"))

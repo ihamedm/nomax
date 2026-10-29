@@ -31,6 +31,24 @@ async def get_current_user(
     return user
 
 
+async def get_optional_user(
+    bearer: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    session: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Resolve a bearer token when present, without requiring authentication."""
+    if bearer is None or not bearer.credentials or bearer.scheme.lower() != "bearer":
+        return None
+    try:
+        payload = security.decode_access_token(bearer.credentials)
+        user_id = uuid.UUID(payload["sub"])
+    except (AppError, KeyError, ValueError):
+        return None
+    user = await session.get(User, user_id)
+    if user is None or user.deleted_at is not None:
+        return None
+    return user
+
+
 def require_permissions(*codes: str):
     async def _require(user: User = Depends(get_current_user)) -> User:
         for code in codes:

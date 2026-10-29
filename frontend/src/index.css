@@ -78,7 +78,45 @@
 }
 
 .nomax-map-pin--picker {
-  background: #f59e0b;
+  position: relative;
+  width: 44px;
+  height: 44px;
+  background: #12b886;
+  border: 4px solid #ffffff;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 0.28);
+}
+
+.nomax-map-pin--picker::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: #ffffff;
+}
+
+.nomax-map-pin--picker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% - 1px);
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 12px solid #12b886;
+}
+
+.nomax-picker-map .leaflet-control-zoom {
+  display: none;
+}
+
+/* The sheet carries the clean Neshan/OSM attribution line instead. */
+.nomax-picker-map .leaflet-control-attribution {
+  display: none;
 }
 
 .leaflet-container {
@@ -88,4 +126,268 @@
 
 .leaflet-popup-content-wrapper {
   border-radius: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Admin dashboard density
+   The dashboard is used on laptops, where the customer-facing scale leaves too
+   much whitespace. These scoped overrides shrink typography, cards, controls
+   and table cells only inside the admin shell.
+--------------------------------------------------------------------------- */
+.admin-shell {
+  font-size: 0.8125rem;
+}
+
+.admin-shell .text-xs {
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+.admin-shell .text-sm {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.admin-shell .text-base {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.admin-shell .text-lg {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+.admin-shell .text-xl {
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+.admin-shell .text-2xl {
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+.admin-shell .p-6 {
+  padding: 1.25rem;
+}
+.admin-shell .p-5 {
+  padding: 1rem;
+}
+.admin-shell .px-5 {
+  padding-inline: 1rem;
+}
+.admin-shell .space-y-5 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1rem;
+}
+.admin-shell .gap-5 {
+  gap: 1rem;
+}
+
+/* Compact control heights: inputs and large buttons 48 → 40. */
+.admin-shell .h-12 {
+  height: 2.5rem;
+}
+.admin-shell .h-11 {
+  height: 2.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Dark theme
+   The product uses a small set of neutral surface/text utilities. These
+   overrides keep every existing page (customer, account and dashboard) in
+   sync without duplicating dark: variants in dozens of components.
+--------------------------------------------------------------------------- */
+.dark {
+  color-scheme: dark;
+}
+
+html.dark {
+  background-color: #020617;
+}
+
+.dark body {
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+/* Surfaces */
+.dark .bg-white {
+  background-color: #0f172a;
+}
+.dark .bg-white\/95 {
+  background-color: rgb(15 23 42 / 0.95);
+}
+.dark .bg-slate-50 {
+  background-color: #020617;
+}
+.dark .bg-slate-50\/95 {
+  background-color: rgb(2 6 23 / 0.95);
+}
+.dark .bg-slate-50\/70 {
+  background-color: rgb(30 41 59 / 0.7);
+}
+.dark .bg-slate-100 {
+  background-color: #1e293b;
+}
+.dark .bg-slate-200 {
+  background-color: #334155;
+}
+.dark .bg-slate-900 {
+  background-color: #1e293b;
+}
+.dark .bg-slate-900\/95 {
+  background-color: rgb(30 41 59 / 0.95);
+}
+
+/* Brand tints */
+.dark .bg-brand-50 {
+  background-color: rgb(16 165 111 / 0.12);
+}
+.dark .bg-brand-50\/40 {
+  background-color: rgb(16 165 111 / 0.08);
+}
+.dark .bg-brand-100 {
+  background-color: rgb(16 165 111 / 0.2);
+}
+.dark .text-brand-700 {
+  color: #6ee7b7;
+}
+.dark .text-brand-600 {
+  color: #34d399;
+}
+.dark .border-brand-200 {
+  border-color: rgb(16 165 111 / 0.35);
+}
+.dark .border-brand-300 {
+  border-color: rgb(16 165 111 / 0.45);
+}
+
+/* Neutral text */
+.dark .text-slate-900 {
+  color: #f8fafc;
+}
+.dark .text-slate-800 {
+  color: #e2e8f0;
+}
+.dark .text-slate-700 {
+  color: #cbd5e1;
+}
+.dark .text-slate-600 {
+  color: #cbd5e1;
+}
+.dark .text-slate-500 {
+  color: #94a3b8;
+}
+.dark .text-slate-400 {
+  color: #7c8ba1;
+}
+
+/* Borders and dividers */
+.dark .border-slate-100,
+.dark .border-slate-200 {
+  border-color: #1e293b;
+}
+.dark .border-slate-300 {
+  border-color: #334155;
+}
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b;
+}
+
+/* Status tints */
+.dark .bg-amber-50 {
+  background-color: rgb(245 158 11 / 0.1);
+}
+.dark .bg-amber-100 {
+  background-color: rgb(245 158 11 / 0.18);
+}
+.dark .bg-amber-300\/20 {
+  background-color: rgb(252 211 77 / 0.16);
+}
+.dark .text-amber-700,
+.dark .text-amber-600,
+.dark .text-amber-500 {
+  color: #fcd34d;
+}
+.dark .bg-rose-50 {
+  background-color: rgb(244 63 94 / 0.1);
+}
+.dark .bg-rose-100 {
+  background-color: rgb(244 63 94 / 0.18);
+}
+.dark .text-rose-700,
+.dark .text-rose-600 {
+  color: #fda4af;
+}
+.dark .border-rose-200 {
+  border-color: rgb(244 63 94 / 0.35);
+}
+.dark .bg-emerald-50 {
+  background-color: rgb(16 185 129 / 0.1);
+}
+.dark .text-emerald-700,
+.dark .text-emerald-600 {
+  color: #6ee7b7;
+}
+.dark .bg-sky-100 {
+  background-color: rgb(14 165 233 / 0.18);
+}
+.dark .text-sky-700 {
+  color: #7dd3fc;
+}
+
+/* Interactive states (plain overrides beat the layered hover utilities) */
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: #1e293b;
+}
+.dark .hover\:bg-slate-50\/70:hover {
+  background-color: rgb(30 41 59 / 0.7);
+}
+.dark .hover\:bg-brand-50\/40:hover {
+  background-color: rgb(16 165 111 / 0.16);
+}
+.dark .active\:bg-brand-50\/40:active {
+  background-color: rgb(16 165 111 / 0.16);
+}
+.dark .hover\:border-brand-300:hover {
+  border-color: rgb(16 165 111 / 0.45);
+}
+.dark .hover\:text-slate-900:hover {
+  color: #f8fafc;
+}
+.dark .hover\:text-slate-800:hover {
+  color: #e2e8f0;
+}
+.dark .hover\:text-brand-700:hover {
+  color: #6ee7b7;
+}
+.dark .placeholder\:text-slate-400::placeholder {
+  color: #64748b;
+}
+.dark .disabled\:bg-slate-50:disabled {
+  background-color: #1e293b;
+}
+.dark .disabled\:text-slate-400:disabled {
+  color: #64748b;
+}
+
+/* Maps stay legible but slightly dimmed in dark mode. */
+.dark .leaflet-container {
+  background: #1e293b;
+}
+.dark .nomax-map-pin {
+  border-color: #e2e8f0;
+}
+.dark .nomax-map-pin--picker {
+  border-color: #ffffff;
+}
+
+/* Component-specific overrides must come after the neutral mappings above. */
+.dark .theme-switch-knob {
+  background-color: #ffffff;
+}
+
+.dark .hero-search-action {
+  background-color: rgb(255 255 255 / 0.16);
+  color: #ffffff;
+}
+.dark .hero-search-action:hover {
+  background-color: rgb(255 255 255 / 0.26);
 }

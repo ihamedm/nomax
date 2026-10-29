@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Badge, RoleBadge } from "@/components/ui/badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
-import { Button, Spinner } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { formatPhone, GROUP_LABELS, permissionLabel, ROLE_LABELS } from "@/lib/format";
 import { formatJalali } from "@/lib/jalali";
+import { useApi } from "@/lib/query";
+import { DataTable, type DataColumn } from "@/features/admin/data-table";
 import { useAuth } from "@/stores/auth";
 import type { AdminUser, PermissionItem, Role } from "@/types";
 
@@ -21,37 +25,39 @@ function sameSet(first: string[], second: string[]): boolean {
 export function AdminUsersPage() {
   const me = useAuth((state) => state.user);
   const toast = useToast();
+  const queryClient = useQueryClient();
 
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [permissions, setPermissions] = useState<PermissionItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const usersQuery = useApi<{ items: AdminUser[] }>(["admin", "users"], "/admin/users");
+  const permissionsQuery = useApi<{ items: PermissionItem[] }>(
+    ["admin", "permissions"],
+    "/admin/permissions",
+  );
+  const users = usersQuery.data?.items ?? [];
+  const permissions = permissionsQuery.data?.items ?? [];
+  const loading = usersQuery.isLoading || permissionsQuery.isLoading;
+  const error = usersQuery.error
+    ? errorMessage(usersQuery.error)
+    : permissionsQuery.error
+      ? errorMessage(permissionsQuery.error)
+      : null;
 
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [role, setRole] = useState<Role>("customer");
   const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [userResult, permissionResult] = await Promise.all([
-        api<{ items: AdminUser[] }>("/admin/users"),
-        api<{ items: PermissionItem[] }>("/admin/permissions"),
-      ]);
-      setUsers(userResult.items);
-      setPermissions(permissionResult.items);
-    } catch (loadError) {
-      setError(errorMessage(loadError));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newPhone, setNewPhone] = useState("");
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
+  const filteredUsers =
+    roleFilter === "all" ? users : users.filter((user) => user.role === roleFilter);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  function reload() {
+    void usersQuery.refetch();
+    void permissionsQuery.refetch();
+  }
 
   const groupedPermissions = useMemo(() => {
     const groups = new Map<string, PermissionItem[]>();
@@ -101,13 +107,96 @@ export function AdminUsersPage() {
       }
       toast("تغییرات کاربر ذخیره شد.");
       setEditing(null);
-      await load();
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
     } catch (saveError) {
       toast(errorMessage(saveError));
     } finally {
       setSaving(false);
     }
   }
+
+  async function createAdmin() {
+    if (!newPhone.trim()) {
+      toast("شماره موبایل مدیر جدید را وارد کنید.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const created = await api<AdminUser>("/admin/users", {
+        method: "POST",
+        body: JSON.stringify({ phone: newPhone.trim(), full_name: newName.trim() || null }),
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      setCreateOpen(false);
+      setNewPhone("");
+      setNewName("");
+      setEditing(created);
+      setRole("admin");
+      setSelected([]);
+      toast("مدیر ساخته شد؛ دسترسی ماژول‌ها را انتخاب کنید.");
+    } catch (createError) {
+      toast(errorMessage(createError));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  const userColumns: DataColumn<AdminUser>[] = [
+    {
+      key: "user",
+      header: "کاربر",
+      cell: (user) => (
+        <div>
+          <p className="font-bold text-slate-900">
+            {user.full_name || "بدون نام"}
+            {user.id === me?.id && (
+              <span className="mr-2 text-[11px] font-normal text-brand-600">(شما)</span>
+            )}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500" dir="ltr">
+            {formatPhone(user.phone)}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "role",
+      header: "نقش",
+      cell: (user) => <RoleBadge role={user.role} label={ROLE_LABELS[user.role]} />,
+    },
+    {
+      key: "permissions",
+      header: "دسترسی‌ها",
+      cell: (user) => (
+        <Badge tone={user.role === "admin" ? "amber" : "slate"}>
+          {user.role === "admin"
+            ? `${user.permissions.length} دسترسی`
+            : user.role === "superadmin"
+              ? "دسترسی کامل"
+              : "بدون دسترسی مدیریتی"}
+        </Badge>
+      ),
+    },
+    {
+      key: "created",
+      header: "عضویت",
+      cell: (user) => (
+        <span className="text-xs text-slate-500">
+          {user.created_at ? formatJalali(user.created_at) : "—"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "عملیات",
+      className: "text-left",
+      cell: (user) => (
+        <Button size="sm" variant="outline" onClick={() => openEditor(user)}>
+          ویرایش
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <section className="space-y-4">
@@ -118,79 +207,49 @@ export function AdminUsersPage() {
             نقش و دسترسی‌های هر کاربر را مدیریت کنید. هر تغییر در گزارش رویدادها ثبت می‌شود.
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
-          به‌روزرسانی
-        </Button>
-      </header>
-
-      {loading && (
-        <div className="flex justify-center py-16 text-brand-600">
-          <Spinner />
-        </div>
-      )}
-
-      {!loading && error && (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
-          <p>{error}</p>
-          <Button size="sm" variant="outline" className="mt-3" onClick={() => void load()}>
-            تلاش دوباره
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            مدیر جدید
+          </Button>
+          <Button size="sm" variant="outline" onClick={reload} disabled={loading}>
+            به‌روزرسانی
           </Button>
         </div>
-      )}
+      </header>
 
-      {!loading && !error && (
-        <div className="space-y-3">
-          {users.map((user) => (
-            <article
-              key={user.id}
-              className="rounded-2xl border border-slate-200 bg-white p-4"
+      <DataTable
+        columns={userColumns}
+        rows={filteredUsers}
+        rowKey={(user) => user.id}
+        loading={loading}
+        error={error}
+        empty="کاربری با این نقش پیدا نشد."
+        minWidthClassName="min-w-[820px]"
+        toolbar={
+          <div className="flex items-center gap-2">
+            <label htmlFor="role-filter" className="text-xs text-slate-500">
+              فیلتر نقش
+            </label>
+            <select
+              id="role-filter"
+              value={roleFilter}
+              onChange={(event) => setRoleFilter(event.target.value as "all" | Role)}
+              className="h-10 w-64 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-bold text-slate-900">
-                    {user.full_name || "بدون نام"}
-                    {user.id === me?.id && (
-                      <span className="mr-2 text-[11px] font-normal text-brand-600">(شما)</span>
-                    )}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500" dir="ltr">
-                    {formatPhone(user.phone)}
-                  </p>
-                </div>
-                <RoleBadge role={user.role} label={ROLE_LABELS[user.role]} />
-              </div>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Badge tone={user.role === "admin" ? "amber" : "slate"}>
-                  {user.role === "admin"
-                    ? `${user.permissions.length} دسترسی`
-                    : user.role === "superadmin"
-                      ? "دسترسی کامل"
-                      : "بدون دسترسی مدیریتی"}
-                </Badge>
-                {user.created_at && (
-                  <span className="text-[11px] text-slate-400">
-                    عضویت: {formatJalali(user.created_at)}
-                  </span>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mr-auto"
-                  onClick={() => openEditor(user)}
-                >
-                  ویرایش
-                </Button>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
+              <option value="all">همه نقش‌ها</option>
+              <option value="customer">مشتری</option>
+              <option value="owner">کسب‌وکار</option>
+              <option value="admin">مدیر</option>
+            </select>
+          </div>
+        }
+      />
 
       <BottomSheet
         open={editing !== null}
         title={editing ? `ویرایش ${editing.full_name || formatPhone(editing.phone)}` : "ویرایش کاربر"}
         onClose={() => setEditing(null)}
+        className="mx-auto w-full max-w-3xl"
       >
         {editing && (
           <div className="space-y-5">
@@ -279,6 +338,49 @@ export function AdminUsersPage() {
             </div>
           </div>
         )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={createOpen}
+        title="ساخت مدیر جدید"
+        onClose={() => setCreateOpen(false)}
+        className="mx-auto w-full max-w-3xl"
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="new-admin-phone" className="mb-2 block text-sm font-medium text-slate-700">
+              شماره موبایل
+            </label>
+            <Input
+              id="new-admin-phone"
+              dir="ltr"
+              inputMode="tel"
+              className="text-left"
+              placeholder="0912 345 6789"
+              value={newPhone}
+              onChange={(event) => setNewPhone(event.target.value)}
+              autoFocus
+            />
+          </div>
+          <div>
+            <label htmlFor="new-admin-name" className="mb-2 block text-sm font-medium text-slate-700">
+              نام نمایشی (اختیاری)
+            </label>
+            <Input
+              id="new-admin-name"
+              placeholder="مدیر محتوا"
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+            />
+          </div>
+          <p className="rounded-xl bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-500">
+            مدیر با نقش «مدیر» ساخته می‌شود. در مرحله بعد دسترسی هر ماژول را انتخاب می‌کنید.
+            ورود با همان کد یکبارمصرف پیامکی انجام می‌شود.
+          </p>
+          <Button className="w-full" loading={creating} onClick={() => void createAdmin()}>
+            ساخت مدیر
+          </Button>
+        </div>
       </BottomSheet>
     </section>
   );

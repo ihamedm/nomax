@@ -73,7 +73,9 @@ export interface BusinessGeo {
   lng: number;
 }
 
-export type BusinessSort = "nearest" | "top" | "newest" | "urgent";
+export type BusinessSort = "nearest" | "top" | "newest" | "urgent" | "visited";
+
+export type BusinessStatus = "pending" | "approved" | "rejected";
 
 export interface BusinessListItem {
   id: string;
@@ -88,16 +90,38 @@ export interface BusinessListItem {
   distance_m: number | null;
   rating_avg: number;
   rating_count: number;
+  view_count?: number;
   is_24h: boolean;
   is_verified: boolean;
+  status?: BusinessStatus;
+  rejection_reason?: string | null;
   profile_image_url?: string | null;
   created_at?: string | null;
+}
+
+export interface BusinessReview {
+  id: string;
+  rating: number;
+  text?: string | null;
+  author_name?: string | null;
+  reply?: string | null;
+  replied_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface MyReviewSummary {
+  id: string;
+  status: string;
+  is_private: boolean;
 }
 
 export interface BusinessDetail extends BusinessListItem {
   description?: string | null;
   instagram?: string | null;
-  reviews: unknown[];
+  is_saved?: boolean;
+  is_owner?: boolean;
+  reviews: BusinessReview[];
+  my_review?: MyReviewSummary | null;
 }
 
 export interface SearchMeta {

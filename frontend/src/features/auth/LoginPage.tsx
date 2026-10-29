@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useRef, useState, type FormEvent } from "react";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
+import { splitLoginTarget } from "@/lib/auth-redirect";
 import { normalizeDigits } from "@/lib/digits";
 import { fa } from "@/lib/format";
 import { isLocal } from "@/lib/platform";
@@ -15,17 +16,25 @@ const PHONE_PATTERN = /^(?:\+?98|0)?9\d{9}$/;
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const toast = useToast();
   const user = useAuth((state) => state.user);
   const setSession = useAuth((state) => state.setSession);
+  const { to: next, state: nextState } = splitLoginTarget(searchParams.get("next"));
 
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // After OTP verification the session is set imperatively; skip the
+  // already-logged-in <Navigate> render so it cannot race the explicit
+  // navigate and re-apply a stale `next` URL (e.g. ?review=1).
+  const completedLogin = useRef(false);
 
-  if (user) return <Navigate to={isAdmin(user) ? "/admin" : "/"} replace />;
+  if (user && !completedLogin.current) {
+    return <Navigate to={next ?? (isAdmin(user) ? "/admin" : "/me")} state={nextState} replace />;
+  }
 
   async function sendOtp() {
     const normalized = normalizeDigits(phone);
@@ -67,8 +76,12 @@ export function LoginPage() {
         method: "POST",
         body: JSON.stringify({ phone, code }),
       });
+      completedLogin.current = true;
       setSession(result.access, result.refresh, result.user);
-      navigate(isAdmin(result.user) ? "/admin" : "/", { replace: true });
+      navigate(next ?? (isAdmin(result.user) ? "/admin" : "/me"), {
+        replace: true,
+        state: nextState,
+      });
     } catch (error) {
       toast(errorMessage(error));
     } finally {
@@ -176,9 +189,11 @@ export function LoginPage() {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-white/70">
-          نسخه فاز ۱ — ورود با کد یکبارمصرف
-        </p>
+        {next && (
+          <p className="mt-4 text-center text-xs leading-5 text-white/75">
+            پس از ورود به صفحه‌ای که از آن آمده‌اید برمی‌گردید.
+          </p>
+        )}
       </div>
     </main>
   );

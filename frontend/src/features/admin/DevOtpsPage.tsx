@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button, Spinner } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { api, errorMessage } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { fa, formatPhone } from "@/lib/format";
+import { useApi } from "@/lib/query";
 import type { DevOtp } from "@/types";
 
 const OTP_TTL_SECONDS = 120;
@@ -12,30 +13,16 @@ const REFRESH_INTERVAL_MS = 5000;
 
 export function DevOtpsPage() {
   const toast = useToast();
-  const [items, setItems] = useState<DevOtp[]>([]);
-  const [updatedAt, setUpdatedAt] = useState(() => Date.now());
+  const { data, isLoading, error: queryError, refetch, dataUpdatedAt } = useApi<{ items: DevOtp[] }>(
+    ["admin", "dev-otps"],
+    "/admin/dev/otps",
+    { refetchInterval: REFRESH_INTERVAL_MS },
+  );
+  const items = data?.items ?? [];
+  const updatedAt = dataUpdatedAt || Date.now();
   const [now, setNow] = useState(() => Date.now());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const result = await api<{ items: DevOtp[] }>("/admin/dev/otps");
-      setItems(result.items);
-      setUpdatedAt(Date.now());
-      setError(null);
-    } catch (loadError) {
-      setError(errorMessage(loadError));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-    const interval = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(interval);
-  }, [load]);
+  const loading = isLoading;
+  const error = queryError ? errorMessage(queryError) : null;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
@@ -65,7 +52,7 @@ export function DevOtpsPage() {
             کدهای فعالِ درخواست‌شده در محیط توسعه. این صفحه در محیط تولید اصلاً وجود ندارد.
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
+        <Button size="sm" variant="outline" onClick={() => void refetch()} disabled={loading}>
           به‌روزرسانی
         </Button>
       </header>
@@ -79,7 +66,7 @@ export function DevOtpsPage() {
       {error && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
           <p>{error}</p>
-          <Button size="sm" variant="outline" className="mt-3" onClick={() => void load()}>
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => void refetch()}>
             تلاش دوباره
           </Button>
         </div>
@@ -97,7 +84,7 @@ export function DevOtpsPage() {
       )}
 
       {items.length > 0 && (
-        <div className="space-y-3">
+        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {items.map((item) => {
             const remaining = remainingSeconds(item);
             const expired = remaining <= 0;

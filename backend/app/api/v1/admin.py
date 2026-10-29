@@ -1,8 +1,9 @@
+import uuid
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
@@ -13,6 +14,10 @@ from app.db.session import get_db
 from app.models.admin import AuditLog
 from app.models.user import User, UserRole
 from app.schemas.admin import AdminUserResponse, AdminUserUpdate
+from app.services.inapp_notifications import (
+    notify_business_approved,
+    notify_business_rejected,
+)
 from app.services.otp_service import OtpService
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
@@ -58,6 +63,63 @@ def _to_admin_response(user: User) -> dict:
     ).model_dump(mode="json")
 
 
+def _admin_business_payload(business, owner: User | None = None) -> dict:
+    category = business.category
+    subcategory = business.subcategory
+    return {
+        "id": str(business.id),
+        "name": business.name,
+        "slug": business.slug,
+        "status": business.status.value if hasattr(business.status, "value") else str(business.status),
+        "is_verified": business.is_verified,
+        "is_24h": business.is_24h,
+        "short_description": business.short_description,
+        "description": business.description,
+        "address": business.address,
+        "phone_business": business.phone_business,
+        "instagram": business.instagram,
+        "geo": (
+            {"lat": business.geo_lat, "lng": business.geo_lng}
+            if business.geo_lat is not None and business.geo_lng is not None
+            else None
+        ),
+        "category": (
+            {"id": category.id, "slug": category.slug, "name": category.name}
+            if category is not None
+            else None
+        ),
+        "subcategory": (
+            {"id": subcategory.id, "slug": subcategory.slug, "name": subcategory.name}
+            if subcategory is not None
+            else None
+        ),
+        "rating_avg": round(business.rating_avg or 0, 2),
+        "rating_count": business.rating_count or 0,
+        "view_count": business.view_count or 0,
+        "rejection_reason": business.rejection_reason,
+        "owner": (
+            {"id": str(owner.id), "phone": owner.phone, "full_name": owner.full_name}
+            if owner is not None
+            else None
+        ),
+        "created_at": business.created_at.isoformat() if business.created_at else None,
+        "updated_at": business.updated_at.isoformat() if business.updated_at else None,
+    }
+
+
+async def _get_admin_business(session: AsyncSession, business_id: str):
+    from app.models.business import Business
+
+    try:
+        bid = UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    business = await session.get(Business, bid)
+    if business is None or business.deleted_at is not None:
+        raise AppError("not_found", "business_not_found", 404)
+    return business
+
+
 @router.get("/me")
 async def admin_me(user: User = Depends(get_current_user)) -> dict:
     return {"data": {"user": _to_admin_response(user), "is_superadmin": user.role == UserRole.SUPERADMIN}}
@@ -66,29 +128,215 @@ async def admin_me(user: User = Depends(get_current_user)) -> dict:
 @router.get("/businesses")
 async def list_admin_businesses(
     status: Optional[str] = None,
+    q: Optional[str] = None,
+    category_id: Optional[int] = None,
+    page: int = 1,
+    per_page: int = 20,
     actor: User = Depends(require_permissions("business.read")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     del actor
     from app.models.business import Business
 
-    stmt = select(Business).where(Business.deleted_at.is_(None))
+    page = max(1, page)
+    per_page = min(100, max(1, per_page))
+    conditions = [Business.deleted_at.is_(None)]
     if status:
-        stmt = stmt.where(Business.status == status)
-    rows = (await session.execute(stmt.order_by(Business.created_at.desc()).limit(100))).scalars().all()
-    return {"data": {"items": [
-        {
-            "id": str(b.id),
-            "name": b.name,
-            "slug": b.slug,
-            "status": b.status.value if hasattr(b.status, "value") else str(b.status),
-            "is_verified": b.is_verified,
-            "is_24h": b.is_24h,
-            "owner_id": str(b.owner_id),
-            "created_at": b.created_at.isoformat() if b.created_at else None,
-        }
-        for b in rows
-    ]}}
+        conditions.append(Business.status == status)
+    if category_id:
+        conditions.append(Business.category_id == category_id)
+    if q:
+        term = f"%{q.strip()}%"
+        conditions.append(
+            or_(Business.name.ilike(term), Business.slug.ilike(term))
+        )
+
+    total = int(
+        (await session.execute(select(func.count(Business.id)).where(*conditions))).scalar() or 0
+    )
+    rows = (
+        await session.execute(
+            select(Business, User)
+            .join(User, Business.owner_id == User.id)
+            .where(*conditions)
+            .order_by(Business.created_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+        )
+    ).all()
+    pages = max(1, (total + per_page - 1) // per_page)
+    return {
+        "data": {"items": [_admin_business_payload(b, owner) for b, owner in rows]},
+        "meta": {"page": page, "per_page": per_page, "total": total, "pages": pages},
+    }
+
+
+@router.post("/businesses")
+async def create_admin_business(
+    payload: dict,
+    request: Request,
+    actor: User = Depends(require_permissions("business.create")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.models.business import Business, BusinessStatus
+    from app.models.category import Category
+
+    name = (payload.get("name") or "").strip()
+    address = (payload.get("address") or "").strip()
+    if not name or payload.get("category_id") is None or not address:
+        raise AppError("validation_error", "name_address_category_required", 422)
+    if not payload.get("owner_phone"):
+        raise AppError("validation_error", "owner_phone_required", 422)
+    owner_phone = security.normalize_phone(payload["owner_phone"])
+    owner = (
+        await session.execute(select(User).where(User.phone == owner_phone))
+    ).scalars().first()
+    if owner is None or owner.deleted_at is not None:
+        raise AppError("not_found", "owner_not_found", 404)
+    category = await session.get(Category, payload["category_id"])
+    if category is None or category.deleted_at is not None:
+        raise AppError("not_found", "category_not_found", 404)
+    status_value = payload.get("status") or BusinessStatus.PENDING.value
+    if status_value not in [item.value for item in BusinessStatus]:
+        raise AppError("validation_error", "invalid_status", 422)
+
+    slug_base = "".join(ch if ch.isalnum() else "-" for ch in name.lower()).strip("-") or "business"
+    business = Business(
+        owner_id=owner.id,
+        category_id=payload["category_id"],
+        subcategory_id=payload.get("subcategory_id"),
+        name=name,
+        slug=f"{slug_base}-{uuid.uuid4().hex[:6]}",
+        short_description=(payload.get("short_description") or "")[:120],
+        description=payload.get("description"),
+        phone_business=payload.get("phone_business"),
+        address=address,
+        geo_lat=payload.get("geo_lat"),
+        geo_lng=payload.get("geo_lng"),
+        instagram=payload.get("instagram"),
+        is_24h=bool(payload.get("is_24h", False)),
+        status=BusinessStatus(status_value),
+    )
+    session.add(business)
+    await session.flush()
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.business.created",
+        entity_type="business",
+        entity_id=str(business.id),
+        after={"name": business.name, "owner_id": str(owner.id)},
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(business)
+    return {"data": _admin_business_payload(business, owner)}
+
+
+@router.get("/businesses/{business_id}")
+async def get_admin_business(
+    business_id: str,
+    actor: User = Depends(require_permissions("business.read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    del actor
+    business = await _get_admin_business(session, business_id)
+    owner = await session.get(User, business.owner_id)
+    return {"data": _admin_business_payload(business, owner)}
+
+
+@router.patch("/businesses/{business_id}")
+async def update_admin_business(
+    business_id: str,
+    payload: dict,
+    request: Request,
+    actor: User = Depends(require_permissions("business.update")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.models.business import BusinessStatus
+
+    business = await _get_admin_business(session, business_id)
+    editable = (
+        "name",
+        "short_description",
+        "description",
+        "phone_business",
+        "address",
+        "geo_lat",
+        "geo_lng",
+        "instagram",
+        "is_24h",
+        "is_verified",
+        "category_id",
+        "subcategory_id",
+        "rejection_reason",
+    )
+    before = {"status": business.status.value, "name": business.name}
+    previous_status = business.status
+    for field in editable:
+        if field in payload:
+            setattr(business, field, payload[field])
+    if "status" in payload:
+        if payload["status"] not in [item.value for item in BusinessStatus]:
+            raise AppError("validation_error", "invalid_status", 422)
+        business.status = BusinessStatus(payload["status"])
+        if business.status != BusinessStatus.REJECTED and "rejection_reason" not in payload:
+            business.rejection_reason = None
+    if business.status != previous_status:
+        if business.status == BusinessStatus.REJECTED:
+            await notify_business_rejected(
+                session,
+                owner_id=business.owner_id,
+                business_id=business.id,
+                business_slug=business.slug,
+                business_name=business.name,
+                reason=business.rejection_reason,
+            )
+        elif business.status == BusinessStatus.APPROVED:
+            await notify_business_approved(
+                session,
+                owner_id=business.owner_id,
+                business_id=business.id,
+                business_slug=business.slug,
+                business_name=business.name,
+            )
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.business.updated",
+        entity_type="business",
+        entity_id=str(business.id),
+        before=before,
+        after={"status": business.status.value, "name": business.name},
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(business)
+    owner = await session.get(User, business.owner_id)
+    return {"data": _admin_business_payload(business, owner)}
+
+
+@router.delete("/businesses/{business_id}")
+async def delete_admin_business(
+    business_id: str,
+    request: Request,
+    actor: User = Depends(require_permissions("business.delete")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from datetime import datetime, timezone
+
+    business = await _get_admin_business(session, business_id)
+    business.deleted_at = datetime.now(timezone.utc)
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.business.deleted",
+        entity_type="business",
+        entity_id=str(business.id),
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    return {"data": {"id": str(business.id), "deleted": True}}
 
 
 @router.patch("/businesses/{business_id}/verify-license")
@@ -159,8 +407,17 @@ async def approve_business(
     business = await session.get(Business, bid)
     if business is None:
         raise AppError("not_found", "business_not_found", 404)
+    was_approved = business.status == BusinessStatus.APPROVED
     business.status = BusinessStatus.APPROVED
     business.rejection_reason = None
+    if not was_approved:
+        await notify_business_approved(
+            session,
+            owner_id=business.owner_id,
+            business_id=business.id,
+            business_slug=business.slug,
+            business_name=business.name,
+        )
     await _write_audit(session, actor.id, "business.approve", "business", str(bid), after={"status": "approved"})
     await session.commit()
     return {"data": {"id": str(bid), "status": "approved"}}
@@ -180,31 +437,132 @@ async def reject_business(
     business = await session.get(Business, bid)
     if business is None:
         raise AppError("not_found", "business_not_found", 404)
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise AppError("rejection_reason_required", "rejection_reason_required", 422)
     business.status = BusinessStatus.REJECTED
-    business.rejection_reason = payload.get("reason")
+    business.rejection_reason = reason
+    await notify_business_rejected(
+        session,
+        owner_id=business.owner_id,
+        business_id=business.id,
+        business_name=business.name,
+        reason=reason,
+    )
     await _write_audit(session, actor.id, "business.reject", "business", str(bid), after={"reason": business.rejection_reason})
     await session.commit()
     return {"data": {"id": str(bid), "status": "rejected"}}
 
 
-@router.get("/reviews")
-async def list_admin_reviews(
-    status: Optional[str] = None,
+@router.get("/reviews/businesses")
+async def list_review_businesses(
     actor: User = Depends(require_permissions("review.read")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     del actor
+    from app.models.business import Business
     from app.models.review import Review
 
-    stmt = select(Review).where(Review.deleted_at.is_(None))
+    rows = (
+        await session.execute(
+            select(Business.id, Business.name)
+            .join(Review, Review.business_id == Business.id)
+            .where(
+                Business.deleted_at.is_(None),
+                Review.deleted_at.is_(None),
+                Review.is_private.is_(False),
+            )
+            .group_by(Business.id, Business.name)
+            .order_by(Business.name)
+        )
+    ).all()
+    return {"data": {"items": [{"id": str(bid), "name": name} for bid, name in rows]}}
+
+
+@router.get("/reviews")
+async def list_admin_reviews(
+    status: Optional[str] = None,
+    business_id: Optional[str] = None,
+    q: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 20,
+    actor: User = Depends(require_permissions("review.read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    del actor
+    from app.models.business import Business
+    from app.models.review import Review
+
+    page = max(1, page)
+    per_page = min(100, max(1, per_page))
+    conditions = [
+        Review.deleted_at.is_(None),
+        Review.is_private.is_(False),
+        Business.deleted_at.is_(None),
+    ]
     if status:
-        stmt = stmt.where(Review.status == status)
-    rows = (await session.execute(stmt.order_by(Review.created_at.desc()).limit(100))).scalars().all()
-    return {"data": {"items": [
-        {"id": str(r.id), "business_id": str(r.business_id), "rating": r.rating,
-         "text": r.text, "status": r.status}
-        for r in rows
-    ]}}
+        if status not in ("approved", "pending", "rejected", "unapproved"):
+            raise AppError("validation_error", "invalid_status", 422)
+        conditions.append(
+            Review.status == ("pending" if status == "unapproved" else status)
+        )
+    if business_id:
+        try:
+            conditions.append(Review.business_id == uuid.UUID(business_id))
+        except ValueError:
+            raise AppError("validation_error", "invalid_business_id", 422)
+    if q:
+        term = f"%{q.strip()}%"
+        conditions.append(
+            or_(
+                Business.name.ilike(term),
+                Review.author_name.ilike(term),
+                Review.text.ilike(term),
+            )
+        )
+
+    total = int(
+        (
+            await session.execute(
+                select(func.count(Review.id))
+                .select_from(Review)
+                .join(Business, Review.business_id == Business.id)
+                .where(*conditions)
+            )
+        ).scalar()
+        or 0
+    )
+    rows = (
+        await session.execute(
+            select(Review, Business.name, Business.slug)
+            .join(Business, Review.business_id == Business.id)
+            .where(*conditions)
+            .order_by(Review.created_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+        )
+    ).all()
+    pages = max(1, (total + per_page - 1) // per_page)
+    return {
+        "data": {
+            "items": [
+                {
+                    "id": str(r.id),
+                    "business_id": str(r.business_id),
+                    "business_name": business_name,
+                    "business_slug": business_slug,
+                    "rating": r.rating,
+                    "text": r.text,
+                    "author_name": r.author_name,
+                    "reply": r.reply,
+                    "status": r.status,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r, business_name, business_slug in rows
+            ]
+        },
+        "meta": {"page": page, "per_page": per_page, "total": total, "pages": pages},
+    }
 
 
 @router.get("/stats/overview")
@@ -272,6 +630,43 @@ async def list_users(
     )
     users = list(result.scalars().all())
     return {"data": {"items": [_to_admin_response(u) for u in users]}}
+
+
+@router.post("/users")
+async def create_admin(
+    payload: dict,
+    request: Request,
+    actor: User = Depends(require_superadmin),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    phone = security.normalize_phone(payload.get("phone", ""))
+    existing = (
+        await session.execute(select(User).where(User.phone == phone))
+    ).scalars().first()
+    if existing is not None:
+        raise AppError("conflict", "user_already_exists", 409, {"phone": phone})
+    permissions = validate_permission_codes(payload.get("permissions") or [])
+    user = User(
+        phone=phone,
+        full_name=(payload.get("full_name") or "").strip() or None,
+        role=UserRole.ADMIN,
+        permissions=permissions,
+        is_phone_verified=True,
+    )
+    session.add(user)
+    await session.flush()
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.user.created",
+        entity_type="user",
+        entity_id=str(user.id),
+        after={"role": "admin", "permissions": permissions},
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(user)
+    return {"data": _to_admin_response(user)}
 
 
 @router.patch("/users/{user_id}/role")
