@@ -9,6 +9,7 @@ export interface DataColumn<T> {
   key: string;
   header: string;
   className?: string;
+  sortable?: boolean;
   cell: (row: T) => ReactNode;
 }
 
@@ -29,6 +30,9 @@ interface DataTableProps<T> {
   onPageChange?: (page: number) => void;
   toolbar?: ReactNode;
   minWidthClassName?: string;
+  sortKey?: string;
+  sortDirection?: "asc" | "desc";
+  onSort?: (key: string) => void;
 }
 
 /**
@@ -46,6 +50,9 @@ export function DataTable<T>({
   onPageChange,
   toolbar,
   minWidthClassName = "min-w-[900px]",
+  sortKey,
+  sortDirection = "desc",
+  onSort,
 }: DataTableProps<T>) {
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -68,7 +75,21 @@ export function DataTable<T>({
               <tr>
                 {columns.map((column) => (
                   <th key={column.key} className={cn("px-3 py-2.5 font-medium", column.className)}>
-                    {column.header}
+                    {onSort && column.sortable ? (
+                      <button
+                        type="button"
+                        onClick={() => onSort(column.key)}
+                        aria-label={`مرتب‌سازی بر اساس ${column.header}`}
+                        className="inline-flex items-center gap-1 transition-colors hover:text-slate-700"
+                      >
+                        {column.header}
+                        <span aria-hidden>
+                          {sortKey === column.key ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                        </span>
+                      </button>
+                    ) : (
+                      column.header
+                    )}
                   </th>
                 ))}
               </tr>

@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # the "new business" action once the limit is reached.
     MAX_BUSINESSES_PER_OWNER: int = 1
 
+    # Gallery photos allowed per business. The wizard reads this value from
+    # `/me/businesses` so the UI and API stay in sync.
+    MAX_BUSINESS_IMAGES: int = 6
+
     DATABASE_URL: str = "postgresql+asyncpg://nomax:secret@localhost:5432/nomax"
     DATABASE_ECHO: bool = False
 
@@ -75,6 +79,13 @@ class Settings(BaseSettings):
         value = (value or "").strip().rstrip("/")
         if value and not value.startswith(("http://", "https://")):
             value = f"https://{value}"
+        return value
+
+    @field_validator("MAX_BUSINESS_IMAGES")
+    @classmethod
+    def _validate_max_business_images(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("MAX_BUSINESS_IMAGES must be at least 1")
         return value
 
     CORS_ORIGINS: list[str] = [

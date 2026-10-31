@@ -11,8 +11,10 @@ import { useTheme } from "@/stores/theme";
 
 const NAV = [
   { to: "/admin", label: "داشبورد", icon: "▦", end: true, superadminOnly: false, permission: null },
+  { to: "/admin/analytics", label: "تحلیل و آمار", icon: "◔", end: false, superadminOnly: false, permission: "stats.read" },
   { to: "/admin/businesses", label: "کسب‌وکارها", icon: "⌂", end: false, superadminOnly: false, permission: "business.read" },
   { to: "/admin/reviews", label: "نظرات", icon: "★", end: false, superadminOnly: false, permission: "review.read" },
+  { to: "/admin/quotes", label: "استعلام‌ها", icon: "⌕", end: false, superadminOnly: false, permission: "quote.read" },
   { to: "/admin/notifications", label: "پیام‌ها و اطلاعیه‌ها", icon: "✉", end: false, superadminOnly: false, permission: "notification.manage" },
   { to: "/admin/categories", label: "دسته‌بندی‌ها", icon: "☰", end: false, superadminOnly: false, permission: "category.read" },
   { to: "/admin/tags", label: "برچسب‌ها", icon: "#", end: false, superadminOnly: false, permission: "category.read" },

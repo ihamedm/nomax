@@ -72,7 +72,7 @@ def _items(response):
 
 @pytest.mark.asyncio
 async def test_only_approved_businesses_are_searchable(client, db_session, create_user, catalog):
-    owner = await create_user("9130000001")
+    owner = await create_user("9130000001", full_name="حسین رضایی")
     automotive = catalog["categories"]["automotive"]
     mechanic = catalog["subcategories"][(automotive.id, "mechanic")]
 
@@ -113,6 +113,7 @@ async def test_only_approved_businesses_are_searchable(client, db_session, creat
     assert body["name"] == "مکانیکی تأییدشده"
     assert body["reviews"] == []
     assert body["geo"] == {"lat": BEHBAHAN["lat"], "lng": BEHBAHAN["lng"]}
+    assert body["owner"] == {"name": "حسین رضایی", "phone": "9130000001"}
 
     pending = await client.get("/api/v1/businesses/pending-shop")
     assert pending.status_code == 404

@@ -225,6 +225,7 @@ async def test_business_limit_is_one_per_owner(client, db_session, create_user):
     data = mine.json()["data"]
     assert data["limit"] == 1
     assert data["can_create"] is False
+    assert data["max_images"] == 6
     assert len(data["items"]) == 1
 
 
@@ -342,3 +343,106 @@ async def test_edit_business_rejects_mismatched_subcategory(client, db_session, 
         headers=auth(owner),
     )
     assert response.status_code == 422
+
+
+async def test_business_gallery_create_edit_and_public_detail(client, db_session, create_user):
+    from app.models.business import BusinessStatus
+
+    owner = await create_user("09160000009", UserRole.OWNER)
+    category, subcategory = await _catalog(db_session)
+    photos = [
+        {"url": "https://cdn.example.com/one.jpg", "is_main": False},
+        {"url": "https://cdn.example.com/two.jpg", "is_main": True},
+        {"url": "https://cdn.example.com/three.jpg", "is_main": False},
+    ]
+    created = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "گالری تست",
+            "category_id": category.id,
+            "subcategory_id": subcategory.id,
+            "address": "بهبهان",
+            "images": photos,
+        },
+        headers=auth(owner),
+    )
+    assert created.status_code == 200
+    created_data = created.json()["data"]
+    assert [image["url"] for image in created_data["images"]] == [
+        photo["url"] for photo in photos
+    ]
+    assert created_data["profile_image_url"] == "https://cdn.example.com/two.jpg"
+    assert [image["is_main"] for image in created_data["images"]] == [False, True, False]
+
+    business_id = created_data["id"]
+    slug = created_data["slug"]
+    business = await db_session.get(Business, __import__("uuid").UUID(business_id))
+    business.status = BusinessStatus.APPROVED
+    await db_session.commit()
+
+    owner_detail = await client.get(
+        f"/api/v1/me/businesses/{business_id}", headers=auth(owner)
+    )
+    assert owner_detail.status_code == 200
+    assert len(owner_detail.json()["data"]["images"]) == 3
+
+    public_detail = await client.get(f"/api/v1/businesses/{slug}")
+    assert public_detail.status_code == 200
+    assert [image["url"] for image in public_detail.json()["data"]["images"]] == [
+        photo["url"] for photo in photos
+    ]
+
+    removed = await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={
+            "images": [
+                {"url": "https://cdn.example.com/three.jpg", "is_main": False},
+                {"url": "https://cdn.example.com/one.jpg", "is_main": True},
+            ]
+        },
+        headers=auth(owner),
+    )
+    assert removed.status_code == 200
+    updated = removed.json()["data"]
+    assert [image["url"] for image in updated["images"]] == [
+        "https://cdn.example.com/three.jpg",
+        "https://cdn.example.com/one.jpg",
+    ]
+    assert updated["profile_image_url"] == "https://cdn.example.com/one.jpg"
+    assert [image["is_main"] for image in updated["images"]] == [False, True]
+
+    six = await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={
+            "images": [
+                {"url": f"https://cdn.example.com/{index}.jpg", "is_main": index == 0}
+                for index in range(6)
+            ]
+        },
+        headers=auth(owner),
+    )
+    assert six.status_code == 200
+    assert len(six.json()["data"]["images"]) == 6
+
+    too_many = await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={
+            "images": [
+                {"url": f"https://cdn.example.com/too-many-{index}.jpg", "is_main": index == 0}
+                for index in range(7)
+            ]
+        },
+        headers=auth(owner),
+    )
+    assert too_many.status_code == 422
+    assert too_many.json()["error"]["code"] == "too_many_images"
+
+
+async def test_picker_catalog_lists_every_subcategory(client, db_session):
+    await _catalog(db_session)
+    response = await client.get("/api/v1/categories/subcategories")
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert items
+    assert all(item["category"]["name"] for item in items)
+    assert all(item["category_id"] == item["category"]["id"] for item in items)

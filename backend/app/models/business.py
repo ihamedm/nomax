@@ -86,3 +86,29 @@ class Business(Base):
 
     category: Mapped["Category"] = relationship(lazy="joined")
     subcategory: Mapped["Subcategory | None"] = relationship(lazy="joined")
+
+
+class BusinessImage(Base):
+    """An ordered gallery image; ``profile_image_url`` mirrors the main row."""
+
+    __tablename__ = "business_images"
+    __table_args__ = (
+        CheckConstraint("sort_order >= 0", name="ck_business_images_sort_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4, nullable=False
+    )
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    url: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_main: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sa.text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )

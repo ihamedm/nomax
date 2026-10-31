@@ -36,6 +36,52 @@ async def list_categories(session: AsyncSession = Depends(get_db)) -> dict:
     return {"data": {"items": [_category_item(category, count) for category, count in rows]}}
 
 
+@router.get("/subcategories")
+async def list_all_subcategories(session: AsyncSession = Depends(get_db)) -> dict:
+    """Compact catalog used by the picker's inline search.
+
+    The catalog is intentionally small and static enough to load once, so the
+    picker can filter both levels locally without a request per keystroke.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(Subcategory, Category)
+                .join(Category, Subcategory.category_id == Category.id)
+                .where(
+                    Subcategory.deleted_at.is_(None),
+                    Category.deleted_at.is_(None),
+                    Category.is_active.is_(True),
+                )
+                .order_by(Category.sort_order, Subcategory.sort_order, Subcategory.id)
+            )
+        )
+        .all()
+    )
+    return {
+        "data": {
+            "items": [
+                {
+                    "id": subcategory.id,
+                    "category_id": subcategory.category_id,
+                    "slug": subcategory.slug,
+                    "name": subcategory.name,
+                    "icon": subcategory.icon,
+                    "sort_order": subcategory.sort_order,
+                    "standard_tags": list(subcategory.standard_tags or []),
+                    "category": {
+                        "id": category.id,
+                        "slug": category.slug,
+                        "name": category.name,
+                        "icon": category.icon,
+                    },
+                }
+                for subcategory, category in rows
+            ]
+        }
+    }
+
+
 @router.get("/{category_id}/subcategories")
 async def list_subcategories(category_id: int, session: AsyncSession = Depends(get_db)) -> dict:
     category = await session.get(Category, category_id)

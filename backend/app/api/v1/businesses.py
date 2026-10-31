@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 from typing import Literal
@@ -13,7 +14,7 @@ from app.core.errors import AppError
 from app.core.permissions import has_permission
 from app.db.session import get_db
 from app.models.bookmark import Bookmark
-from app.models.business import Business, BusinessStatus
+from app.models.business import Business, BusinessImage, BusinessStatus
 from app.models.category import Category, Subcategory
 from app.models.admin import AuditLog
 from app.models.review import Review
@@ -28,6 +29,9 @@ from app.services.inapp_notifications import (
     notify_business_approved,
     notify_business_rejected,
 )
+from app.services.search_analytics import log_search
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
 me_router = APIRouter(tags=["owner"])
@@ -141,6 +145,7 @@ async def list_businesses(
     sort: SortMode = "nearest",
     cursor: str | None = Query(None, max_length=200),
     limit: int = Query(20, ge=1, le=50),
+    user: User | None = Depends(get_optional_user),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     if (lat is None) != (lng is None):
@@ -165,6 +170,22 @@ async def list_businesses(
             offset=decode_cursor(cursor),
         ),
     )
+    if cursor is None:
+        try:
+            await log_search(
+                session,
+                user=user,
+                query=q,
+                category_slug=cat,
+                subcategory_slug=subcat,
+                results_count=len(page.hits),
+                first_business=page.hits[0].business if page.hits else None,
+            )
+            await session.flush()
+        except Exception as exc:  # noqa: BLE001 - analytics must not break search
+            logger.warning("search analytics write failed: %s", exc)
+            await session.rollback()
+
     return {
         "data": {"items": [_business_payload(hit) for hit in page.hits]},
         "meta": {"has_more": page.has_more, "next_cursor": page.next_cursor},
@@ -173,6 +194,138 @@ async def list_businesses(
 
 MAX_TAGS = 30
 MAX_TAG_LENGTH = 60
+MAX_IMAGE_URL_LENGTH = 255
+
+
+def _clean_image_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    url = value.strip()
+    if not url:
+        return None
+    if len(url) > MAX_IMAGE_URL_LENGTH:
+        raise AppError("image_url_too_long", "image_url_too_long", 422)
+    return url
+
+
+def _clean_image_list(raw: object) -> list[dict]:
+    """Validate the gallery payload while accepting legacy URL-only entries."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise AppError("images_must_be_a_list", "images_must_be_a_list", 422)
+
+    images: list[dict] = []
+    seen: set[str] = set()
+    for item in raw:
+        if isinstance(item, str):
+            url = _clean_image_url(item)
+            is_main = False
+        elif isinstance(item, dict):
+            url = _clean_image_url(item.get("url"))
+            is_main = bool(item.get("is_main"))
+        else:
+            raise AppError("invalid_image", "invalid_image", 422)
+        if not url or url in seen:
+            continue
+        if len(images) >= settings.MAX_BUSINESS_IMAGES:
+            raise AppError(
+                "too_many_images",
+                "too_many_images",
+                422,
+                {"max": settings.MAX_BUSINESS_IMAGES},
+            )
+        seen.add(url)
+        images.append({"url": url, "is_main": is_main})
+
+    return images
+
+
+def _resolve_business_images(payload: dict) -> tuple[list[dict], str | None]:
+    """Return (gallery rows, main url) for a create/update payload.
+
+    ``images`` is authoritative when supplied. ``profile_image_url`` remains
+    accepted by older clients and always identifies the main image.
+    """
+    has_images = "images" in payload
+    has_profile = "profile_image_url" in payload
+    if not has_images and not has_profile:
+        return [], None
+
+    images = _clean_image_list(payload.get("images")) if has_images else []
+    profile_url = _clean_image_url(payload.get("profile_image_url")) if has_profile else None
+
+    if profile_url:
+        for image in images:
+            image["is_main"] = image["url"] == profile_url
+        if not any(image["url"] == profile_url for image in images):
+            if len(images) >= settings.MAX_BUSINESS_IMAGES:
+                raise AppError(
+                    "too_many_images",
+                    "too_many_images",
+                    422,
+                    {"max": settings.MAX_BUSINESS_IMAGES},
+                )
+            images.insert(0, {"url": profile_url, "is_main": True})
+
+    if images and not any(image["is_main"] for image in images):
+        images[0]["is_main"] = True
+
+    main_url = next((image["url"] for image in images if image["is_main"]), None)
+    return images, main_url
+
+
+async def _replace_business_images(
+    session: AsyncSession, business_id: uuid.UUID, images: list[dict]
+) -> None:
+    await session.execute(sa.delete(BusinessImage).where(BusinessImage.business_id == business_id))
+    for index, image in enumerate(images):
+        session.add(
+            BusinessImage(
+                business_id=business_id,
+                url=image["url"],
+                is_main=bool(image["is_main"]),
+                sort_order=index,
+            )
+        )
+    await session.flush()
+
+
+async def _business_images_payload(
+    session: AsyncSession, business: Business
+) -> list[dict]:
+    rows = (
+        (
+            await session.execute(
+                sa.select(BusinessImage)
+                .where(BusinessImage.business_id == business.id)
+                .order_by(BusinessImage.sort_order, BusinessImage.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if rows:
+        return [
+            {
+                "id": str(image.id),
+                "url": image.url,
+                "is_main": image.is_main,
+                "sort_order": image.sort_order,
+            }
+            for image in rows
+        ]
+    if business.profile_image_url:
+        # Legacy rows created before the gallery migration.
+        return [
+            {
+                "id": None,
+                "url": business.profile_image_url,
+                "is_main": True,
+                "sort_order": 0,
+            }
+        ]
+    return []
 
 
 def _clean_tags(raw: object) -> list[str]:
@@ -319,9 +472,7 @@ async def create_business(
     if instagram and len(instagram) > 100:
         raise AppError("validation_error", "instagram_too_long", 422)
 
-    profile_image_url = (payload.get("profile_image_url") or "").strip() or None
-    if profile_image_url and len(profile_image_url) > 255:
-        raise AppError("validation_error", "profile_image_url_too_long", 422)
+    images, profile_image_url = _resolve_business_images(payload)
 
     tags = _clean_tags(payload.get("tags"))
 
@@ -347,6 +498,9 @@ async def create_business(
     session.add(business)
     await session.flush()
 
+    if images:
+        await _replace_business_images(session, business.id, images)
+
     if tags:
         await _assign_tags(
             session,
@@ -361,7 +515,9 @@ async def create_business(
 
     await session.commit()
     await session.refresh(business)
-    return {"data": _business_payload(BusinessHit(business=business), detail=True)}
+    data = _business_payload(BusinessHit(business=business), detail=True)
+    data["images"] = await _business_images_payload(session, business)
+    return {"data": data}
 
 
 @me_router.get("/me/businesses/{business_id}/tags")
@@ -727,11 +883,10 @@ async def update_business(
         if instagram and len(instagram) > 100:
             raise AppError("validation_error", "instagram_too_long", 422)
 
-    profile_image_url = business.profile_image_url
-    if "profile_image_url" in payload:
-        profile_image_url = (payload.get("profile_image_url") or "").strip() or None
-        if profile_image_url and len(profile_image_url) > 255:
-            raise AppError("validation_error", "profile_image_url_too_long", 422)
+    gallery_images, profile_image_url = _resolve_business_images(payload)
+    images_changed = "images" in payload or "profile_image_url" in payload
+    if not images_changed:
+        profile_image_url = business.profile_image_url
 
     tags = _clean_tags(payload.get("tags")) if "tags" in payload else None
 
@@ -759,6 +914,9 @@ async def update_business(
     if "is_24h" in payload:
         business.is_24h = bool(payload["is_24h"])
 
+    if images_changed:
+        await _replace_business_images(session, business.id, gallery_images)
+
     if tags is not None:
         await _assign_tags(
             session,
@@ -776,7 +934,9 @@ async def update_business(
 
     await session.commit()
     await session.refresh(business)
-    return {"data": _business_payload(BusinessHit(business=business), detail=True)}
+    data = _business_payload(BusinessHit(business=business), detail=True)
+    data["images"] = await _business_images_payload(session, business)
+    return {"data": data}
 
 
 @router.delete("/{business_id}")
@@ -819,6 +979,7 @@ async def my_businesses(
             "items": [_business_payload(BusinessHit(business=b)) for b in rows],
             "limit": limit,
             "can_create": len(rows) < limit,
+            "max_images": settings.MAX_BUSINESS_IMAGES,
         }
     }
 
@@ -852,6 +1013,8 @@ async def my_business(
         )
     ).scalars().all()
     payload["tags"] = list(tags)
+    payload["images"] = await _business_images_payload(session, business)
+    payload["max_images"] = settings.MAX_BUSINESS_IMAGES
     return {"data": payload}
 
 
@@ -1007,6 +1170,15 @@ async def get_business(
     if business.status == BusinessStatus.APPROVED:
         business.view_count = (business.view_count or 0) + 1
     data = _business_payload(BusinessHit(business=business), detail=True)
+    owner = await session.get(User, business.owner_id)
+    data["owner"] = (
+        {
+            "name": (owner.full_name or "").strip() or None,
+            "phone": owner.phone,
+        }
+        if owner is not None
+        else None
+    )
     data["is_owner"] = is_owner
     data["is_saved"] = False
     data["my_review"] = None
@@ -1035,5 +1207,6 @@ async def get_business(
                 "is_private": my_review.is_private,
             }
     data["reviews"] = [_review_payload(review) for review in reviews]
+    data["images"] = await _business_images_payload(session, business)
     await session.commit()
     return {"data": data}

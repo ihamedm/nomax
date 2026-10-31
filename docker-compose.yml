@@ -47,6 +47,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-nomax-local-dev-secret-change-me-please-0123456789abcdef}
       OTP_RATE_LIMIT_PER_HOUR: ${OTP_RATE_LIMIT_PER_HOUR:-0}
       MAX_BUSINESSES_PER_OWNER: ${MAX_BUSINESSES_PER_OWNER:-1}
+      MAX_BUSINESS_IMAGES: ${MAX_BUSINESS_IMAGES:-6}
       UPLOAD_DIR: /data/uploads
       # ArvanCloud S3. Empty credentials in local development fall back to
       # the nomax_uploads volume; fill them in .env to use S3 for uploads.

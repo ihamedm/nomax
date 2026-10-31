@@ -115,11 +115,25 @@ export interface MyReviewSummary {
   is_private: boolean;
 }
 
+export interface BusinessImage {
+  id?: string | null;
+  url: string;
+  is_main: boolean;
+  sort_order: number;
+}
+
+export interface BusinessOwner {
+  name?: string | null;
+  phone?: string | null;
+}
+
 export interface BusinessDetail extends BusinessListItem {
   description?: string | null;
   instagram?: string | null;
+  owner?: BusinessOwner | null;
   is_saved?: boolean;
   is_owner?: boolean;
+  images?: BusinessImage[];
   reviews: BusinessReview[];
   my_review?: MyReviewSummary | null;
 }

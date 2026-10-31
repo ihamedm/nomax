@@ -3,12 +3,15 @@
 Iranian local business & services marketplace (B2B2C), starting with Behbahan.
 
 NOMAX is implemented through the v1 scope: OTP auth + RBAC, catalog and
-PostGIS search, business onboarding, reviews, the anonymous quote flow,
-notifications, permission-scoped admin, and Docker/production deploy.
+PostGIS search, business onboarding, reviews, the anonymous quote flow with
+multi-wave owner dispatch and retries, notifications, permission-scoped admin,
+and Docker/production deploy.
 
 - **User dashboard:** <http://localhost:8080/me> (Docker) or <http://localhost:5175/me> (Vite dev)
-- **Account tabs:** home, my business, customers (incoming quote requests), quotes, and saved bookmarks.
+- **Quote flow:** <http://localhost:8080/quote/new> for the 3-step request form and <http://localhost:8080/quote/mine> for countdowns, offer comparison, acceptance and history.
+- **Account tabs:** home, my business, customers (new requests / accepted customers / archive), quotes, and saved bookmarks.
 - **Admin dashboard:** <http://localhost:8080/admin> (Docker) or <http://localhost:5175/admin> (Vite dev)
+- **Analytics dashboard:** <http://localhost:8080/admin/analytics> (General / Quotes / Market / Businesses / Map / Logs tabs; requires `stats.read`)
 - **S3 file manager:** <http://localhost:8080/admin/files> (requires `storage.manage` and Arvan S3 credentials; files can be copied as public or temporary private links)
 - **Theme:** light/dark switch in the app drawer (and admin header); the choice is saved locally.
 - Current status and next phase: [`docs/roadmap-status.md`](docs/roadmap-status.md)
@@ -24,7 +27,7 @@ notifications, permission-scoped admin, and Docker/production deploy.
 - **Storage:** ArvanCloud S3 (S3-compatible) in development and production; dashboard file manager
 - **Push:** native Android via an Iranian provider; **no web push / VAPID**
 - **Maps:** Iranian provider (Phase 2)
-- **Jobs:** Redis + arq + Postgres outbox (Phase 5)
+- **Jobs:** Redis Streams message broker + Postgres durable schedule/outbox; `app.worker` handles quote retries
 
 ## Local setup
 
@@ -90,19 +93,50 @@ live codes at <http://localhost:8080/admin/dev-otps>.
 | Area | URL | Access |
 | --- | --- | --- |
 | App home | `/` | sticky header, hero search, 3-column categories, new/most-visited carousels, ad slots, mobile bottom nav |
-| Dedicated search | `/search` | AJAX/debounced results, filters, map, trending searches (admin-managed) |
+| Dedicated search | `/search` | 450ms debounced results, autofocus, clear action, filters, map with business-bottom-card, trending searches |
 | User dashboard | `/me` | any signed-in user (profile, businesses, notifications with unread badges, analytics); owners also get `/me/reviews` for pending/private/approved reviews, owner moderation and replies |
+| Quote request | `/quote/new` | 3-step form with close action, category sheet inline search and Neshan map picker; urgent requests expire after 2 hours |
+| My quotes | `/quote/mine` | active request countdown, offer count/comparison, acceptance with phone reveal, cancel and history |
+| Owner customers | `/me/customers` | new received requests, offer sheet (price/unit/brand/message), accepted customers with contact, archive |
 | Admin dashboard | `/admin` | `admin` with assigned permissions, or `superadmin` |
+| Analytics dashboard | `/admin/analytics` | `stats.read`; general growth, quote funnel/timings, market supply-demand, sortable business performance, colored market map and paginated event logs |
 | Admin users & permissions | `/admin/users` | superadmin only |
 | Business management | `/admin/businesses` | `business.read` + create/update/delete/approve; filterable paginated table, details, add/edit/delete |
 | Review moderation | `/admin/reviews` | `review.read` / `review.moderate`; all non-private reviews with business/status filters, search, pagination and approve/decline |
+| Quote dashboard | `/admin/quotes` | `quote.read` / `quote.manage`; stats, filters, search, dispatch waves, manual owner assignment, force-next-wave, detail and cancellation |
 | Messages & announcements | `/admin/notifications` | `notification.manage`; in-app messages to all users, owners, customers or one receiver |
 | Categories & subcategories | `/admin/categories` | `category.read` / `category.manage`; shared modular data table + CRUD |
 | Tags | `/admin/tags` | `category.read` / `category.manage`; shared modular data table + CRUD |
 | Banners & ads | `/admin/ads` | `ad.manage`; shared modular data table + CRUD |
-| Content settings | `/admin/settings` | `admin.settings.manage`; trending search terms |
+| Settings | `/admin/settings` | `admin.settings.manage`; trending search terms and the quote dispatch strategy (`?tab=dispatch`) |
 | All remaining models | `/admin/data` | superadmin only; generic paginated CRUD over remaining tables |
 | Dev OTP viewer | `/admin/dev-otps` | superadmin, non-production only |
+
+The analytics dashboard reads from two purpose-built event tables:
+`search_logs` captures first-page searches (query, inferred category, result
+count) and `quote_deliveries` captures each quote/business dispatch with an
+optional `seen_at`; quote acceptance time is stored on the request. The
+dashboard reports by Tehran day/hour and never logs pagination requests as new
+demand.
+
+### Quote dispatch reliability
+
+`quote_requests` is the durable dispatch schedule (`dispatch_round`,
+`dispatch_status`, `next_dispatch_at`), `quote_deliveries` records every wave and
+`quote_dispatch_runs` audits candidate counts and fallback reasons. A request
+first targets a small batch of unique owners. If the wave produces no seen/offer
+signal it expands to new owners; seen-without-offer expansion is configurable.
+Candidates walk a ladder: exact subcategory within radius, category within
+radius, expanded radius, then category-wide fallback. Quiet hours are evaluated
+in `Asia/Tehran`.
+
+The API writes the next retry to Postgres and wakes the worker through a Redis
+Stream/sorted-set broker. The worker also scans due rows every few seconds, so a
+lost Redis message cannot strand a quote. Strategy values are editable under
+`/admin/settings?tab=dispatch`; the «راهنمای ارسال استعلام» button opens a
+one-time guide with the full flow, decision rules, variable glossary and a
+worked example. Admins can add owners manually or force the next wave from the
+quote detail modal.
 
 Every admin list is rendered through the shared
 `frontend/src/features/admin/data-table.tsx` component, so density, pagination,
@@ -197,7 +231,7 @@ every admin creation, role change, and permission change writes an
 
 ```bash
 cd backend
-python3 -m pytest -q --timeout=30     # 44 tests, SQLite + in-memory Redis
+python3 -m pytest -q --timeout=30     # 147 tests, SQLite + in-memory Redis
 ```
 
 The frontend gate is:
@@ -205,6 +239,7 @@ The frontend gate is:
 ```bash
 cd frontend
 npm run build                          # tsc --noEmit + vite build
+npm test -- --run                      # 28 Vitest tests
 ```
 
 Tests use a temporary SQLite database and an in-memory Redis fake, so no
@@ -243,7 +278,8 @@ docker-compose.yml
 ## Environment
 
 Backend variables are documented in `backend/.env.example`; frontend variables
-in `frontend/.env.example`. Nothing calls a foreign runtime service in
+in `frontend/.env.example`. `MAX_BUSINESS_IMAGES` (default `6`) controls the
+business gallery limit. Nothing calls a foreign runtime service in
 development: SMS uses the console provider and object storage uses ArvanCloud
 S3. Fill `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env`; `/ready` reports the
 S3 connectivity state and the dashboard file manager (`/admin/files`) needs the
@@ -256,6 +292,16 @@ filter, the requested crop/anchor, JPEG compression and named variants
 (`square`, `card`, `wide`, `thumb`). Files are stored under
 `uploads/businesses/{user_id}/{YYYY}/{MM}/` rather than the upload root. Admin
 file-manager uploads are stored raw and are not processed.
+
+Business galleries support up to `MAX_BUSINESS_IMAGES` photos (default **6**,
+set in `.env`/`backend/.env`). The owner wizard shows them in a 3×2 grid, can
+upload multiple files, remove photos and pick the main image; the selected main
+photo is copied to `businesses.profile_image_url` for cards/search, and the full
+ordered gallery is available on the public business page as a swipeable
+carousel; slides open a full-screen lightbox. The detail API also exposes the
+owner name and phone for the owner card, and the call action falls back to that
+number when the business phone is missing. The API exposes the configured
+limit through `/me/businesses` so the form stays in sync.
 
 > Never enable `DEV_OTP_ENABLED` in production. The router is still excluded by
 > `APP_ENV`, but the flag is a second safety belt, not a feature toggle for prod.

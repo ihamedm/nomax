@@ -1,6 +1,6 @@
 # NOMAX roadmap status
 
-Last updated: 2026-10-29
+Last updated: 2026-10-31
 
 This file is the hand-off point between agent sessions. Update it at the end of
 every working session so the next agent knows what actually runs.
@@ -241,8 +241,269 @@ GlitchTip observability compose. HTTPS is configured for the production domain.
   `admin-compact-dashboard.png`, `admin-compact-reviews.png`,
   `admin-compact-businesses.png`.
 
+## Post-v1 — Full quote ecosystem (2026-10-31)
+
+The quote flow is no longer a stub: customer, owner and superadmin now have
+complete screens on top of the existing quote/offer tables.
+
+### Customer
+
+- `/quote/new` is a three-step RTL form. Step 1 reuses the add-business
+  category/subcategory bottom sheet; step 2 reuses the Neshan map picker with
+  quote-specific copy; step 3 adds the optional 2-hour urgent toggle and notes.
+  The mobile app nav is hidden while the wizard is open, and the sticky action
+  bar remains visible.
+- `/quote/mine` (also `/me/quotes`) shows the current request with a live
+  countdown and offer count, a waiting state when no offer has arrived, and a
+  collapsible history for accepted/cancelled/expired requests.
+- `/quote/mine/:id` compares offers by business, rating, price, unit, brand and
+  message. Accepting requires confirmation, reveals only the selected business's
+  phone, expires competing offers, and notifies the owner. Active requests can be
+  cancelled; pending offers are expired and their owners are notified.
+- One active request per customer remains enforced by the partial unique index;
+  the form turns a conflict into a link to the existing request.
+
+### Owner
+
+- `/me/customers` now has three tabs:
+  - **جدید** — active matching requests without an offer from the owner's
+    businesses; decline or open the offer sheet.
+  - **مشتریان** — offers accepted by the customer, with the customer name/phone
+    and a call action.
+  - **بایگانی** — sent offers awaiting a response, declined requests, lost
+    offers, and closed requests.
+- The offer sheet collects price, unit, brand and a message; when the owner has
+  multiple matching businesses it asks which business is bidding.
+- The new tab only includes approved businesses matching category/subcategory and
+  the 10km radius. Owner list/detail responses never include the customer phone
+  before acceptance.
+
+### Superadmin
+
+- `/admin/quotes` (permission `quote.read`) provides stats — total, active,
+  urgent, accepted, acceptance rate, total/pending offers — plus status filters,
+  search, pagination, a request/offer detail modal, and cancel (`quote.manage`)
+  with an audit-log entry and owner notifications.
+- Dashboard and sidebar entries are permission-scoped.
+
+### Backend and data
+
+- `GET /quotes/requests/mine` now includes category/subcategory,
+  `offers_count` and the accepted business. `GET /quotes/requests/incoming`
+  accepts `scope=new|archive|customers` and returns counts, matching businesses
+  and the owner's offer.
+- New `GET /quotes/{id}` scopes offers to the customer, winner or admin; new
+  owner decline endpoint; offer payloads include unit and status.
+- `POST /quotes/offers` validates positive price, matching business and
+  duplicate bids. `PATCH .../accept` expires other pending offers and notifies
+  the winner.
+- Notifications are typed (`quote_request`, `quote_offer`, `quote_accepted`,
+  `quote_cancelled`) and link to the quote/customer screens.
+- Lazy expiry on reads marks overdue requests/offers expired without requiring
+  the worker.
+- Migration `0019` adds `offers.unit` and quote status/created indexes.
+- New tests in `backend/tests/test_quote_flow.py`; **147 backend tests** and
+  **28 frontend Vitest tests** pass. Browser E2E covered the full form → owner
+  offer → customer accept → phone reveal flow, plus the admin dashboard.
+
+## Post-v1 — Reliable multi-wave quote dispatch (2026-10-31)
+
+The one-shot dispatcher was replaced after two reproducible failure classes:
+UTC quiet-hour checks dropped requests created in the morning in Tehran, and an
+exact subcategory filter could exclude every approved business in the parent
+category. A third issue was that no owner was retried when the first delivery
+went unanswered.
+
+### Dispatch engine
+
+- `quote_requests` is now the durable schedule (`dispatch_round`,
+  `dispatch_status`, `last_dispatched_at`, `next_dispatch_at`).
+  `quote_deliveries` records `round`, `source` (`auto`/`manual`) and
+  `responded_at`; `quote_dispatch_runs` audits each wave.
+- Candidate ladder: exact subcategory + tight radius → category + tight radius
+  → expanded radius → category-wide fallback. Distance and subcategory fallbacks
+  are dashboard toggles.
+- Waves target unique owners (one business per owner) with configurable initial
+  and retry batch sizes, minimum target and max rounds. Contacted owners are
+  never repeated.
+- A silent wave expands. Seen-without-offer expansion is a toggle. A pending
+  offer stops auto-expansion. No-candidate requests stay `searching` and are
+  rescanned without consuming a delivery round.
+- Quiet hours are evaluated in `Asia/Tehran`. Urgent night requests prefer 24h
+  businesses, then widen instead of waiting until morning.
+- Redis Streams + a delayed sorted set wake the worker; the worker also scans
+  `next_dispatch_at` in Postgres every few seconds. Lost messages, Redis
+  restarts and worker restarts are therefore recoverable. Request ids are
+  locked separately to avoid Postgres outer-join `FOR UPDATE` errors.
+
+### Admin and customer surfaces
+
+- `/admin/settings?tab=dispatch` controls enablement, batch sizes, max rounds,
+  response windows, seen expansion, radii, fallbacks, sending hours, night
+  urgent policy and no-candidate rescan interval.
+- The header’s «راهنمای ارسال استعلام» button opens a single Persian help modal:
+  visual flow (window → candidate ladder → wave → wait → decision/retry/end),
+  five decision rules, a variable glossary using the exact settings labels, and
+  a timed worked example. It is responsive on mobile.
+- `/admin/quotes` detail now shows dispatch waves, per-owner delivery/seen/offer
+  status, source and round. `quote.manage` can add approved owners manually
+  (search + multi-select, de-duplicated, audited) or force the next wave.
+- Customer quote list/detail renders a compact status graph: ثبت → ارسال →
+  مشاهده → پیشنهاد with counts, current/max wave and next-wave countdown.
+  Owner identities stay hidden until an offer is submitted.
+- Fallback-delivered owners can open and answer the request even if their
+  subcategory/radius differs; only real deliveries are marked seen.
+
+### APIs and data
+
+- `GET /admin/settings`, `PUT /admin/settings/quote_dispatch`.
+- `GET /admin/quotes/{id}/dispatch`, `POST /admin/quotes/{id}/assign`,
+  `POST /admin/quotes/{id}/dispatch-now`.
+- `GET /quotes/requests/mine` and `GET /quotes/{id}` include an aggregate
+  `dispatch` object (counts, state, waves, timing).
+- Migration `0021` adds the dispatch columns, delivery audit fields and
+  `quote_dispatch_runs`; it backfills delivered waves and schedules previously
+  dropped active requests for immediate recovery.
+- Tests: `backend/tests/test_quote_dispatch.py` covers Tehran quiet hours,
+  subcategory fallback, urgent-night fallback, multi-wave expansion/max rounds,
+  seen-without-offer, no-candidate recovery, worker reconciliation, manual
+  assignment and settings validation — **147 backend tests**, **28 frontend
+  Vitest tests**, typecheck/build pass.
+- Screenshots: `admin-settings-dispatch.png`, `admin-quote-dispatch.png`,
+  `quote-dispatch-status.png`, `admin-dispatch-help.png`,
+  `admin-dispatch-help-variables.png`, `admin-dispatch-help-mobile.png`.
+
+## Post-v1 — Analytics dashboard and demand tracking (2026-10-31)
+
+New `/admin/analytics` page (permission `stats.read`) with three tabs. All
+timestamps are grouped in Tehran time; calendar week starts on Saturday.
+
+### General tab
+
+- Widgets: businesses (total/approved), reviews, quotes, searches, users and
+  the sum of actionable items.
+- 14-day multi-line chart: searches, quote requests, quote responses and
+  registrations.
+- Quote-funnel grouped bars for today / this week / this month / all time:
+  requests → sent to owners → seen → responded → chosen.
+- Today's 24-hour bar chart for searches and quote requests.
+- Role-composition donut with role flags and counts.
+- Pending-action chart for businesses, reviews and unanswered active quotes.
+
+### Quotes tab
+
+- Widgets for total/active/accepted quotes, offers, pending offers, seen and
+  responded requests, response/choice rates and average timing.
+- Status donut for active / accepted / cancelled / expired.
+- Timing bars for request → sent to owner, seen by owner, first offer, and
+  customer choice, with sample counts.
+- Feedback bars comparing seen / responded / chosen percentages.
+
+### Market and demand
+
+- Demand = searches + quote requests per category.
+- Top-category demand-vs-supply bars.
+- Full category table: businesses, searches, no-result searches, quotes,
+  active unanswered quotes, demand, and verbose status (`جذب فوری`,
+  `کمبود عرضه`, `متعادل`, `عرضه مازاد`, `بدون تقاضا`, `بدون عرضه`).
+- Most-wanted subcategory table with searches, quotes and businesses.
+- Most-searched keyword table with searches, average visible results and
+  no-result counts.
+- No-result keyword table with search count and related category.
+
+### Instrumentation
+
+- `search_logs` stores first-page search events only (cursor pages are not
+  logged) with query, inferred category/subcategory, result count and user.
+- `quote_deliveries` records each quote/business dispatch; `seen_at` is set when
+  the owner inbox renders the request. `quote_requests.accepted_at` records the
+  customer choice.
+- `GET /admin/analytics/overview`, `/quotes`, `/market`, `/businesses`, `/map`,
+  `/logs` and `/logs/summary` expose the aggregates; `/admin/data` also exposes
+  the two new tables.
+- Migration `0020` adds `search_logs`, `quote_deliveries` and
+  `quote_requests.accepted_at` (backfilled from accepted offers).
+- **147 backend tests** and **28 frontend Vitest tests** pass. Browser checks at
+  1440/1280/1024 widths showed no console errors or horizontal body overflow.
+
+### Business, map and event-log tabs
+
+- **Businesses**: sortable performance table with category/subcategory, views,
+  sent/accepted offers, response-rate bars, rating, negative-rate bars and
+  operational status labels. Search filters the table locally; every column
+  header toggles ascending/descending order.
+- **Map**: full-height Neshan map with green business pins, sky normal-quote
+  pins and red urgent-quote pins; layer toggles and counts, popups and a
+  city-centred initial viewport.
+- **Logs**: derived raw event stream (search, registration, business creation,
+  review, quote request/offer/seen/chosen) with type filter, 25-row pagination,
+  14-day event volume line chart and type donut.
+- New endpoints: `GET /admin/analytics/businesses`, `/map`, `/logs` and
+  `/logs/summary`, all `stats.read`.
+- The analytics page is lazy-loaded so the main customer bundle remains below
+  the 500kB warning threshold.
+- Screenshots: `analytics-businesses.png`, `analytics-map.png`,
+  `analytics-logs.png`, `analytics-logs-table.png`.
+
 Remaining deliberate gaps: Playwright e2e, whole-app frontend coverage, Persian
 slugs, and Mellipayamak KYC (external).
+
+## Post-v1 — UX polish, gallery and desktop navigation (2026-10-31)
+
+### Search and categories
+
+- Search input autofocuses on every `/search` mount (cold load and mobile) and
+  keeps a clear button.
+- Query updates are debounced for 450ms after the last keystroke. A live check
+  typed a six-character Persian query and produced one `/businesses` request.
+- The category picker has one inline search field that filters categories and
+  all subcategories together. It normalises Persian/Arabic characters and uses
+  one cached `/categories/subcategories` catalog, so filtering is local.
+
+### Business gallery
+
+- Added `business_images` (URL, sort order, main flag) and migration `0022`;
+  existing `profile_image_url` values are backfilled as the first image.
+- `MAX_BUSINESS_IMAGES` (default 6) configures the limit through `.env`; the
+  value is exposed by `/me/businesses` and consumed by the wizard.
+- Owners can upload up to six photos at once, remove photos, and choose the
+  main photo from the add/edit-business wizard. The editor is a fixed 3×2 grid.
+  `profile_image_url` follows the selected main image for cards and search.
+- Public business detail renders the gallery as a swipeable, arrow-and-dot
+  carousel. Any slide opens a full-screen lightbox with keyboard, thumbnail and
+  swipe navigation; single images also open the lightbox, and empty galleries
+  get a branded placeholder.
+
+### Business detail redesign
+
+- The detail page now leads with a clean gallery hero, followed by category,
+  name, rating, verification/24h chips and the short description. The local
+  “جزئیات کسب‌وکار” header was removed in favour of the global back action.
+- Call and Neshan directions are a clear primary/secondary button pair; saving
+  is a compact bookmark control on the hero.
+- `GET /businesses/{slug}` returns `owner: {name, phone}`. A dedicated owner
+  card shows the name, avatar initial and a tap-to-call phone chip; owners keep
+  their edit shortcut.
+- About content (description, address, Instagram) was consolidated into one
+  calm card. Reviews and map behavior are unchanged.
+
+### Navigation and form ergonomics
+
+- Desktop header now shows Home, Categories, Search and Quotes links at `md+`;
+  the floating bottom toolbar remains mobile-only.
+- Add/edit-business and quote wizards use a close (×) header action that
+  replaces history with `/me/businesses` or `/quote/mine`, instead of a back
+  arrow.
+- Wizard content has extra bottom padding so sticky action bars never cover
+  the last form fields.
+- Business pins in search map mode open a sticky bottom business card via an
+  opt-in `NeshanMap.onMarkerClick` callback.
+
+**Verification:** 149 backend tests, 28 frontend Vitest tests, typecheck and
+production build pass; migration `0022` applied. Browser checks at 1440×1000
+and 390×844 covered desktop nav, autofocus/debounce, category search, the
+six-photo 3×2 editor, the detail carousel/lightbox and owner card, map card and
+close routing.
 
 ## UI snapshots
 
@@ -273,3 +534,42 @@ Captured from the running dev build at mobile widths (430–500px):
 - [Compact admin dashboard](screenshots/admin-compact-dashboard.png)
 - [Compact admin reviews](screenshots/admin-compact-reviews.png)
 - [Compact admin businesses](screenshots/admin-compact-businesses.png)
+- [Customer quote list](screenshots/quote-customer-list.png)
+- [Customer offer comparison](screenshots/quote-customer-detail.png)
+- [Customer accepted request](screenshots/quote-customer-accepted.png)
+- [Owner new requests](screenshots/quote-owner-new.png)
+- [Owner accepted customers](screenshots/quote-owner-customers.png)
+- [Owner archive](screenshots/quote-owner-archive.png)
+- [Owner offer sheet](screenshots/quote-owner-offer-sheet.png)
+- [Quote form — step 1](screenshots/quote-form-step1.png)
+- [Quote form — step 2](screenshots/quote-form-step2.png)
+- [Quote form — step 3](screenshots/quote-form-step3.png)
+- [Admin quote dashboard](screenshots/admin-quotes.png)
+- [Analytics — general](screenshots/analytics-general.png)
+- [Analytics — general lower charts](screenshots/analytics-general-bottom.png)
+- [Analytics — quotes](screenshots/analytics-quotes.png)
+- [Analytics — market demand](screenshots/analytics-market.png)
+- [Analytics — category table](screenshots/analytics-market-table.png)
+- [Analytics — keyword tables](screenshots/analytics-market-keywords.png)
+- [Analytics — business performance](screenshots/analytics-businesses.png)
+- [Analytics — market map](screenshots/analytics-map.png)
+- [Analytics — event logs](screenshots/analytics-logs.png)
+- [Analytics — raw event table](screenshots/analytics-logs-table.png)
+- [Dispatch strategy settings](screenshots/admin-settings-dispatch.png)
+- [Dispatch help — overview and flow](screenshots/admin-dispatch-help.png)
+- [Dispatch help — variable glossary](screenshots/admin-dispatch-help-variables.png)
+- [Dispatch help — mobile](screenshots/admin-dispatch-help-mobile.png)
+- [Admin dispatch waves and manual assignment](screenshots/admin-quote-dispatch.png)
+- [Customer dispatch status graph](screenshots/quote-dispatch-status.png)
+- [Customer dispatch graph — mobile](screenshots/quote-dispatch-status-mobile.png)
+- [Search on desktop with header navigation](screenshots/search-desktop-header.png)
+- [Category picker inline search](screenshots/category-picker-search.png)
+- [Category and subcategory search results](screenshots/category-picker-search-results.png)
+- [Business photo editor](screenshots/business-gallery-editor.png)
+- [Public business gallery](screenshots/business-gallery-detail.png)
+- [Business detail hero and carousel](screenshots/business-detail-hero.png)
+- [Gallery lightbox](screenshots/business-gallery-lightbox.png)
+- [Actions and owner card](screenshots/business-detail-actions-owner.png)
+- [Business detail on desktop](screenshots/business-detail-desktop.png)
+- [Business map pin bottom card](screenshots/map-business-sheet.png)
+- [Form header close action](screenshots/form-close-header.png)

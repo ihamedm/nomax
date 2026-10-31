@@ -25,6 +25,9 @@ interface MapPickerSheetProps {
   value: Coordinates | null;
   onClose: () => void;
   onConfirm: (address: string, geo: Coordinates) => void;
+  /** Copy is overridable so the same picker can be used for quote requests. */
+  title?: string;
+  locationLabel?: string;
 }
 
 function shortAddress(value: string): string {
@@ -74,10 +77,18 @@ function LocateIcon({ className }: { className?: string }) {
   );
 }
 
-export function MapPickerSheet({ open, address, value, onClose, onConfirm }: MapPickerSheetProps) {
+export function MapPickerSheet({
+  open,
+  address,
+  value,
+  onClose,
+  onConfirm,
+  title = "موقعیت کسب‌وکار",
+  locationLabel = "موقعیت کسب‌وکار",
+}: MapPickerSheetProps) {
   const toast = useToast();
   const [query, setQuery] = useState(address);
-  const [nearLabel, setNearLabel] = useState("موقعیت کسب‌وکار");
+  const [nearLabel, setNearLabel] = useState(locationLabel);
   const [resolvedAddress, setResolvedAddress] = useState("");
   const [results, setResults] = useState<GeocodeResult[]>([]);
   const [marker, setMarker] = useState<Coordinates | null>(value);
@@ -127,7 +138,7 @@ export function MapPickerSheet({ open, address, value, onClose, onConfirm }: Map
     setError(null);
     setResolvedAddress(address.trim());
     setNearLabel(
-      address.trim() ? `نزدیک ${shortAddress(address)}` : "موقعیت کسب‌وکار",
+      address.trim() ? `نزدیک ${shortAddress(address)}` : locationLabel,
     );
     if (!value && address.trim().length >= 3) void search(address);
     // Only re-initialise when the sheet opens.
@@ -193,7 +204,7 @@ export function MapPickerSheet({ open, address, value, onClose, onConfirm }: Map
 
   function confirm() {
     if (!marker) {
-      toast("ابتدا موقعیت کسب‌وکار را روی نقشه انتخاب کنید.");
+      toast(`ابتدا ${locationLabel} را روی نقشه انتخاب کنید.`);
       return;
     }
     setConfirming(true);
@@ -227,8 +238,8 @@ export function MapPickerSheet({ open, address, value, onClose, onConfirm }: Map
         >
           <CloseIcon />
         </button>
-        <div className="pointer-events-auto mx-auto rounded-full bg-white px-6 py-3 text-base font-bold text-slate-900 shadow-lg shadow-slate-900/20">
-          موقعیت کسب‌وکار
+        <div className="pointer-events-auto mx-auto max-w-full truncate rounded-full bg-white px-6 py-3 text-base font-bold text-slate-900 shadow-lg shadow-slate-900/20">
+          {title}
         </div>
         <span aria-hidden />
       </div>

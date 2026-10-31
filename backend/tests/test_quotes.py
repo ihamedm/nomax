@@ -152,11 +152,14 @@ async def test_offer_rejected_for_expired_request(client, db_session, create_use
     assert response.status_code == 409
 
 
-async def test_dispatch_night_only_targets_24h_businesses(db_session, create_user):
+async def test_dispatch_night_only_targets_24h_businesses(
+    db_session, create_user, set_dispatch_settings
+):
     from datetime import datetime, timezone
 
     from app.services.quote_dispatcher import dispatch_quote
 
+    await set_dispatch_settings(day_start_hour=6, day_end_hour=21)
     customer = await create_user("09120000008")
     day_owner = await create_user("09120000009", UserRole.OWNER)
     night_owner = await create_user("09120000010", UserRole.OWNER)

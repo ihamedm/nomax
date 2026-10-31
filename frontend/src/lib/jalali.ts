@@ -12,9 +12,20 @@ export function formatJalali(
 ): string {
   const date = asDate(value);
   if (!date) return "";
+  const hasExplicitParts = [
+    "dateStyle",
+    "timeStyle",
+    "year",
+    "month",
+    "day",
+    "weekday",
+    "hour",
+    "minute",
+    "second",
+  ].some((key) => key in options);
   return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
     timeZone: TEHRAN_TIME_ZONE,
-    dateStyle: "medium",
+    ...(hasExplicitParts ? {} : { dateStyle: "medium" }),
     ...options,
   }).format(date);
 }

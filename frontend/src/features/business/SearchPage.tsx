@@ -75,6 +75,7 @@ export function SearchPage() {
   const trendingQuery = useApi<{ items: string[] }>(["search", "trending"], "/search/trending");
 
   const [view, setView] = useState<"list" | "map">("list");
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null);
 
   const [locating, setLocating] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -92,13 +93,24 @@ export function SearchPage() {
     if (focusParam) searchInputRef.current?.focus();
   }, [focusParam]);
 
-  // Real-time/AJAX search: debounce typing into the URL query.
+  // Opening the search page always puts the cursor in the field. A short wait
+  // lets the shell mount and the mobile keyboard target the right element.
+  useEffect(() => {
+    // The tiny delay also covers cold-load hydration.
+    const timer = window.setTimeout(() => {
+      searchInputRef.current?.focus({ preventScroll: true });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // Debounce typing into the URL query. A request is made only after the user
+  // pauses, instead of on every keystroke.
   useEffect(() => {
     const term = query.trim();
     if (term === qParam) return;
     const timer = window.setTimeout(() => {
       updateParams({ q: term || null });
-    }, 350);
+    }, 450);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, qParam]);
@@ -147,6 +159,9 @@ export function SearchPage() {
   const loadingMore = searchQuery.isFetchingNextPage;
   const hasMore = searchQuery.hasNextPage;
   const error = searchQuery.error ? errorMessage(searchQuery.error) : null;
+  const selectedBusiness = selectedBusinessId
+    ? items.find((business) => business.id === selectedBusinessId) ?? null
+    : null;
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -229,15 +244,33 @@ export function SearchPage() {
     <main className="mx-auto w-full max-w-5xl pb-10">
       <section className="sticky top-14 z-20 border-b border-slate-200 bg-slate-50/95 px-4 pb-3 pt-3 backdrop-blur">
         <form onSubmit={submitSearch} className="flex items-center gap-2">
-          <Input
-            ref={searchInputRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="جستجوی کسب‌وکار یا خدمت…"
-            aria-label="جستجوی کسب‌وکار"
-            className="h-11 flex-1 text-sm"
-            enterKeyHint="search"
-          />
+          <div className="relative min-w-0 flex-1">
+            <Input
+              ref={searchInputRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="جستجوی کسب‌وکار یا خدمت…"
+              aria-label="جستجوی کسب‌وکار"
+              className="h-11 pl-9 text-sm"
+              enterKeyHint="search"
+              inputMode="search"
+              autoFocus
+            />
+            {query && (
+              <button
+                type="button"
+                aria-label="پاک کردن جستجو"
+                onClick={() => {
+                  setQuery("");
+                  updateParams({ q: null });
+                  searchInputRef.current?.focus();
+                }}
+                className="absolute left-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                ×
+              </button>
+            )}
+          </div>
           <Button
             type="submit"
             size="sm"
@@ -340,11 +373,13 @@ export function SearchPage() {
               center={location}
               markers={mapMarkers}
               fitToMarkers
+              onMarkerClick={(marker) => setSelectedBusinessId(marker.id)}
               className="h-[55dvh]"
               zoom={13}
             />
             <p className="text-center text-[11px] text-slate-400">
-              {fa(items.length)} کسب‌وکار روی نقشه نمایش داده می‌شود.
+              {fa(items.length)} کسب‌وکار روی نقشه نمایش داده می‌شود. برای دیدن اطلاعات، روی
+              نشان هر کسب‌وکار بزنید.
             </p>
           </div>
         ) : (
@@ -403,6 +438,21 @@ export function SearchPage() {
           </>
         )}
       </section>
+
+      <BottomSheet
+        open={selectedBusiness !== null}
+        title="کسب‌وکار روی نقشه"
+        onClose={() => setSelectedBusinessId(null)}
+      >
+        {selectedBusiness && (
+          <div className="space-y-3">
+            <BusinessCard business={selectedBusiness} />
+            <p className="text-center text-[11px] text-slate-400">
+              برای دیدن جزئیات، تصاویر و نظرات روی کارت بزنید.
+            </p>
+          </div>
+        )}
+      </BottomSheet>
 
       <BottomSheet open={filterOpen} title="دسته‌بندی و فاصله" onClose={() => setFilterOpen(false)}>
         <div className="space-y-5">

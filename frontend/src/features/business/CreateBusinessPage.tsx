@@ -25,12 +25,15 @@ import { RulesSheet } from "./create/RulesSheet";
 import {
   MAX_CUSTOM_TAGS,
   MAX_INTRO,
+  MAX_PHOTOS,
   MAX_TAG_LENGTH,
   STEP_LABELS,
   TOTAL_STEPS,
   categoryPath,
+  mainPhotoUrl,
   validateStep,
   type WizardData,
+  type WizardPhoto,
 } from "./create/types";
 
 const EMPTY: WizardData = {
@@ -41,7 +44,7 @@ const EMPTY: WizardData = {
   address: "",
   is24h: false,
   geo: null,
-  pictureUrl: "",
+  photos: [],
   intro: "",
   shopPhone: "",
   instagram: "",
@@ -171,11 +174,15 @@ export default function CreateBusinessPage({
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  const mine = useApi<{ items: BusinessListItem[]; limit: number; can_create: boolean }>(
-    ["me", "businesses"],
-    "/me/businesses",
-    { enabled: mode === "create" && ready && Boolean(user) },
-  );
+  const mine = useApi<{
+    items: BusinessListItem[];
+    limit: number;
+    can_create: boolean;
+    max_images: number;
+  }>(["me", "businesses"], "/me/businesses", {
+    enabled: ready && Boolean(user),
+  });
+  const maxPhotos = mine.data?.max_images ?? MAX_PHOTOS;
 
   useEffect(() => {
     if (step === 0) setError(null);
@@ -251,6 +258,7 @@ export default function CreateBusinessPage({
     setError(null);
     try {
       const tags = Array.from(new Set([...data.standardTags, ...data.customTags]));
+      const mainImage = mainPhotoUrl(data.photos) || null;
       const saved = await api<BusinessListItem>(isEdit ? `/businesses/${businessId}` : "/businesses", {
         method: isEdit ? "PATCH" : "POST",
         body: JSON.stringify({
@@ -265,7 +273,12 @@ export default function CreateBusinessPage({
           geo_lng: data.geo?.lng ?? null,
           instagram: data.instagram.trim() || null,
           is_24h: data.is24h,
-          profile_image_url: data.pictureUrl || null,
+          profile_image_url: mainImage,
+          images: data.photos.map((photo, index) => ({
+            url: photo.url,
+            is_main: photo.isMain,
+            sort_order: index,
+          })),
           tags,
         }),
       });
@@ -284,40 +297,87 @@ export default function CreateBusinessPage({
     }
   }
 
-  async function uploadPicture(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  async function uploadPictures(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast("فقط تصویر مجاز است.");
+    if (!files.length) return;
+
+    const remaining = maxPhotos - data.photos.length;
+    if (remaining <= 0) {
+      toast(`حداکثر ${toFa(maxPhotos)} تصویر می‌توانید اضافه کنید.`);
       return;
     }
-    if (file.size > MAX_IMAGE_INPUT_BYTES) {
-      toast("حجم تصویر باید کمتر از ۱۵ مگابایت باشد.");
-      return;
+    if (files.length > remaining) {
+      toast(`فقط ${toFa(remaining)} تصویر دیگر قابل اضافه شدن است.`);
     }
+
     setUploading(true);
+    let uploaded = 0;
     try {
-      const prepared = await compressImageForUpload(file);
-      if (prepared.size > MAX_IMAGE_UPLOAD_BYTES) {
-        toast("حجم تصویر پس از بهینه‌سازی هنوز بیش از ۵ مگابایت است.");
-        return;
+      for (const file of files.slice(0, remaining)) {
+        if (!file.type.startsWith("image/")) {
+          toast("فقط تصویر مجاز است.");
+          continue;
+        }
+        if (file.size > MAX_IMAGE_INPUT_BYTES) {
+          toast("حجم تصویر باید کمتر از ۱۵ مگابایت باشد.");
+          continue;
+        }
+        try {
+          const prepared = await compressImageForUpload(file);
+          if (prepared.size > MAX_IMAGE_UPLOAD_BYTES) {
+            toast("حجم تصویر پس از بهینه‌سازی هنوز بیش از ۵ مگابایت است.");
+            continue;
+          }
+          const form = new FormData();
+          form.append("file", prepared);
+          form.append("crop", "square");
+          form.append("filter", "none");
+          const result = await api<{ url: string }>("/uploads/image", {
+            method: "POST",
+            body: form,
+          });
+          setData((current) => {
+            if (current.photos.length >= maxPhotos) return current;
+            if (current.photos.some((photo) => photo.url === result.url)) return current;
+            const nextPhoto: WizardPhoto = {
+              url: result.url,
+              isMain: current.photos.length === 0,
+            };
+            return { ...current, photos: [...current.photos, nextPhoto] };
+          });
+          uploaded += 1;
+        } catch (uploadError) {
+          toast(errorMessage(uploadError));
+        }
       }
-      const form = new FormData();
-      form.append("file", prepared);
-      form.append("crop", "square");
-      form.append("filter", "none");
-      const result = await api<{ url: string }>("/uploads/image", {
-        method: "POST",
-        body: form,
-      });
-      patch({ pictureUrl: result.url });
-      toast("تصویر بهینه‌سازی و بارگذاری شد.");
-    } catch (uploadError) {
-      toast(errorMessage(uploadError));
+      if (uploaded > 0) {
+        toast(
+          uploaded === 1
+            ? "تصویر بهینه‌سازی و بارگذاری شد."
+            : `${toFa(uploaded)} تصویر بهینه‌سازی و بارگذاری شد.`,
+        );
+      }
     } finally {
       setUploading(false);
     }
+  }
+
+  function setMainPhoto(index: number) {
+    patch({
+      photos: data.photos.map((photo, photoIndex) => ({
+        ...photo,
+        isMain: photoIndex === index,
+      })),
+    });
+  }
+
+  function removePhoto(index: number) {
+    const next = data.photos.filter((_, photoIndex) => photoIndex !== index);
+    if (next.length > 0 && !next.some((photo) => photo.isMain)) {
+      next[0] = { ...next[0], isMain: true };
+    }
+    patch({ photos: next });
   }
 
   function addCustomTag() {
@@ -363,6 +423,7 @@ export default function CreateBusinessPage({
         </div>
       </header>
 
+      <div className="flex-1 pb-24">
       {step === 0 && (
         <section className="space-y-4">
           <div>
@@ -499,49 +560,89 @@ export default function CreateBusinessPage({
 
       {step === 2 && (
         <section className="space-y-4">
-          <div>
-            <FieldLabel hint="اختیاری">تصویر کسب‌وکار</FieldLabel>
-            <div className="flex items-center gap-3">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-white">
-                {data.pictureUrl ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-slate-700">تصاویر کسب‌وکار</p>
+                <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                  تا {toFa(maxPhotos)} تصویر؛ اولین تصویر یا تصویر ستاره‌دار در کارت و
+                  جستجو نمایش داده می‌شود.
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] text-slate-500">
+                {toFa(data.photos.length)} از {toFa(maxPhotos)}
+              </span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {data.photos.map((photo, index) => (
+                <div
+                  key={`${photo.url}-${index}`}
+                  className={cn(
+                    "relative aspect-[4/3] overflow-hidden rounded-xl border-2 bg-slate-50",
+                    photo.isMain ? "border-brand-400" : "border-transparent",
+                  )}
+                >
                   <img
-                    src={data.pictureUrl}
-                    alt="تصویر کسب‌وکار"
+                    src={photo.url}
+                    alt={`تصویر ${toFa(index + 1)} کسب‌وکار`}
                     className="h-full w-full object-cover"
                   />
-                ) : (
-                  <ImageIcon className="h-6 w-6 text-slate-300" />
-                )}
-              </div>
-              <div className="flex-1 space-y-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  loading={uploading}
-                  onClick={() => fileRef.current?.click()}
-                  className="w-full"
-                >
-                  {data.pictureUrl ? "تغییر تصویر" : "انتخاب تصویر"}
-                </Button>
-                {data.pictureUrl && (
                   <button
                     type="button"
-                    onClick={() => patch({ pictureUrl: "" })}
-                    className="text-[11px] text-rose-600"
+                    aria-label="حذف تصویر"
+                    onClick={() => removePhoto(index)}
+                    className="absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-slate-900/65 text-sm text-white backdrop-blur hover:bg-rose-600"
                   >
-                    حذف تصویر
+                    ×
                   </button>
-                )}
-              </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(event) => void uploadPicture(event)}
-              />
+                  {photo.isMain ? (
+                    <span className="absolute inset-x-1 bottom-1 rounded-md bg-brand-600/90 py-1 text-center text-[9px] font-bold text-white backdrop-blur">
+                      ★ تصویر اصلی
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setMainPhoto(index)}
+                      className="absolute inset-x-1 bottom-1 rounded-md bg-slate-900/65 py-1 text-[9px] font-medium text-white backdrop-blur hover:bg-brand-600"
+                    >
+                      تعیین به‌عنوان اصلی
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {data.photos.length < maxPhotos && (
+                <button
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => fileRef.current?.click()}
+                  className="flex aspect-[4/3] flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-slate-400 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 disabled:opacity-60"
+                >
+                  {uploading ? (
+                    <Spinner />
+                  ) : (
+                    <>
+                      <ImageIcon className="h-5 w-5" />
+                      <span className="text-[11px] font-medium">افزودن تصویر</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
+
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(event) => void uploadPictures(event)}
+            />
+            <p className="mt-3 text-[10px] leading-5 text-slate-400">
+              انتخاب چند تصویر هم‌زمان ممکن است. برای تعیین تصویر اصلی، روی «تعیین به‌عنوان اصلی»
+              همان تصویر بزنید.
+            </p>
           </div>
 
           <details className="rounded-xl border border-dashed border-slate-300 bg-white">
@@ -780,13 +881,31 @@ export default function CreateBusinessPage({
                 ویرایش
               </button>
             </div>
-            {data.pictureUrl && (
-              <img
-                src={data.pictureUrl}
-                alt="تصویر کسب‌وکار"
-                className="mb-3 h-32 w-full rounded-xl object-cover"
-              />
+            {data.photos.length > 0 && (
+              <div className="mb-3">
+                <img
+                  src={mainPhotoUrl(data.photos)}
+                  alt="تصویر اصلی کسب‌وکار"
+                  className="h-32 w-full rounded-xl object-cover"
+                />
+                {data.photos.length > 1 && (
+                  <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+                    {data.photos.map((photo, index) => (
+                      <img
+                        key={`preview-${photo.url}-${index}`}
+                        src={photo.url}
+                        alt={`تصویر ${toFa(index + 1)}`}
+                        className={cn(
+                          "h-12 w-12 shrink-0 rounded-lg object-cover",
+                          photo.isMain && "ring-2 ring-brand-500",
+                        )}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
+            <PreviewRow label="تعداد تصاویر">{toFa(data.photos.length)} تصویر</PreviewRow>
             <PreviewRow label="معرفی">{data.intro}</PreviewRow>
             <PreviewRow label="اینستاگرام">
               {data.instagram ? (
@@ -852,6 +971,7 @@ export default function CreateBusinessPage({
           </div>
         </section>
       )}
+      </div>
 
       <div className="sticky bottom-0 z-30 -mx-4 mt-auto border-t border-slate-200 bg-white px-4 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-4">
         {error && (

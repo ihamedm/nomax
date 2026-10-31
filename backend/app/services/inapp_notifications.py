@@ -16,6 +16,10 @@ from app.models.user import User, UserRole
 
 TYPE_BUSINESS_APPROVED = "business_approved"
 TYPE_BUSINESS_REJECTED = "business_rejected"
+TYPE_QUOTE_REQUEST = "quote_request"
+TYPE_QUOTE_OFFER = "quote_offer"
+TYPE_QUOTE_ACCEPTED = "quote_accepted"
+TYPE_QUOTE_CANCELLED = "quote_cancelled"
 TYPE_ANNOUNCEMENT = "announcement"
 TYPE_SYSTEM = "system"
 
@@ -103,6 +107,93 @@ async def notify_business_approved(
             "business_name": business_name,
             "action": "view_business",
             "action_url": f"/businesses/{business_slug}",
+        },
+    )
+
+
+async def notify_quote_request(
+    session: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    title: str,
+    is_urgent: bool,
+) -> Notification:
+    return await notify_user(
+        session,
+        owner_id,
+        type=TYPE_QUOTE_REQUEST,
+        title="درخواست قیمت جدید",
+        body=f"«{title[:80]}»" + (" — فوری" if is_urgent else ""),
+        payload={
+            "quote_id": str(quote_id),
+            "action": "view_quote_request",
+            "action_url": "/me/customers",
+        },
+    )
+
+
+async def notify_quote_offer(
+    session: AsyncSession,
+    *,
+    customer_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    business_name: str,
+    price: float | None,
+) -> Notification:
+    price_text = f"{int(price):,} تومان" if price is not None else "قیمت نامشخص"
+    return await notify_user(
+        session,
+        customer_id,
+        type=TYPE_QUOTE_OFFER,
+        title="پیشنهاد قیمت جدید",
+        body=f"{business_name[:80]} برای درخواست شما پیشنهاد {price_text} ثبت کرد.",
+        payload={
+            "quote_id": str(quote_id),
+            "action": "view_quote",
+            "action_url": f"/quote/mine/{quote_id}",
+        },
+    )
+
+
+async def notify_quote_accepted(
+    session: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    business_name: str,
+) -> Notification:
+    return await notify_user(
+        session,
+        owner_id,
+        type=TYPE_QUOTE_ACCEPTED,
+        title="پیشنهاد شما پذیرفته شد",
+        body=f"مشتری پیشنهاد «{business_name[:80]}» را برای درخواست قیمت انتخاب کرد.",
+        payload={
+            "quote_id": str(quote_id),
+            "action": "view_customer",
+            "action_url": "/me/customers",
+        },
+    )
+
+
+async def notify_quote_cancelled(
+    session: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    title: str,
+) -> Notification:
+    return await notify_user(
+        session,
+        owner_id,
+        type=TYPE_QUOTE_CANCELLED,
+        title="درخواست قیمت لغو شد",
+        body=f"درخواست «{title[:80]}» لغو شد.",
+        payload={
+            "quote_id": str(quote_id),
+            "action": "view_quote_request",
+            "action_url": "/me/customers",
         },
     )
 

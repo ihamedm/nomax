@@ -1,5 +1,11 @@
 import type { Category, Coordinates, Subcategory } from "@/types";
 
+/** A gallery item while it is being edited in the wizard. */
+export interface WizardPhoto {
+  url: string;
+  isMain: boolean;
+}
+
 /** Shared state for the five-step "add business" wizard. */
 export interface WizardData {
   title: string;
@@ -9,7 +15,7 @@ export interface WizardData {
   address: string;
   is24h: boolean;
   geo: Coordinates | null;
-  pictureUrl: string;
+  photos: WizardPhoto[];
   intro: string;
   shopPhone: string;
   instagram: string;
@@ -31,6 +37,11 @@ export const TOTAL_STEPS = STEP_LABELS.length;
 export const MAX_INTRO = 120;
 export const MAX_CUSTOM_TAGS = 4;
 export const MAX_TAG_LENGTH = 30;
+export const MAX_PHOTOS = 6;
+
+export function mainPhotoUrl(photos: WizardPhoto[]): string {
+  return photos.find((photo) => photo.isMain)?.url ?? photos[0]?.url ?? "";
+}
 
 export const BEHBAHAN_CENTER: Coordinates = { lat: 30.5959, lng: 50.2417 };
 

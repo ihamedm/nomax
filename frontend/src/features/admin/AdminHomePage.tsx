@@ -8,6 +8,13 @@ import { useAuth } from "@/stores/auth";
 
 const CARDS = [
   {
+    to: "/admin/analytics",
+    title: "تحلیل و آمار",
+    description: "رشد روزانه، قیف استعلام، ترکیب کاربران و تحلیل عرضه و تقاضا.",
+    superadminOnly: false,
+    permission: "stats.read",
+  },
+  {
     to: "/admin/businesses",
     title: "کسب‌وکارها",
     description: "بررسی، تأیید یا رد کسب‌وکارهای در انتظار.",
@@ -20,6 +27,13 @@ const CARDS = [
     description: "تأیید یا رد نظرات کاربران و محاسبه امتیاز کسب‌وکار.",
     superadminOnly: false,
     permission: "review.read",
+  },
+  {
+    to: "/admin/quotes",
+    title: "استعلام‌های قیمت",
+    description: "پایش درخواست‌ها، پیشنهادها، نرخ تبدیل و لغو درخواست‌های فعال.",
+    superadminOnly: false,
+    permission: "quote.read",
   },
   {
     to: "/admin/categories",

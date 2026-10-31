@@ -3,7 +3,7 @@ from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, Uuid
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -36,8 +36,23 @@ class QuoteRequest(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_offer_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     phone_revealed_to: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Operational state of the dispatch engine. `dispatch_round` counts every
+    # wave that actually reached at least one business, including manual waves.
+    dispatch_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    dispatch_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="pending", server_default="pending", index=True
+    )
+    last_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_dispatch_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    customer: Mapped["User"] = relationship(lazy="joined", foreign_keys=[customer_id])
+    category: Mapped["Category"] = relationship(lazy="joined")
+    subcategory: Mapped["Subcategory | None"] = relationship(lazy="joined")
 
 
 class Offer(Base):
@@ -48,9 +63,12 @@ class Offer(Base):
     request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quote_requests.id", ondelete="CASCADE"), nullable=False, index=True)
     business_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
     price: Mapped[float | None] = mapped_column(Numeric(12, 0), nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(30), nullable=True)
     brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    business: Mapped["Business"] = relationship(lazy="joined")

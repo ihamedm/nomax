@@ -5,7 +5,7 @@ import CreateBusinessPage from "@/features/business/CreateBusinessPage";
 import type { WizardData } from "@/features/business/create/types";
 import { errorMessage } from "@/lib/api";
 import { useApi } from "@/lib/query";
-import type { Category, Subcategory } from "@/types";
+import type { BusinessImage, Category, Subcategory } from "@/types";
 
 interface EditableBusiness {
   id: string;
@@ -18,6 +18,7 @@ interface EditableBusiness {
   instagram?: string | null;
   is_24h: boolean;
   profile_image_url?: string | null;
+  images?: BusinessImage[];
   category: { id: number; slug: string; name: string; icon: string } | null;
   subcategory:
     | {
@@ -79,6 +80,15 @@ export default function MeBusinessEditPage() {
 
   const standard = new Set(subcategory?.standard_tags ?? []);
   const tags = business.tags ?? [];
+  const photos = (business.images?.length
+    ? [...business.images].sort((a, b) => a.sort_order - b.sort_order)
+    : business.profile_image_url
+      ? [{ url: business.profile_image_url, is_main: true, sort_order: 0 }]
+      : []
+  ).map((image) => ({ url: image.url, isMain: image.is_main }));
+  if (photos.length > 0 && !photos.some((photo) => photo.isMain)) {
+    photos[0] = { ...photos[0], isMain: true };
+  }
   const initial: WizardData = {
     title: business.name,
     description: business.description ?? "",
@@ -87,7 +97,7 @@ export default function MeBusinessEditPage() {
     address: business.address,
     is24h: business.is_24h,
     geo: business.geo,
-    pictureUrl: business.profile_image_url ?? "",
+    photos,
     intro: business.short_description ?? "",
     shopPhone: business.phone_business ?? "",
     instagram: business.instagram ?? "",

@@ -83,7 +83,7 @@ const BOTTOM_NAV = [
   { to: "/", label: "خانه", icon: HomeIcon, end: true },
   { to: "/categories", label: "دسته‌ها", icon: GridIcon, end: false },
   { to: "/search", label: "جستجو", icon: SearchIcon, end: false },
-  { to: "/quote/new", label: "درخواست", icon: QuoteIcon, end: false },
+  { to: "/quote", label: "استعلام‌ها", icon: QuoteIcon, end: false },
   { to: "/me", label: "حساب", icon: UserIcon, end: false },
 ];
 
@@ -94,6 +94,8 @@ const ACCOUNT_BOTTOM_NAV = [
   { to: "/me/quotes", label: "درخواست‌ها", icon: QuotesIcon, end: false },
   { to: "/me/saved", label: "ذخیره‌شده", icon: BookmarkIcon, end: false },
 ];
+
+const DESKTOP_NAV = BOTTOM_NAV.filter((item) => item.to !== "/me");
 
 const DRAWER_LINKS = [
   { to: "/", label: "خانه" },
@@ -126,7 +128,17 @@ export function AppLayout() {
   const isBusinessWizard =
     location.pathname === "/businesses/new" ||
     /^\/businesses\/[^/]+\/edit$/.test(location.pathname);
+  const isQuoteWizard = location.pathname === "/quote/new";
+  const isFormFlow = isBusinessWizard || isQuoteWizard;
+  const isFullscreenFlow = isFormFlow;
   const bottomItems = isAccount ? ACCOUNT_BOTTOM_NAV : BOTTOM_NAV;
+
+  function closeForm() {
+    // Close to the section that owns the form instead of walking browser
+    // history, which could put the user back inside a half-filled wizard.
+    const destination = isQuoteWizard ? "/quote/mine" : "/me/businesses";
+    navigate(destination, { replace: true });
+  }
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -159,13 +171,25 @@ export function AppLayout() {
     <div
       className={cn(
         "min-h-[100dvh] bg-slate-50",
-        isBusinessWizard ? "pb-0" : "pb-24 md:pb-0",
+        isFullscreenFlow ? "pb-0" : "pb-24 md:pb-0",
       )}
     >
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-3 px-4">
           <div className="flex items-center gap-2">
-            {isHome ? (
+            {isFormFlow ? (
+              <button
+                type="button"
+                aria-label="بستن فرم"
+                title="بستن فرم"
+                onClick={closeForm}
+                className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100"
+              >
+                <Icon>
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </Icon>
+              </button>
+            ) : isHome ? (
               <button
                 type="button"
                 aria-label="باز کردن منو"
@@ -197,6 +221,32 @@ export function AppLayout() {
             </Link>
           </div>
 
+          {!isFormFlow && (
+            <nav
+              aria-label="ناوبری اصلی"
+              className="hidden min-w-0 flex-1 items-center justify-center gap-0.5 md:flex"
+            >
+              {DESKTOP_NAV.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-medium transition-colors",
+                      isActive
+                        ? "bg-brand-50 text-brand-700"
+                        : "text-slate-500 hover:bg-slate-50 hover:text-slate-900",
+                    )
+                  }
+                >
+                  <item.icon />
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </nav>
+          )}
+
           <Link
             to={user ? "/me" : "/login"}
             aria-label={
@@ -216,7 +266,7 @@ export function AppLayout() {
 
       <Outlet />
 
-      {!isBusinessWizard && (
+      {!isFullscreenFlow && (
         <nav className="fixed inset-x-4 bottom-4 z-30 md:hidden">
           <div className="mx-auto flex max-w-md items-center justify-around rounded-2xl border border-slate-200 bg-white/95 px-2 py-2 shadow-xl shadow-slate-900/10 backdrop-blur">
             {bottomItems.map((item) => (

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button, Spinner } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icons";
 import { RatingStars } from "@/components/ui/stars";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
@@ -17,29 +18,75 @@ import { LoginRequiredSheet } from "@/features/auth/LoginRequiredSheet";
 import { NeshanMap, type MapMarker } from "@/features/map/NeshanMap";
 import { ReviewSheet } from "@/features/reviews/ReviewSheet";
 import type { BusinessDetail } from "@/types";
+import { BusinessGallery } from "./detail/BusinessGallery";
 
-function ActionLink({
-  href,
-  children,
-  tone = "outline",
-}: {
-  href: string;
-  children: ReactNode;
-  tone?: "outline" | "primary";
-}) {
+function PhoneIcon({ className }: { className?: string }) {
   return (
-    <a
-      href={href}
-      target={href.startsWith("tel:") ? undefined : "_blank"}
-      rel={href.startsWith("tel:") ? undefined : "noreferrer"}
-      className={
-        tone === "primary"
-          ? "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 text-sm font-medium text-white"
-          : "inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700"
-      }
+    <Icon className={className}>
+      <path d="M5 4h4l2 5-2.5 1.5a12 12 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" />
+    </Icon>
+  );
+}
+
+function NavigationIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="m3 11 18-8-8 18-2-8-8-2Z" />
+    </Icon>
+  );
+}
+
+function PinIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </Icon>
+  );
+}
+
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </Icon>
+  );
+}
+
+function ShieldIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M12 3 4.5 6v5c0 4.5 3.2 8.2 7.5 10 4.3-1.8 7.5-5.5 7.5-10V6L12 3Z" />
+      <path d="m9 12 2 2 4-4" />
+    </Icon>
+  );
+}
+
+function InstagramIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M17.5 6.5h.01" />
+    </Icon>
+  );
+}
+
+function BookmarkIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-5 w-5"
+      aria-hidden
     >
-      {children}
-    </a>
+      <path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-4-6 4z" />
+    </svg>
   );
 }
 
@@ -48,6 +95,11 @@ function myReviewBadge(review: NonNullable<BusinessDetail["my_review"]>) {
   if (review.status === "approved") return { label: "نظر شما منتشر شد", tone: "brand" as const };
   if (review.status === "rejected") return { label: "نظر رد شد", tone: "rose" as const };
   return { label: "در انتظار تأیید", tone: "amber" as const };
+}
+
+function telHref(phone: string | null | undefined) {
+  if (!phone) return null;
+  return `tel:${phone.startsWith("0") ? phone : `0${phone}`}`;
 }
 
 export function BusinessDetailPage() {
@@ -156,25 +208,27 @@ export function BusinessDetailPage() {
     ];
   }, [business]);
 
+  const photos = useMemo(() => {
+    if (!business) return [];
+    if (business.images?.length) {
+      return [...business.images].sort((a, b) => a.sort_order - b.sort_order);
+    }
+    return business.profile_image_url
+      ? [{ url: business.profile_image_url, is_main: true, sort_order: 0 }]
+      : [];
+  }, [business]);
+
   const instagramHandle = business?.instagram?.replace(/^@/, "").replace(/[^A-Za-z0-9._]/g, "");
-  const callNumber = business?.phone_business
-    ? `tel:0${business.phone_business.replace(/^0/, "")}`
-    : null;
+  const ownerName = business?.owner?.name?.trim() || "مالک نومکس";
+  const ownerPhone = business?.owner?.phone?.trim() || null;
+  const displayPhone = business?.phone_business?.trim() || ownerPhone;
+  const callNumber = telHref(displayPhone);
   const neshanLink = business?.geo
     ? `https://neshan.org/maps/@${business.geo.lat},${business.geo.lng},16z`
     : null;
 
   return (
-    <main className="mx-auto min-h-[100dvh] w-full max-w-xl pb-16">
-      <header className="sticky top-14 z-20 flex items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
-        <p className="text-sm font-bold text-slate-800">جزئیات کسب‌وکار</p>
-        {business?.is_owner && (
-          <Link to={`/businesses/${business.id}/edit`} className="text-xs text-brand-600">
-            ویرایش اطلاعات
-          </Link>
-        )}
-      </header>
-
+    <main className="mx-auto min-h-[100dvh] w-full max-w-3xl pb-16">
       {loading && (
         <div className="flex justify-center py-24 text-brand-600">
           <Spinner />
@@ -182,7 +236,7 @@ export function BusinessDetailPage() {
       )}
 
       {!loading && error && (
-        <div className="px-4 py-10">
+        <div className="px-4 py-10 sm:px-6">
           <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center text-sm text-rose-700">
             <p>{error}</p>
             <Link to="/search" className="mt-4 inline-block">
@@ -195,7 +249,7 @@ export function BusinessDetailPage() {
       )}
 
       {!loading && !error && business && (
-        <div className="space-y-4 px-4 pt-4">
+        <div className="space-y-3 px-4 pb-2 pt-4 sm:px-6">
           {business.status === "rejected" && (
             <section
               role="alert"
@@ -243,116 +297,189 @@ export function BusinessDetailPage() {
             </section>
           )}
 
-          <section className="overflow-hidden rounded-3xl bg-gradient-to-l from-brand-600 to-brand-500 p-5 text-white">
-            <div className="flex items-start gap-4">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/15 text-4xl">
-                {business.profile_image_url ? (
-                  <img
-                    src={business.profile_image_url}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span aria-hidden>{business.category?.icon ?? "🏪"}</span>
+          <section className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_20px_60px_-40px_rgba(15,23,42,0.45)]">
+            <div className="relative">
+              <BusinessGallery
+                name={business.name}
+                images={photos}
+                icon={business.category?.icon}
+              />
+              <button
+                type="button"
+                aria-label={saved ? "حذف از ذخیره‌شده‌ها" : "ذخیره کسب‌وکار"}
+                aria-pressed={saved}
+                title={saved ? "ذخیره شده" : "ذخیره کسب‌وکار"}
+                onClick={requestSave}
+                disabled={saveMutation.isPending}
+                className={cn(
+                  "absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border shadow-sm backdrop-blur transition disabled:opacity-60",
+                  saved
+                    ? "border-brand-600 bg-brand-600 text-white"
+                    : "border-white/60 bg-white/90 text-slate-700 hover:border-brand-200 hover:text-brand-700",
                 )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <h1 className="text-xl font-black leading-8">{business.name}</h1>
-                <p className="mt-1 text-xs text-white/75">
-                  {business.category?.name}
-                  {business.subcategory ? ` · ${business.subcategory.name}` : ""}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {business.status === "rejected" && (
-                    <span className="rounded-full bg-rose-500/40 px-2.5 py-1 text-[11px] text-white">
-                      ردشده
-                    </span>
-                  )}
-                  {business.status === "pending" && (
-                    <span className="rounded-full bg-amber-300/25 px-2.5 py-1 text-[11px] text-amber-100">
-                      در انتظار تأیید
-                    </span>
-                  )}
-                  {business.is_verified && (
-                    <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px]">تأیید شده</span>
-                  )}
-                  {business.is_24h && (
-                    <span className="rounded-full bg-amber-300/20 px-2.5 py-1 text-[11px] text-amber-100">
-                      ۲۴ ساعته
-                    </span>
-                  )}
-                </div>
-              </div>
+              >
+                <BookmarkIcon filled={saved} />
+              </button>
             </div>
 
-            <p className="mt-4 text-sm leading-6 text-white/85">{business.short_description}</p>
-
-            <div className="mt-4 flex items-center justify-between rounded-2xl bg-white/10 px-4 py-3">
-              <div>
-                <p className="text-[11px] text-white/60">امتیاز کاربران</p>
-                <p className="mt-1 text-lg font-black">
-                  ★ {formatRating(business.rating_avg)}
-                  <span className="mr-1 text-xs font-normal text-white/60">
-                    از {fa(business.rating_count)} نظر
-                  </span>
+            <div className="px-5 pb-5 pt-4">
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 text-[11px] font-medium text-slate-400">
+                  {business.category?.icon} {business.category?.name}
+                  {business.subcategory ? ` · ${business.subcategory.name}` : ""}
                 </p>
+                {business.is_owner && (
+                  <Link
+                    to={`/businesses/${business.id}/edit`}
+                    className="shrink-0 text-[11px] font-bold text-brand-600 hover:text-brand-700"
+                  >
+                    ویرایش پروفایل
+                  </Link>
+                )}
               </div>
-              <Badge tone="brand" className="bg-white/15 text-white">
-                {business.rating_count > 0 ? "امتیاز ثبت‌شده" : "بدون نظر"}
-              </Badge>
+
+              <h1 className="mt-1.5 text-2xl font-black leading-9 tracking-tight text-slate-900 sm:text-3xl sm:leading-10">
+                {business.name}
+              </h1>
+
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 font-bold text-slate-800">
+                  <span className="text-amber-500" aria-hidden>
+                    ★
+                  </span>
+                  {business.rating_count > 0
+                    ? formatRating(business.rating_avg)
+                    : "بدون امتیاز"}
+                </span>
+                <span className="h-3 w-px bg-slate-200" aria-hidden />
+                <span className="text-slate-400">
+                  {business.rating_count > 0
+                    ? `${fa(business.rating_count)} نظر`
+                    : "اولین نظر را ثبت کنید"}
+                </span>
+                {business.is_verified && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">
+                    <ShieldIcon className="h-3 w-3" />
+                    تأییدشده
+                  </span>
+                )}
+                {business.is_24h && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                    <ClockIcon className="h-3 w-3" />
+                    ۲۴ ساعته
+                  </span>
+                )}
+              </div>
+
+              {business.short_description && (
+                <p className="mt-3 text-sm leading-7 text-slate-600">
+                  {business.short_description}
+                </p>
+              )}
             </div>
           </section>
 
-          <section className="grid grid-cols-2 gap-2">
+          <section className="grid grid-cols-2 gap-2.5" aria-label="اقدام‌های کسب‌وکار">
             {callNumber ? (
-              <ActionLink href={callNumber} tone="primary">
-                📞 تماس با کسب‌وکار
-              </ActionLink>
+              <a
+                href={callNumber}
+                className="flex min-h-16 items-center gap-2.5 rounded-2xl bg-brand-600 px-3.5 text-white shadow-[0_12px_30px_-20px_rgba(11,138,92,0.9)] transition hover:bg-brand-700"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/15">
+                  <PhoneIcon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 leading-tight">
+                  <span className="block text-[13px] font-bold">
+                    {business.phone_business ? "تماس با کسب‌وکار" : "تماس با مالک"}
+                  </span>
+                  <span dir="ltr" className="mt-1 block text-[10px] text-white/70">
+                    {formatPhone(displayPhone ?? "")}
+                  </span>
+                </span>
+              </a>
             ) : (
-              <span className="inline-flex h-11 items-center justify-center rounded-xl bg-slate-100 text-xs text-slate-400">
+              <span className="flex min-h-16 items-center justify-center rounded-2xl bg-slate-100 px-3 text-center text-[11px] text-slate-400">
                 شماره تماس ثبت نشده
               </span>
             )}
+
             {neshanLink ? (
-              <ActionLink href={neshanLink}>🧭 مسیریابی در نشان</ActionLink>
+              <a
+                href={neshanLink}
+                target="_blank"
+                rel="noreferrer"
+                className="flex min-h-16 items-center gap-2.5 rounded-2xl border border-slate-200 bg-white px-3.5 text-slate-800 transition hover:border-brand-200 hover:bg-brand-50/30"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                  <NavigationIcon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 leading-tight">
+                  <span className="block text-[13px] font-bold">مسیریابی</span>
+                  <span className="mt-1 block text-[10px] text-slate-400">در نشان</span>
+                </span>
+              </a>
             ) : (
-              <span className="inline-flex h-11 items-center justify-center rounded-xl bg-slate-100 text-xs text-slate-400">
+              <span className="flex min-h-16 items-center justify-center rounded-2xl bg-slate-100 px-3 text-center text-[11px] text-slate-400">
                 موقعیت ثبت نشده
               </span>
             )}
-            {instagramHandle && (
-              <ActionLink href={`https://instagram.com/${instagramHandle}`}>
-                اینستاگرام @{instagramHandle}
-              </ActionLink>
-            )}
-            {business.phone_business && (
-              <div className="flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-600">
-                <span dir="ltr">{formatPhone(business.phone_business)}</span>
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={requestSave}
-              disabled={saveMutation.isPending}
-              className={cn(
-                "inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-medium transition-colors disabled:opacity-60",
-                saved
-                  ? "border-brand-200 bg-brand-50 text-brand-700"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-brand-300",
-              )}
-            >
-              🔖 {saved ? "ذخیره شد" : "ذخیره کسب‌وکار"}
-            </button>
           </section>
 
+          {business.owner && (
+            <section className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-50 text-base font-black text-brand-700">
+                {Array.from(ownerName)[0] || "ن"}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-slate-400">مالک کسب‌وکار</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-slate-900">{ownerName}</p>
+              </div>
+              {ownerPhone && (
+                <a
+                  href={telHref(ownerPhone) ?? undefined}
+                  aria-label={`تماس با ${ownerName}`}
+                  className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
+                >
+                  <PhoneIcon className="h-3.5 w-3.5" />
+                  <span dir="ltr">{formatPhone(ownerPhone)}</span>
+                </a>
+              )}
+            </section>
+          )}
+
           <section className="rounded-2xl border border-slate-200 bg-white p-5">
-            <h2 className="text-sm font-bold text-slate-900">درباره کسب‌وکار</h2>
-            <p className="mt-2 text-xs leading-7 text-slate-600">
-              {business.description || business.short_description}
-            </p>
-            <div className="mt-4 rounded-xl bg-slate-50 p-3">
-              <p className="text-[11px] text-slate-400">آدرس</p>
-              <p className="mt-1 text-xs leading-6 text-slate-700">{business.address}</p>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-bold text-slate-900">درباره کسب‌وکار</h2>
+              {instagramHandle && (
+                <a
+                  href={`https://instagram.com/${instagramHandle}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:text-brand-700"
+                >
+                  <InstagramIcon className="h-3.5 w-3.5" />
+                  اینستاگرام
+                </a>
+              )}
+            </div>
+            {business.description && (
+              <p className="mt-2 whitespace-pre-line text-xs leading-7 text-slate-600">
+                {business.description}
+              </p>
+            )}
+            <div
+              className={cn(
+                "flex items-start gap-3",
+                business.description ? "mt-4 border-t border-slate-100 pt-4" : "mt-4",
+              )}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
+                <PinIcon className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400">آدرس</p>
+                <p className="mt-0.5 text-xs leading-6 text-slate-700">{business.address}</p>
+              </div>
             </div>
           </section>
 

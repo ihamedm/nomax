@@ -141,6 +141,20 @@ const MESSAGES: Record<string, string> = {
   review_already_exists: "شما قبلاً برای این کسب‌وکار نظر ثبت کرده‌اید.",
   cannot_review_own_business: "شما نمی‌توانید برای کسب‌وکار خود نظر ثبت کنید.",
   review_too_long: "متن نظر حداکثر ۳۰۰ نویسه است.",
+  active_quote_exists: "شما یک درخواست فعال دارید و تا بسته شدن آن امکان ثبت درخواست جدید نیست.",
+  offer_already_submitted: "برای این درخواست قبلاً پیشنهاد ثبت کرده‌اید.",
+  offer_not_pending: "این پیشنهاد دیگر قابل انتخاب نیست.",
+  quote_not_active: "این درخواست دیگر فعال نیست.",
+  quote_not_cancellable: "این درخواست در وضعیت فعلی قابل لغو نیست.",
+  quote_expired: "مهلت این درخواست تمام شده است.",
+  invalid_price: "مبلغ پیشنهادی معتبر نیست.",
+  title_too_short: "شرح درخواست باید حداقل ۳ نویسه باشد.",
+  address_too_short: "آدرس درخواست را کامل‌تر وارد کنید.",
+  business_category_mismatch: "کسب‌وکار انتخابی با دسته‌بندی این درخواست هم‌خوان نیست.",
+  too_many_images: "تعداد تصاویر از حد مجاز بیشتر است.",
+  image_url_too_long: "نشانی تصویر بیش از حد طولانی است.",
+  images_must_be_a_list: "فهرست تصاویر معتبر نیست.",
+  invalid_image: "یکی از تصاویر معتبر نیست.",
 };
 
 export function errorMessage(error: unknown): string {

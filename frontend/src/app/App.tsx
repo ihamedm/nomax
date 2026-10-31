@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 
-import { Button } from "@/components/ui/button";
+import { Button, Spinner } from "@/components/ui/button";
 import { AppLayout } from "@/app/AppLayout";
 import { AdminHomePage } from "@/features/admin/AdminHomePage";
 import { AdminLayout } from "@/features/admin/AdminLayout";
@@ -26,6 +26,7 @@ import StaticPage from "@/features/static/StaticPage";
 import CategoriesPage from "@/features/category/CategoriesPage";
 import QuoteNewPage from "@/features/quote/QuoteNewPage";
 import QuoteMinePage from "@/features/quote/QuoteMinePage";
+import QuoteDetailPage from "@/features/quote/QuoteDetailPage";
 import AdminBusinessesPage from "@/features/admin/AdminBusinessesPage";
 import AdminReviewsPage from "@/features/admin/AdminReviewsPage";
 import AdminCategoriesPage from "@/features/admin/AdminCategoriesPage";
@@ -35,8 +36,13 @@ import AdminSettingsPage from "@/features/admin/AdminSettingsPage";
 import AdminDataPage from "@/features/admin/AdminDataPage";
 import AdminFilesPage from "@/features/admin/AdminFilesPage";
 import AdminNotificationsPage from "@/features/admin/AdminNotificationsPage";
+import AdminQuotesPage from "@/features/admin/AdminQuotesPage";
 import { HomePage } from "@/features/home/HomePage";
 import { useAuth } from "@/stores/auth";
+
+const AdminAnalyticsPage = lazy(
+  () => import("@/features/admin/AdminAnalyticsPage"),
+);
 
 function SessionBootstrap() {
   const ready = useAuth((state) => state.ready);
@@ -79,6 +85,7 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/categories" element={<CategoriesPage />} />
+          <Route path="/quote" element={<Navigate to="/quote/mine" replace />} />
           <Route
             path="/quote/new"
             element={
@@ -92,6 +99,14 @@ export function App() {
             element={
               <RequireAuth>
                 <QuoteMinePage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/quote/mine/:id"
+            element={
+              <RequireAuth>
+                <QuoteDetailPage />
               </RequireAuth>
             }
           />
@@ -131,6 +146,21 @@ export function App() {
           <Route path="businesses" element={<AdminBusinessesPage />} />
           <Route path="notifications" element={<AdminNotificationsPage />} />
           <Route path="reviews" element={<AdminReviewsPage />} />
+          <Route path="quotes" element={<AdminQuotesPage />} />
+          <Route
+            path="analytics"
+            element={
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[40dvh] items-center justify-center text-brand-600">
+                    <Spinner />
+                  </div>
+                }
+              >
+                <AdminAnalyticsPage />
+              </Suspense>
+            }
+          />
           <Route path="categories" element={<AdminCategoriesPage />} />
           <Route path="tags" element={<AdminTagsPage />} />
           <Route path="ads" element={<AdminAdsPage />} />

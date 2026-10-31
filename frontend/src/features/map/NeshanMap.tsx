@@ -12,6 +12,10 @@ export interface MapMarker {
   lng: number;
   title?: string;
   subtitle?: string;
+  color?: string;
+  zIndexOffset?: number;
+  offsetX?: number;
+  offsetY?: number;
 }
 
 interface NeshanMapProps {
@@ -22,6 +26,7 @@ interface NeshanMapProps {
   interactive?: boolean;
   fitToMarkers?: boolean;
   onMapClick?: (coords: Coordinates) => void;
+  onMarkerClick?: (marker: MapMarker) => void;
   pickerMarker?: Coordinates | null;
   onPickerMove?: (coords: Coordinates) => void;
 }
@@ -29,12 +34,25 @@ interface NeshanMapProps {
 // The Neshan SDK is a UMD Leaflet build; its types live outside our bundle.
 type Leaflet = Record<string, any>;
 
-function markerIcon(L: Leaflet, picker = false) {
+function markerIcon(
+  L: Leaflet,
+  picker = false,
+  color?: string,
+  offsetX = 0,
+  offsetY = 0,
+) {
   // The picker pin has a circular head plus a tail, so it needs a larger
   // canvas and its anchor sits at the tip of the tail.
+  const styles = [
+    color ? `background:${color}` : "",
+    offsetX || offsetY ? `position:relative;left:${offsetX}px;top:${offsetY}px` : "",
+  ]
+    .filter(Boolean)
+    .join(";");
+  const colorStyle = styles ? ` style="${styles}"` : "";
   return L.divIcon({
     className: "",
-    html: `<span class="nomax-map-pin${picker ? " nomax-map-pin--picker" : ""}"></span>`,
+    html: `<span class="nomax-map-pin${picker ? " nomax-map-pin--picker" : ""}"${colorStyle}></span>`,
     iconSize: picker ? [46, 58] : [24, 24],
     iconAnchor: picker ? [23, 56] : [12, 12],
     popupAnchor: [0, -14],
@@ -68,6 +86,7 @@ export function NeshanMap({
   interactive = true,
   fitToMarkers = false,
   onMapClick,
+  onMarkerClick,
   pickerMarker,
   onPickerMove,
 }: NeshanMapProps) {
@@ -76,11 +95,13 @@ export function NeshanMap({
   const layerRef = useRef<any>(null);
   const pickerRef = useRef<any>(null);
   const clickRef = useRef(onMapClick);
+  const markerClickRef = useRef(onMarkerClick);
   const pickerMoveRef = useRef(onPickerMove);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   clickRef.current = onMapClick;
+  markerClickRef.current = onMarkerClick;
   pickerMoveRef.current = onPickerMove;
 
   const key = getNeshanKey();
@@ -148,6 +169,21 @@ export function NeshanMap({
     mapRef.current.setView([center.lat, center.lng], zoom);
   }, [center.lat, center.lng, zoom, ready]);
 
+  // The map often mounts inside tabs/sheets whose width settles one frame
+  // later. Without invalidateSize the tile pane can stay at the old size.
+  useEffect(() => {
+    if (!ready || !mapRef.current || !containerRef.current) return;
+    const map = mapRef.current;
+    const node = containerRef.current;
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(node);
+    const frame = window.requestAnimationFrame(() => map.invalidateSize());
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [ready]);
+
   useEffect(() => {
     if (!ready || !layerRef.current || !mapRef.current) return;
     const L = (window as Window & { L?: Leaflet }).L;
@@ -158,14 +194,20 @@ export function NeshanMap({
 
     for (const marker of markers) {
       const instance = L.marker([marker.lat, marker.lng], {
-        icon: markerIcon(L),
+        icon: markerIcon(L, false, marker.color, marker.offsetX, marker.offsetY),
         title: marker.title ?? "",
+        zIndexOffset: marker.zIndexOffset ?? 0,
       });
-      instance.bindPopup(popupElement(marker));
+      if (markerClickRef.current) {
+        instance.on("click", () => markerClickRef.current?.(marker));
+      } else {
+        instance.bindPopup(popupElement(marker));
+      }
       instance.addTo(layer);
     }
 
     if (fitToMarkers && markers.length > 0) {
+      mapRef.current.invalidateSize();
       if (markers.length === 1) {
         mapRef.current.setView([markers[0].lat, markers[0].lng], 15);
       } else {

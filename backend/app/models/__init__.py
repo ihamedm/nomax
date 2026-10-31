@@ -1,5 +1,5 @@
 from app.models.admin import AuditLog
-from app.models.business import Business, BusinessStatus
+from app.models.business import Business, BusinessImage, BusinessStatus
 from app.models.review import Review
 from app.models.quote import QuoteRequest, Offer
 from app.models.job import ScheduledJob
@@ -13,11 +13,13 @@ from app.models.category import Category, Subcategory
 from app.models.sms import SmsLog
 from app.models.setting import AppSetting
 from app.models.bookmark import Bookmark
+from app.models.analytics import QuoteDelivery, QuoteDispatchRun, SearchLog
 from app.models.user import User, UserRole
 
 __all__ = [
     "AuditLog",
     "Business",
+    "BusinessImage",
     "BusinessStatus",
     "Category",
     "Subcategory",
@@ -39,4 +41,7 @@ __all__ = [
     "ContactMessage",
     "AppSetting",
     "Bookmark",
+    "SearchLog",
+    "QuoteDelivery",
+    "QuoteDispatchRun",
 ]

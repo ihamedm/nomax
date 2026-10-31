@@ -1,6 +1,9 @@
 import pytest
+import sqlalchemy as sa
 
 from app.core.security import create_access_token
+from app.db.seed import seed_categories
+from app.models.category import Category
 from app.models.user import UserRole
 
 
@@ -38,11 +41,16 @@ async def test_audit_log_requires_permission(client, create_user):
     assert response.status_code == 200
 
 
-async def test_quote_response_does_not_leak_customer_phone(client, create_user):
+async def test_quote_response_does_not_leak_customer_phone(
+    client, db_session, create_user
+):
+    await seed_categories(db_session)
+    await db_session.commit()
+    category = (await db_session.execute(sa.select(Category))).scalars().first()
     customer = await create_user("09125555555", UserRole.CUSTOMER)
     response = await client.post(
         "/api/v1/quotes",
-        json={"title": "لوله‌کشی", "category_id": 1, "address": "بهبهان"},
+        json={"title": "لوله‌کشی", "category_id": category.id, "address": "بهبهان"},
         headers=auth(customer),
     )
     assert response.status_code == 200

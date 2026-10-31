@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import require_superadmin
 from app.core.errors import AppError
 from app.db.session import get_db
+from app.models.analytics import QuoteDelivery, SearchLog
 from app.models.category import Subcategory
 from app.models.contact import ContactMessage
 from app.models.job import ScheduledJob
@@ -36,6 +37,8 @@ REGISTRY: dict[str, tuple[type, str]] = {
     "reviews": (Review, "نظرات"),
     "quote_requests": (QuoteRequest, "درخواست‌های قیمت"),
     "offers": (Offer, "پیشنهادهای قیمت"),
+    "quote_deliveries": (QuoteDelivery, "ارسال استعلام به کسب‌وکار"),
+    "search_logs": (SearchLog, "لاگ جستجو"),
     "category_suggestions": (CategorySuggestion, "پیشنهاد دسته‌بندی"),
     "contact_messages": (ContactMessage, "پیام‌های تماس"),
     "licenses": (License, "مجوزها"),

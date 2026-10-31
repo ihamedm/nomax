@@ -15,19 +15,26 @@ import { useApi } from "@/lib/query";
 function actionLabel(notification: AppNotification): string {
   if (notification.type === "business_rejected") return "اصلاح و ارسال دوباره";
   if (notification.type === "business_approved") return "مشاهده کسب‌وکار";
+  if (notification.type === "quote_offer") return "مشاهده پیشنهادها";
+  if (notification.type === "quote_accepted") return "مشاهده مشتری";
+  if (notification.type === "quote_request") return "مشاهده درخواست";
   return "مشاهده";
 }
 
 function typeTone(type: string): "rose" | "brand" | "sky" | "slate" {
-  if (type === "business_rejected") return "rose";
-  if (type === "business_approved") return "brand";
-  if (type === "announcement") return "sky";
+  if (type === "business_rejected" || type === "quote_cancelled") return "rose";
+  if (type === "business_approved" || type === "quote_accepted") return "brand";
+  if (type === "announcement" || type === "quote_offer") return "sky";
   return "slate";
 }
 
 function typeLabel(type: string): string {
   if (type === "business_rejected") return "رد کسب‌وکار";
   if (type === "business_approved") return "تأیید کسب‌وکار";
+  if (type === "quote_request") return "درخواست قیمت";
+  if (type === "quote_offer") return "پیشنهاد قیمت";
+  if (type === "quote_accepted") return "پذیرش پیشنهاد";
+  if (type === "quote_cancelled") return "لغو درخواست";
   if (type === "announcement") return "اطلاعیه";
   return "پیام";
 }
