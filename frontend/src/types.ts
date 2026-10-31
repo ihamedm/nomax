@@ -130,6 +130,7 @@ export interface BusinessOwner {
 export interface BusinessDetail extends BusinessListItem {
   description?: string | null;
   instagram?: string | null;
+  updated_at?: string | null;
   owner?: BusinessOwner | null;
   is_saved?: boolean;
   is_owner?: boolean;

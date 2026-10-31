@@ -114,6 +114,14 @@ async def test_only_approved_businesses_are_searchable(client, db_session, creat
     assert body["reviews"] == []
     assert body["geo"] == {"lat": BEHBAHAN["lat"], "lng": BEHBAHAN["lng"]}
     assert body["owner"] == {"name": "حسین رضایی", "phone": "9130000001"}
+    assert body["updated_at"] is not None
+
+    # A public view increments view_count but must not look like an edit.
+    second_view = await client.get(f"/api/v1/businesses/{approved.slug}")
+    assert second_view.status_code == 200
+    second_body = second_view.json()["data"]
+    assert second_body["updated_at"] == body["updated_at"]
+    assert second_body["view_count"] == body["view_count"] + 1
 
     pending = await client.get("/api/v1/businesses/pending-shop")
     assert pending.status_code == 404

@@ -1,6 +1,7 @@
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 
 import sqlalchemy as sa
@@ -96,6 +97,7 @@ def _business_payload(hit: BusinessHit, *, detail: bool = False) -> dict:
             {
                 "description": business.description,
                 "instagram": business.instagram,
+                "updated_at": business.updated_at.isoformat() if business.updated_at else None,
                 "reviews": [],
             }
         )
@@ -932,6 +934,8 @@ async def update_business(
         business.status = BusinessStatus.PENDING
         business.rejection_reason = None
 
+    # Explicit so gallery-only edits also move the public "last updated" time.
+    business.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(business)
     data = _business_payload(BusinessHit(business=business), detail=True)
@@ -1167,9 +1171,23 @@ async def get_business(
             .order_by(Review.created_at.desc())
         )
     ).scalars().all()
+    view_count = business.view_count or 0
     if business.status == BusinessStatus.APPROVED:
-        business.view_count = (business.view_count or 0) + 1
+        view_count += 1
+        # Viewing must not look like a business edit. The ORM's onupdate would
+        # touch updated_at when incrementing view_count, so update the counter
+        # with the timestamp pinned to its current value.
+        await session.execute(
+            sa.update(Business)
+            .where(Business.id == business.id)
+            .values(
+                view_count=sa.func.coalesce(Business.view_count, 0) + 1,
+                updated_at=Business.updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
     data = _business_payload(BusinessHit(business=business), detail=True)
+    data["view_count"] = view_count
     owner = await session.get(User, business.owner_id)
     data["owner"] = (
         {

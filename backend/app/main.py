@@ -25,6 +25,7 @@ from app.api.v1.health import router as health_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.cms import router as cms_router
 from app.api.v1.admin_data import router as admin_data_router
+from app.api.v1.admin_backups import router as admin_backups_router
 from app.core.api_response import build_error_response
 from app.core.config import settings
 from app.core.errors import AppError
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     application.include_router(settings_router, prefix="/api/v1")
     application.include_router(cms_router, prefix="/api/v1")
     application.include_router(admin_data_router, prefix="/api/v1")
+    application.include_router(admin_backups_router, prefix="/api/v1")
     application.include_router(admin_router, prefix="/api/v1")
     application.include_router(admin_quotes_router, prefix="/api/v1")
     application.include_router(analytics_router, prefix="/api/v1")

@@ -581,8 +581,15 @@ Status: `[x]` verified implemented, `[~]` partial, `[ ]` missing / to verify.
   remains available to the business owner.
 - [x] The about card now holds the full description, address and Instagram
   link; reviews and the map keep their existing behavior.
-- [x] Tests: **149 backend tests** pass, including the owner payload assertion;
-  frontend **28 Vitest tests**, typecheck and production build pass.
+- [x] The hero shows «آخرین به‌روزرسانی …» in relative time using
+  `formatRelative` («۴ دقیقه پیش», «۲ روز پیش») with the exact Jalali timestamp
+  in the `title`. The detail payload now includes `updated_at`; public page
+  views increment `view_count` without touching `updated_at`, while any owner
+  edit (including gallery-only changes) refreshes it.
+- [x] Tests: **149 backend tests** pass, including the owner payload assertion
+  and a regression that page views leave `updated_at` unchanged while the view
+  counter increments. Frontend **28 Vitest tests**, typecheck and production
+  build pass.
 - [x] Browser verification at 390×844 and 1440×1000 covered six-slide carousel
   state, lightbox open/close and next navigation, scroll lock restoration,
   owner name/phone, call links, and zero console errors / horizontal overflow.
@@ -593,3 +600,91 @@ Status: `[x]` verified implemented, `[~]` partial, `[ ]` missing / to verify.
   [carousel second slide](docs/screenshots/business-detail-gallery-slide.png),
   [actions and owner card](docs/screenshots/business-detail-actions-owner.png),
   [desktop business detail](docs/screenshots/business-detail-desktop.png).
+
+## U. Account dashboard redesign — one surface, live counts and grouped shortcuts (2026-10-31)
+
+- [x] `/me` moved from a profile card plus a grid of eight separate cards to one
+  account surface: a dark profile panel (avatar, name, phone, role, verification
+  and member-since date) paired with a single grouped shortcut list.
+- [x] The profile panel shows live numbers for owned businesses, active quote
+  requests and saved businesses, loaded from the existing cached
+  `/me/businesses`, `/quotes/requests/mine` and `/me/bookmarks` queries.
+- [x] Shortcuts are grouped into «کسب‌وکار» and «فعالیت و حساب» with icons,
+  explanations and inline badges: pending businesses, new incoming customer
+  requests, new reviews and unread notifications.
+- [x] The menu is role-aware: customers no longer see owner-only customers or
+  reviews; the analytics shortcut is hidden for accounts without businesses; and
+  «ثبت کسب‌وکار جدید» disappears when the owner reaches the business limit.
+- [x] Logout is now a quiet row in the same surface rather than a separate card.
+- [x] Tests: **149 backend tests** and **28 frontend Vitest tests** pass;
+  typecheck and production build pass. No backend changes were needed.
+- [x] Browser verification at 390×844 and 1440×1000 covered the owner dashboard
+  (8 rows, badges, stats, member date) and the customer dashboard (6 rows, no
+  owner-only items), with zero console errors and no horizontal overflow.
+- [x] Screenshots:
+  [account dashboard](docs/screenshots/account-dashboard.png),
+  [account dashboard on desktop](docs/screenshots/account-dashboard-desktop.png).
+
+## V. Superadmin database backup and restore (2026-10-31)
+
+- [x] New superadmin-only `/admin/backups` page, linked from the admin sidebar
+  and admin dashboard: create a backup, list stored backups, download one,
+  delete one, upload a `.sql` backup, or restore a stored backup.
+- [x] Backups are portable plain-SQL dumps from `pg_dump --format=plain
+  --clean --if-exists`, stored in `BACKUP_DIR`. Compose mounts a dedicated
+  `backups` volume at `/data/backups` in dev and production.
+- [x] `pg_dump` 17 session settings/meta-commands that PostgreSQL 16 cannot
+  execute are stripped during backup, so files remain restorable on the
+  project's PostGIS 16 database. The backend image now installs
+  `postgresql-client`.
+- [x] Restore is guarded: superadmin only, exact `RESTORE` confirmation, file
+  type/content validation, an automatic pre-restore safety backup, and a
+  single-transaction `psql` restore (`ON_ERROR_STOP=1`). A failed restore rolls
+  back and leaves the database untouched; every successful restore writes an
+  audit row.
+- [x] Uploads are bounded by `BACKUP_MAX_UPLOAD_MB` (default 512), streamed to
+  disk, removed on validation/restore failure, and never exposed through the
+  public `/uploads` static mount.
+- [x] The API pool is disposed after a successful restore. The UI warns that
+  current database connections are interrupted and recommends restarting API
+  and worker if anything looks stale.
+- [x] Tests: **154 backend tests** pass, including backup authorization,
+  listing/download/delete, path-safe filenames, exact confirmation and invalid
+  upload cleanup. Frontend **28 Vitest tests**, typecheck and production build
+  pass.
+- [x] Live restore drill: created a backup, restored it through the new API,
+  received the safety-backup filename, verified users/businesses/alembic
+  version counts, confirmed `/ready` stayed healthy and the audit row was
+  written.
+- [x] Screenshots:
+  [backup dashboard](docs/screenshots/admin-backups.png),
+  [restore confirmation](docs/screenshots/admin-backups-restore.png).
+
+## W. Daily database backup and private S3 archive (2026-10-31)
+
+- [x] The worker starts a daily scheduler at 03:00 `Asia/Tehran`
+  (`BACKUP_DAILY_HOUR` / `BACKUP_DAILY_MINUTE` / `BACKUP_TIMEZONE`). A marker
+  file in the persistent backup volume makes the job idempotent across
+  restarts and lets a failed cloud sync retry without creating a duplicate
+  dump. A restart after the scheduled time catches up the same day.
+- [x] Manual backups are uploaded immediately after `pg_dump`; automatic dumps
+  are uploaded by the daily job. The dashboard's «آرشیو در S3» action uploads
+  any older local manual/automatic dumps that are missing remotely.
+- [x] Every uploaded backup is gzipped first (`compresslevel=6`, deterministic
+  mtime), stored as `nomax-<UTC timestamp>-<kind>.sql.gz` in the private
+  ArvanCloud bucket (`S3_BUCKET_PRIVATE`, or `BACKUP_S3_BUCKET`) under
+  `BACKUP_S3_PREFIX=database-backups`, with SHA-256 object metadata.
+- [x] Remote retention keeps the newest `BACKUP_KEEP_REMOTE=30` objects and
+  deletes older archived manual/automatic dumps. Local `.sql` files stay
+  available for restore; pre-restore safety dumps and user-uploaded SQL files
+  are deliberately not copied to the archive.
+- [x] The backup dashboard shows automatic/manual badges, an `S3` badge for
+  archived items, the daily schedule, S3 configuration state and a sync action.
+  Upload failure does not discard the successful local backup.
+- [x] The worker Compose service now mounts the same `backups` volume as the
+  API and receives the S3/backup environment, so the scheduled job can write
+  dumps that the dashboard sees and uploads.
+- [x] Tests: **161 backend tests** pass, including gzip content verification,
+  private-bucket upload, 30-object pruning, automatic dump idempotency,
+  upload retry, timezone gating, remote status and unconfigured sync guard.
+  Frontend **28 Vitest tests**, typecheck and production build pass.

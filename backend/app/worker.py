@@ -23,6 +23,7 @@ import sqlalchemy as sa
 from app.db.session import AsyncSessionLocal
 from app.models.quote import QuoteRequest
 from app.services import quote_broker
+from app.services.backup_scheduler import run_backup_scheduler
 from app.services.outbox import claim_due
 from app.services.quote_dispatcher import retry_due_quote
 from app.services.quote_service import ACTIVE, expire_stale_quotes
@@ -116,6 +117,9 @@ async def _run_from_broker(job_ids: list[str]) -> int:
 
 async def main() -> None:
     logger.info("quote worker started")
+    # The daily database dump runs in this long-lived process; the marker file
+    # in the backups volume makes it safe across container restarts.
+    asyncio.create_task(run_backup_scheduler(), name="daily-database-backup")
     while True:
         try:
             moved = await quote_broker.publish_due()

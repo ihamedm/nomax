@@ -13,6 +13,7 @@ and Docker/production deploy.
 - **Admin dashboard:** <http://localhost:8080/admin> (Docker) or <http://localhost:5175/admin> (Vite dev)
 - **Analytics dashboard:** <http://localhost:8080/admin/analytics> (General / Quotes / Market / Businesses / Map / Logs tabs; requires `stats.read`)
 - **S3 file manager:** <http://localhost:8080/admin/files> (requires `storage.manage` and Arvan S3 credentials; files can be copied as public or temporary private links)
+- **Database backups:** <http://localhost:8080/admin/backups> (superadmin only; portable SQL backups, automatic 03:00 Tehran dump, gzip archive in private Arvan S3 with 30-version retention, restore with automatic safety backup)
 - **Theme:** light/dark switch in the app drawer (and admin header); the choice is saved locally.
 - Current status and next phase: [`docs/roadmap-status.md`](docs/roadmap-status.md)
 - Provider decisions: [`docs/adr/0001-provider-boundaries.md`](docs/adr/0001-provider-boundaries.md)
@@ -27,7 +28,7 @@ and Docker/production deploy.
 - **Storage:** ArvanCloud S3 (S3-compatible) in development and production; dashboard file manager
 - **Push:** native Android via an Iranian provider; **no web push / VAPID**
 - **Maps:** Iranian provider (Phase 2)
-- **Jobs:** Redis Streams message broker + Postgres durable schedule/outbox; `app.worker` handles quote retries
+- **Jobs:** Redis Streams message broker + Postgres durable schedule/outbox; `app.worker` handles quote retries and the daily database backup
 
 ## Local setup
 
@@ -94,7 +95,7 @@ live codes at <http://localhost:8080/admin/dev-otps>.
 | --- | --- | --- |
 | App home | `/` | sticky header, hero search, 3-column categories, new/most-visited carousels, ad slots, mobile bottom nav |
 | Dedicated search | `/search` | 450ms debounced results, autofocus, clear action, filters, map with business-bottom-card, trending searches |
-| User dashboard | `/me` | any signed-in user (profile, businesses, notifications with unread badges, analytics); owners also get `/me/reviews` for pending/private/approved reviews, owner moderation and replies |
+| User dashboard | `/me` | any signed-in user; one grouped account surface with live counts, role-aware shortcuts, owner/business details, notifications with unread badges and analytics; owners also get `/me/reviews` for pending/private/approved reviews, owner moderation and replies |
 | Quote request | `/quote/new` | 3-step form with close action, category sheet inline search and Neshan map picker; urgent requests expire after 2 hours |
 | My quotes | `/quote/mine` | active request countdown, offer count/comparison, acceptance with phone reveal, cancel and history |
 | Owner customers | `/me/customers` | new received requests, offer sheet (price/unit/brand/message), accepted customers with contact, archive |
@@ -110,6 +111,7 @@ live codes at <http://localhost:8080/admin/dev-otps>.
 | Banners & ads | `/admin/ads` | `ad.manage`; shared modular data table + CRUD |
 | Settings | `/admin/settings` | `admin.settings.manage`; trending search terms and the quote dispatch strategy (`?tab=dispatch`) |
 | All remaining models | `/admin/data` | superadmin only; generic paginated CRUD over remaining tables |
+| Database backup & restore | `/admin/backups` | superadmin only; create/list/download/delete portable SQL backups, automatic daily dump, gzip archive in private Arvan S3 (last 30), upload or select a backup and restore it with a safety snapshot |
 | Dev OTP viewer | `/admin/dev-otps` | superadmin, non-production only |
 
 The analytics dashboard reads from two purpose-built event tables:
@@ -285,6 +287,14 @@ S3. Fill `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env`; `/ready` reports the
 S3 connectivity state and the dashboard file manager (`/admin/files`) needs the
 `storage.manage` permission. Without credentials, uploads fall back to local
 disk for tests.
+
+Database backups use the same Arvan credentials. Manual and automatic dumps
+are gzipped into `S3_BUCKET_PRIVATE` (or `BACKUP_S3_BUCKET`) under
+`BACKUP_S3_PREFIX` and only the newest `BACKUP_KEEP_REMOTE` (default 30) are
+kept. The worker creates the automatic dump every day at
+`BACKUP_DAILY_HOUR:BACKUP_DAILY_MINUTE` in `BACKUP_TIMEZONE` (03:00 Tehran by
+default) and catches up after a restart. Local `.sql` dumps remain available
+for restore; the compressed cloud copies are never exposed publicly.
 
 User business images are processed before storage: the browser optionally
 downscales large photos, then the API applies EXIF orientation, an optional

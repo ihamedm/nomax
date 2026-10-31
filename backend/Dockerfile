@@ -8,6 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_RETRIES=10
 
 COPY pyproject.toml ./
+
+# psql/pg_dump power the superadmin database backup dashboard. Keep this
+# layer before the source copy so normal code changes don't reinstall it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./

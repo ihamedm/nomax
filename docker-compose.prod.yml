@@ -49,12 +49,23 @@ services:
       S3_PUBLIC_READ_ACL: ${S3_PUBLIC_READ_ACL:-true}
       S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-900}
       S3_HEALTHCHECK_TTL_SECONDS: ${S3_HEALTHCHECK_TTL_SECONDS:-30}
+      BACKUP_DIR: /data/backups
+      BACKUP_MAX_UPLOAD_MB: ${BACKUP_MAX_UPLOAD_MB:-512}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-database-backups}
+      BACKUP_KEEP_REMOTE: ${BACKUP_KEEP_REMOTE:-30}
+      BACKUP_DAILY_ENABLED: ${BACKUP_DAILY_ENABLED:-true}
+      BACKUP_DAILY_HOUR: ${BACKUP_DAILY_HOUR:-3}
+      BACKUP_DAILY_MINUTE: ${BACKUP_DAILY_MINUTE:-0}
+      BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Tehran}
       GEOCODER_URL: ${GEOCODER_URL:-https://nominatim.openstreetmap.org}
       GEOCODER_USER_AGENT: "${GEOCODER_USER_AGENT:-NOMAX/1.0 (+https://nomax.ir)}"
       GEOCODER_TIMEOUT_SECONDS: ${GEOCODER_TIMEOUT_SECONDS:-8}
       GEOCODER_COUNTRY_CODES: ${GEOCODER_COUNTRY_CODES:-ir}
       GEOCODER_VIEWBOX: ${GEOCODER_VIEWBOX:-50.18,30.65,50.30,30.54}
       GEOCODER_BOUNDED: ${GEOCODER_BOUNDED:-true}
+    volumes:
+      - backups:/data/backups
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8001/ready')"]
       interval: 30s
@@ -88,6 +99,17 @@ services:
       S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
       S3_PUBLIC_READ_ACL: ${S3_PUBLIC_READ_ACL:-true}
       S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-900}
+      BACKUP_DIR: /data/backups
+      BACKUP_MAX_UPLOAD_MB: ${BACKUP_MAX_UPLOAD_MB:-512}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-database-backups}
+      BACKUP_KEEP_REMOTE: ${BACKUP_KEEP_REMOTE:-30}
+      BACKUP_DAILY_ENABLED: ${BACKUP_DAILY_ENABLED:-true}
+      BACKUP_DAILY_HOUR: ${BACKUP_DAILY_HOUR:-3}
+      BACKUP_DAILY_MINUTE: ${BACKUP_DAILY_MINUTE:-0}
+      BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Tehran}
+    volumes:
+      - backups:/data/backups
 
   web:
     build: ./frontend
@@ -124,5 +146,6 @@ services:
 volumes:
   pgdata:
   redisdata:
+  backups:
   caddy_data:
   caddy_config:

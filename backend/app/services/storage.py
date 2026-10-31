@@ -38,6 +38,11 @@ def bucket_name(bucket: str) -> str:
     raise StorageValidationError("invalid_bucket")
 
 
+def s3_client():
+    """Return the shared S3 client for other storage-backed features."""
+    return _client()
+
+
 @lru_cache(maxsize=1)
 def _client():
     if not storage_configured():

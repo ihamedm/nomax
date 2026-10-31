@@ -486,6 +486,39 @@ slugs, and Mellipayamak KYC (external).
   their edit shortcut.
 - About content (description, address, Instagram) was consolidated into one
   calm card. Reviews and map behavior are unchanged.
+- The hero shows a relative «آخرین به‌روزرسانی» line with the exact Jalali
+  timestamp on hover. Detail responses now include `updated_at`; page views
+  preserve it while incrementing `view_count`, and owner edits refresh it.
+
+### Account dashboard
+
+- `/me` is now one account surface instead of a profile card and eight separate
+  shortcut cards: a dark profile panel (avatar, name, phone, role, verification,
+  member-since date) and a single grouped list.
+- The profile panel shows live counts for businesses, active quote requests and
+  saved businesses using the existing cached queries.
+- Shortcuts are grouped into «کسب‌وکار» and «فعالیت و حساب», with icons,
+  descriptions and inline badges for pending businesses, new customer requests,
+  new reviews and unread notifications. Role and business-limit states are
+  respected; logout is a quiet row in the same surface.
+
+### Database backup and restore
+
+- Added superadmin-only `/admin/backups` (sidebar + admin dashboard shortcut)
+  for creating, listing, downloading, deleting and restoring database backups.
+- Backups are portable plain-SQL dumps stored in a dedicated `backups` volume;
+  the backend image installs `postgresql-client`.
+- Restores require the exact `RESTORE` phrase, take an automatic safety backup
+  first, validate the upload, and run in one transaction with `ON_ERROR_STOP`.
+  Failed restores roll back; successful restores are audited.
+- PostgreSQL 17 client-only session directives are stripped for compatibility
+  with the project's PostgreSQL 16 database.
+- The worker now creates an automatic dump daily at 03:00 Tehran, with a
+  persistent marker for restart-safe idempotency and sync retries.
+- Manual and automatic dumps are gzipped before upload to the private Arvan
+  bucket (`BACKUP_S3_PREFIX`), with SHA-256 metadata and retention of the
+  newest 30 objects. The dashboard shows archived state and offers a retry
+  sync; local dumps remain available for restore.
 
 ### Navigation and form ergonomics
 
@@ -499,11 +532,13 @@ slugs, and Mellipayamak KYC (external).
 - Business pins in search map mode open a sticky bottom business card via an
   opt-in `NeshanMap.onMarkerClick` callback.
 
-**Verification:** 149 backend tests, 28 frontend Vitest tests, typecheck and
+**Verification:** 161 backend tests, 28 frontend Vitest tests, typecheck and
 production build pass; migration `0022` applied. Browser checks at 1440×1000
 and 390×844 covered desktop nav, autofocus/debounce, category search, the
-six-photo 3×2 editor, the detail carousel/lightbox and owner card, map card and
-close routing.
+six-photo 3×2 editor, the detail carousel/lightbox and owner card, the account
+dashboard for owner and customer roles, map card and close routing. A live
+backup/restore drill restored the current database from the dashboard API,
+verified data counts and kept `/ready` green.
 
 ## UI snapshots
 
@@ -571,5 +606,9 @@ Captured from the running dev build at mobile widths (430–500px):
 - [Gallery lightbox](screenshots/business-gallery-lightbox.png)
 - [Actions and owner card](screenshots/business-detail-actions-owner.png)
 - [Business detail on desktop](screenshots/business-detail-desktop.png)
+- [Account dashboard](screenshots/account-dashboard.png)
+- [Account dashboard on desktop](screenshots/account-dashboard-desktop.png)
+- [Database backup dashboard](screenshots/admin-backups.png)
+- [Database restore confirmation](screenshots/admin-backups-restore.png)
 - [Business map pin bottom card](screenshots/map-business-sheet.png)
 - [Form header close action](screenshots/form-close-header.png)

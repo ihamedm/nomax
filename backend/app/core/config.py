@@ -63,6 +63,21 @@ class Settings(BaseSettings):
     S3_PUBLIC_READ_ACL: bool = True
     UPLOAD_DIR: str = "/tmp/nomax/uploads"
 
+    # Database backup/restore from the superadmin dashboard. Compose mounts a
+    # persistent volume at /data/backups; local development uses /tmp.
+    BACKUP_DIR: str = "/tmp/nomax/backups"
+    BACKUP_MAX_UPLOAD_MB: int = 512
+    BACKUP_TIMEOUT_SECONDS: int = 600
+    # Manual and automatic dumps are gzipped and copied to the private Arvan
+    # bucket. An empty BACKUP_S3_BUCKET reuses S3_BUCKET_PRIVATE.
+    BACKUP_S3_BUCKET: str = ""
+    BACKUP_S3_PREFIX: str = "database-backups"
+    BACKUP_KEEP_REMOTE: int = 30
+    BACKUP_DAILY_ENABLED: bool = True
+    BACKUP_DAILY_HOUR: int = 3
+    BACKUP_DAILY_MINUTE: int = 0
+    BACKUP_TIMEZONE: str = "Asia/Tehran"
+
     # Address geocoding used by the map picker. Nominatim is the default
     # because it needs no key; set GEOCODER_URL to switch providers.
     GEOCODER_URL: str = "https://nominatim.openstreetmap.org"
@@ -86,6 +101,27 @@ class Settings(BaseSettings):
     def _validate_max_business_images(cls, value: int) -> int:
         if value < 1:
             raise ValueError("MAX_BUSINESS_IMAGES must be at least 1")
+        return value
+
+    @field_validator("BACKUP_MAX_UPLOAD_MB", "BACKUP_TIMEOUT_SECONDS", "BACKUP_KEEP_REMOTE")
+    @classmethod
+    def _validate_backup_limits(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("BACKUP values must be at least 1")
+        return value
+
+    @field_validator("BACKUP_DAILY_HOUR")
+    @classmethod
+    def _validate_backup_hour(cls, value: int) -> int:
+        if not 0 <= value <= 23:
+            raise ValueError("BACKUP_DAILY_HOUR must be between 0 and 23")
+        return value
+
+    @field_validator("BACKUP_DAILY_MINUTE")
+    @classmethod
+    def _validate_backup_minute(cls, value: int) -> int:
+        if not 0 <= value <= 59:
+            raise ValueError("BACKUP_DAILY_MINUTE must be between 0 and 59")
         return value
 
     CORS_ORIGINS: list[str] = [

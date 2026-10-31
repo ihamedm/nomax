@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { fa, formatPhone, formatRating } from "@/lib/format";
-import { formatJalali } from "@/lib/jalali";
+import { formatJalali, formatJalaliDateTime, formatRelative } from "@/lib/jalali";
 import { useApi } from "@/lib/query";
 import { returnPath } from "@/lib/auth-redirect";
 import { useAuth } from "@/stores/auth";
@@ -374,6 +374,21 @@ export function BusinessDetailPage() {
               {business.short_description && (
                 <p className="mt-3 text-sm leading-7 text-slate-600">
                   {business.short_description}
+                </p>
+              )}
+
+              {business.updated_at && (
+                <p className="mt-3 flex items-center gap-1.5 text-[10px] text-slate-400">
+                  <ClockIcon className="h-3.5 w-3.5" />
+                  <span>
+                    آخرین به‌روزرسانی{" "}
+                    <time
+                      dateTime={business.updated_at}
+                      title={formatJalaliDateTime(business.updated_at)}
+                    >
+                      {formatRelative(business.updated_at)}
+                    </time>
+                  </span>
                 </p>
               )}
             </div>

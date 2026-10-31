@@ -78,6 +78,13 @@ const CARDS = [
     permission: null,
   },
   {
+    to: "/admin/backups",
+    title: "پشتیبان‌گیری پایگاه داده",
+    description: "ساخت، دانلود و بازیابی نسخه کامل پایگاه داده با نسخه ایمنی خودکار.",
+    superadminOnly: true,
+    permission: null,
+  },
+  {
     to: "/admin/users",
     title: "کاربران و دسترسی‌ها",
     description: "ساخت مدیر، تغییر نقش و تعیین دسترسی دقیق هر ماژول.",
