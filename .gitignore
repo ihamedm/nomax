@@ -11,6 +11,9 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+behbahan-businesses/
+docs/screenshots/
+frontend/coverage/
 
 # Local configuration and secrets
 .env

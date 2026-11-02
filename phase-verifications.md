@@ -670,21 +670,57 @@ Status: `[x]` verified implemented, `[~]` partial, `[ ]` missing / to verify.
 - [x] Manual backups are uploaded immediately after `pg_dump`; automatic dumps
   are uploaded by the daily job. The dashboard's «آرشیو در S3» action uploads
   any older local manual/automatic dumps that are missing remotely.
-- [x] Every uploaded backup is gzipped first (`compresslevel=6`, deterministic
-  mtime), stored as `nomax-<UTC timestamp>-<kind>.sql.gz` in the private
-  ArvanCloud bucket (`S3_BUCKET_PRIVATE`, or `BACKUP_S3_BUCKET`) under
-  `BACKUP_S3_PREFIX=database-backups`, with SHA-256 object metadata.
+- [x] Every backup is compressed at creation (`compresslevel=6`, deterministic
+  mtime) and stored locally as `nomax-<UTC timestamp>-<kind>.sql.gz`; the same
+  archive is uploaded to the private ArvanCloud bucket (`S3_BUCKET_PRIVATE`, or
+  `BACKUP_S3_BUCKET`) under `BACKUP_S3_PREFIX=database-backups`, with SHA-256
+  object metadata.
+- [x] Compression correction: the local backup artifact itself is compressed,
+  not only the S3 copy. Dashboard downloads return `application/gzip`;
+  restoring a `.sql.gz` decompresses it to a temporary SQL file and supports
+  legacy plain `.sql` backups; uploaded `.sql.gz` files are accepted too.
 - [x] Remote retention keeps the newest `BACKUP_KEEP_REMOTE=30` objects and
-  deletes older archived manual/automatic dumps. Local `.sql` files stay
-  available for restore; pre-restore safety dumps and user-uploaded SQL files
-  are deliberately not copied to the archive.
+  deletes older archived manual/automatic dumps. Compressed local `.sql.gz`
+  files stay available for restore; pre-restore safety dumps and user-uploaded
+  SQL files are deliberately not copied to the archive.
 - [x] The backup dashboard shows automatic/manual badges, an `S3` badge for
   archived items, the daily schedule, S3 configuration state and a sync action.
   Upload failure does not discard the successful local backup.
 - [x] The worker Compose service now mounts the same `backups` volume as the
   API and receives the S3/backup environment, so the scheduled job can write
   dumps that the dashboard sees and uploads.
-- [x] Tests: **161 backend tests** pass, including gzip content verification,
+- [x] Tests: **164 backend tests** pass, including local gzip creation/upload,
+  gzip download and restore preparation, gzip content verification,
   private-bucket upload, 30-object pruning, automatic dump idempotency,
   upload retry, timezone gating, remote status and unconfigured sync guard.
   Frontend **28 Vitest tests**, typecheck and production build pass.
+- [x] Live verification: the worker created the 2026-11-01 automatic dump,
+  retried a transient S3 DNS failure without duplicating the dump, and archived
+  a gzip object with matching SHA-256. A manual backup was created as
+  `nomax-…-manual.sql.gz` (46,910 bytes instead of 242,810 bytes of SQL),
+  downloaded with `Content-Type: application/gzip`, and restored through the
+  API; the safety backup was also `.sql.gz` and `/ready` stayed `200` with
+  database, Redis and storage all `ok`. The API list marks compressed local
+  backups as `compressed=true`; the idempotent sync returned zero uploads.
+- [x] Browser verification at 1440×1000 and 390×844: both backup kinds, S3
+  badges, daily schedule and sync action render with zero console errors and no
+  horizontal overflow.
+
+## X. Behbahan business sample import (2026-11-01)
+
+- [x] Added `scripts/import_behbahan_businesses.py` for the scraped
+  `behbahan-businesses/businesses.csv` dataset. It reads the CSV row index,
+  resolves the category/subcategory, imports coordinates/address/phone/
+  Instagram/description, and processes local `<index>/images` files through the
+  same resize/JPEG/storage pipeline as user uploads.
+- [x] Import is idempotent by deterministic `behbahan-<index>-<hash>` slug and
+  supports `--limit`, `--owner-phone` and `--dry-run`. A dedicated verified
+  owner (`09120000000`, «واردات تست بهبهان») owns the test batch.
+- [x] Imported rows **1–10** as approved businesses; 16 local images were
+  converted to JPEG, stored under the owner/date S3 prefix, and linked as
+  ordered galleries (row 8 limited to the configured six images).
+- [x] Verified: businesses `30 → 40`, business images `7 → 23`, all ten rows
+  approved with correct coordinates and category mappings, public search finds
+  them, detail returns the gallery, and an S3 image URL returns `200 image/jpeg`.
+- [x] Re-running the importer skips existing rows (`0 imported, 2 skipped`).
+  Test owner, imported rows and S3 images remain for UI testing.

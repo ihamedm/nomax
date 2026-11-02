@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 from datetime import datetime, timezone
 
 import pytest
@@ -183,3 +184,54 @@ async def test_sync_uploads_only_missing_backups(backup_dir, fake_s3):
         f"database-backups/{missing}.gz"
     ]
     assert len(fake_s3.objects) == 2
+
+
+@pytest.mark.asyncio
+async def test_local_gzip_backup_is_uploaded_without_second_compression(
+    backup_dir, fake_s3
+):
+    path = backup_dir / "nomax-20261031T120000123456Z-manual.sql.gz"
+    payload = b"CREATE TABLE public.users (id int);\n" * 1000
+    with gzip.open(path, "wb") as handle:
+        handle.write(payload)
+    original_archive = path.read_bytes()
+
+    result = await database_backups.upload_backup(path, "manual")
+
+    assert result["status"] == "uploaded"
+    assert result["size"] == len(original_archive)
+    assert fake_s3.uploads[0]["data"] == original_archive
+    assert fake_s3.uploads[0]["extra"]["Metadata"]["sha256"] == hashlib.sha256(
+        payload
+    ).hexdigest()
+    assert "-manual.sql.gz\"" in fake_s3.uploads[0]["extra"]["ContentDisposition"]
+
+
+@pytest.mark.asyncio
+async def test_gzip_restore_is_decompressed_and_validated(backup_dir):
+    path = backup_dir / "nomax-20261031T120000123456Z-manual.sql.gz"
+    dump = b"""-- PostgreSQL database dump
+CREATE TABLE public.alembic_version (version_num varchar);
+CREATE TABLE public.users (id integer);
+CREATE TABLE public.businesses (id integer);
+COPY public.users (id) FROM stdin;
+1
+\\.
+COPY public.businesses (id) FROM stdin;
+1
+\\.
+"""
+    with gzip.open(path, "wb") as handle:
+        handle.write(dump)
+
+    source, temporary = await database_backups.prepare_restore(path)
+    assert temporary is not None
+    assert source == temporary
+    assert source.read_text().startswith("-- PostgreSQL database dump")
+    assert path.with_name(f".{path.name}.restore.sql").exists()
+
+    temporary.unlink()
+    path.write_bytes(b"not gzip")
+    with pytest.raises(Exception) as error:
+        await database_backups.prepare_restore(path)
+    assert getattr(error.value, "code", "") == "invalid_backup_file"

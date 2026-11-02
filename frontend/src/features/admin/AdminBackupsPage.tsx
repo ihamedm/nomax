@@ -25,6 +25,7 @@ interface BackupItem {
   created_at: string;
   kind: "manual" | "auto" | "uploaded" | "pre-restore";
   kind_label: string;
+  compressed: boolean;
   remote: boolean;
   upload?: BackupUpload;
 }
@@ -126,9 +127,7 @@ export default function AdminBackupsPage() {
     onSuccess: (backup) => {
       if (backup.upload?.status === "uploaded") {
         toast(
-          `نسخه پشتیبان ساخته و فشرده شد (${formatBytes(backup.size)} → ${formatBytes(
-            backup.upload.size ?? 0,
-          )}) و در S3 آروان ذخیره شد.`,
+          `نسخه پشتیبان فشرده (${formatBytes(backup.size)}) ساخته و در S3 آروان ذخیره شد.`,
         );
       } else if (backup.upload?.status === "failed") {
         toast("نسخه محلی ساخته شد، اما ارسال فشرده به S3 آروان انجام نشد.");
@@ -296,7 +295,8 @@ export default function AdminBackupsPage() {
             <div>
               <h2 className="text-sm font-black text-slate-900">نسخه‌های ذخیره‌شده</h2>
               <p className="mt-0.5 text-[10px] leading-5 text-slate-400">
-                نسخه‌های دستی و خودکار، فشرده‌شده در S3 خصوصی آروان هم نگهداری می‌شوند.
+                نسخه‌ها به‌صورت فشرده ذخیره می‌شوند و نسخه‌های دستی و خودکار در
+                S3 خصوصی آروان هم نگهداری می‌شوند.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -358,6 +358,11 @@ export default function AdminBackupsPage() {
                       {backup.filename}
                     </p>
                     <Badge tone={KIND_TONES[backup.kind]}>{backup.kind_label}</Badge>
+                    {backup.compressed && (
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
+                        فشرده
+                      </span>
+                    )}
                     {backup.remote && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">
                         <CloudIcon /> S3
@@ -413,7 +418,8 @@ export default function AdminBackupsPage() {
               <div>
                 <h2 className="text-sm font-black text-slate-900">بازیابی از فایل</h2>
                 <p className="mt-1 text-[10px] leading-5 text-slate-500">
-                  فقط فایل SQL ساخته‌شده با <span dir="ltr">pg_dump</span> پذیرفته می‌شود.
+                  فایل <span dir="ltr">.sql</span> یا <span dir="ltr">.sql.gz</span>{" "}
+                  ساخته‌شده با <span dir="ltr">pg_dump</span> پذیرفته می‌شود.
                 </p>
               </div>
             </div>
@@ -430,7 +436,7 @@ export default function AdminBackupsPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".sql,text/plain,application/sql"
+                accept=".sql,.sql.gz,.gz,text/plain,application/sql,application/gzip"
                 className="sr-only"
                 onChange={(event) => {
                   setUploadFile(event.target.files?.[0] ?? null);

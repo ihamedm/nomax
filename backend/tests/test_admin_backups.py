@@ -142,3 +142,29 @@ async def test_s3_sync_requires_configured_credentials(
     )
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "backup_s3_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_compressed_backup_is_downloaded_as_gzip(
+    client, create_user, backup_dir
+):
+    import gzip
+
+    superadmin = await create_user("09150000008", UserRole.SUPERADMIN)
+    filename = "nomax-20261031T120000123456Z-auto.sql.gz"
+    path = backup_dir / filename
+    with gzip.open(path, "wb") as handle:
+        handle.write(b"compressed backup")
+
+    listed = await client.get("/api/v1/admin/backups", headers=auth(superadmin))
+    assert listed.status_code == 200
+    item = listed.json()["data"]["items"][0]
+    assert item["compressed"] is True
+    assert item["size"] == path.stat().st_size
+
+    downloaded = await client.get(
+        f"/api/v1/admin/backups/{filename}/download", headers=auth(superadmin)
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "application/gzip"
+    assert gzip.decompress(downloaded.content) == b"compressed backup"

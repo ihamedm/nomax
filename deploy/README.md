@@ -18,8 +18,8 @@ portable SQL backups. Files are stored in the `backups` Compose volume at
 backup first and run in a single transaction.
 
 The `worker` service creates one automatic dump every day at 03:00 Tehran
-(`BACKUP_DAILY_*`). Manual and automatic backups are gzipped and uploaded to
-the private Arvan bucket (`S3_BUCKET_PRIVATE`, or `BACKUP_S3_BUCKET`) under
+(`BACKUP_DAILY_*`). Manual and automatic backups are created as `.sql.gz` and
+the same archive is uploaded to the private Arvan bucket (`S3_BUCKET_PRIVATE`, or `BACKUP_S3_BUCKET`) under
 `BACKUP_S3_PREFIX`; the newest `BACKUP_KEEP_REMOTE=30` objects are retained.
 Set `S3_ACCESS_KEY`, `S3_SECRET_KEY` and the bucket variables in `.env.prod`.
 The dashboard's «آرشیو در S3» action retries any failed/missing uploads.

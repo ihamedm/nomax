@@ -13,7 +13,7 @@ and Docker/production deploy.
 - **Admin dashboard:** <http://localhost:8080/admin> (Docker) or <http://localhost:5175/admin> (Vite dev)
 - **Analytics dashboard:** <http://localhost:8080/admin/analytics> (General / Quotes / Market / Businesses / Map / Logs tabs; requires `stats.read`)
 - **S3 file manager:** <http://localhost:8080/admin/files> (requires `storage.manage` and Arvan S3 credentials; files can be copied as public or temporary private links)
-- **Database backups:** <http://localhost:8080/admin/backups> (superadmin only; portable SQL backups, automatic 03:00 Tehran dump, gzip archive in private Arvan S3 with 30-version retention, restore with automatic safety backup)
+- **Database backups:** <http://localhost:8080/admin/backups> (superadmin only; gzip-compressed SQL backups, automatic 03:00 Tehran dump, private Arvan S3 archive with 30-version retention, restore with automatic safety backup)
 - **Theme:** light/dark switch in the app drawer (and admin header); the choice is saved locally.
 - Current status and next phase: [`docs/roadmap-status.md`](docs/roadmap-status.md)
 - Provider decisions: [`docs/adr/0001-provider-boundaries.md`](docs/adr/0001-provider-boundaries.md)
@@ -111,7 +111,7 @@ live codes at <http://localhost:8080/admin/dev-otps>.
 | Banners & ads | `/admin/ads` | `ad.manage`; shared modular data table + CRUD |
 | Settings | `/admin/settings` | `admin.settings.manage`; trending search terms and the quote dispatch strategy (`?tab=dispatch`) |
 | All remaining models | `/admin/data` | superadmin only; generic paginated CRUD over remaining tables |
-| Database backup & restore | `/admin/backups` | superadmin only; create/list/download/delete portable SQL backups, automatic daily dump, gzip archive in private Arvan S3 (last 30), upload or select a backup and restore it with a safety snapshot |
+| Database backup & restore | `/admin/backups` | superadmin only; create/list/download/delete gzip-compressed SQL backups, automatic daily dump, private Arvan S3 archive (last 30), upload `.sql`/`.sql.gz` or select a backup and restore it with a safety snapshot |
 | Dev OTP viewer | `/admin/dev-otps` | superadmin, non-production only |
 
 The analytics dashboard reads from two purpose-built event tables:
@@ -293,8 +293,10 @@ are gzipped into `S3_BUCKET_PRIVATE` (or `BACKUP_S3_BUCKET`) under
 `BACKUP_S3_PREFIX` and only the newest `BACKUP_KEEP_REMOTE` (default 30) are
 kept. The worker creates the automatic dump every day at
 `BACKUP_DAILY_HOUR:BACKUP_DAILY_MINUTE` in `BACKUP_TIMEZONE` (03:00 Tehran by
-default) and catches up after a restart. Local `.sql` dumps remain available
-for restore; the compressed cloud copies are never exposed publicly.
+default) and catches up after a restart. New local backups are created as
+`.sql.gz`; the same archive is copied to S3. Restore decompresses it to a
+temporary plain-SQL file, and legacy `.sql` backups remain supported. Backups
+are never exposed publicly.
 
 User business images are processed before storage: the browser optionally
 downscales large photos, then the API applies EXIF orientation, an optional

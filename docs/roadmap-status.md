@@ -1,6 +1,6 @@
 # NOMAX roadmap status
 
-Last updated: 2026-10-31
+Last updated: 2026-11-01
 
 This file is the hand-off point between agent sessions. Update it at the end of
 every working session so the next agent knows what actually runs.
@@ -515,10 +515,15 @@ slugs, and Mellipayamak KYC (external).
   with the project's PostgreSQL 16 database.
 - The worker now creates an automatic dump daily at 03:00 Tehran, with a
   persistent marker for restart-safe idempotency and sync retries.
-- Manual and automatic dumps are gzipped before upload to the private Arvan
-  bucket (`BACKUP_S3_PREFIX`), with SHA-256 metadata and retention of the
-  newest 30 objects. The dashboard shows archived state and offers a retry
-  sync; local dumps remain available for restore.
+- Manual and automatic dumps are created as `.sql.gz`, uploaded unchanged to
+  the private Arvan bucket (`BACKUP_S3_PREFIX`), and retained for the newest 30
+  objects with SHA-256 metadata. The dashboard shows compressed/archived state
+  and offers a retry sync; restore transparently decompresses and legacy
+  `.sql` backups remain supported.
+- Live worker run on 2026-11-01 created and archived the automatic dump after
+  surviving a transient S3 DNS failure; restart-safe marker prevented a
+  duplicate. A compressed manual dump was downloaded and restored end-to-end
+  with a compressed pre-restore safety backup and `/ready` green.
 
 ### Navigation and form ergonomics
 
@@ -532,13 +537,21 @@ slugs, and Mellipayamak KYC (external).
 - Business pins in search map mode open a sticky bottom business card via an
   opt-in `NeshanMap.onMarkerClick` callback.
 
-**Verification:** 161 backend tests, 28 frontend Vitest tests, typecheck and
+**Verification:** 164 backend tests, 28 frontend Vitest tests, typecheck and
 production build pass; migration `0022` applied. Browser checks at 1440×1000
 and 390×844 covered desktop nav, autofocus/debounce, category search, the
 six-photo 3×2 editor, the detail carousel/lightbox and owner card, the account
 dashboard for owner and customer roles, map card and close routing. A live
 backup/restore drill restored the current database from the dashboard API,
 verified data counts and kept `/ready` green.
+
+### Behbahan sample data
+
+- Added an idempotent importer for the external `behbahan-businesses` scrape.
+  It imports CSV rows and local image folders through the standard image/S3
+  pipeline. Ten approved test businesses (16 images) were imported under the
+  dedicated owner `09120000000`; the rest of the 7,474-row dataset remains
+  unimported for manual/batched work.
 
 ## UI snapshots
 

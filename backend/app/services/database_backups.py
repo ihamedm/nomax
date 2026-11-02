@@ -28,7 +28,7 @@ from app.services import storage
 logger = logging.getLogger(__name__)
 
 BACKUP_NAME_RE = re.compile(
-    r"^nomax-\d{8}T\d{12}Z-(?:manual|auto|uploaded|pre-restore)\.sql$"
+    r"^nomax-\d{8}T\d{12}Z-(?:manual|auto|uploaded|pre-restore)\.sql(?:\.gz)?$"
 )
 REMOTE_NAME_RE = re.compile(
     r"^nomax-\d{8}T\d{12}Z-(?:manual|auto)\.sql\.gz$"
@@ -63,19 +63,34 @@ def backup_path(filename: str) -> Path:
     return path
 
 
-def new_backup_name(kind: str) -> str:
+def new_backup_name(kind: str, *, compressed: bool = True) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    return f"nomax-{stamp}-{kind}.sql"
+    suffix = ".sql.gz" if compressed else ".sql"
+    return f"nomax-{stamp}-{kind}{suffix}"
 
 
 def backup_kind(filename: str) -> str:
-    if filename.endswith("-pre-restore.sql"):
+    name = filename.removesuffix(".gz")
+    if name.endswith("-pre-restore.sql"):
         return "pre-restore"
-    if filename.endswith("-uploaded.sql"):
+    if name.endswith("-uploaded.sql"):
         return "uploaded"
-    if filename.endswith("-auto.sql"):
+    if name.endswith("-auto.sql"):
         return "auto"
     return "manual"
+
+
+def archive_name(filename: str) -> str:
+    """Return the remote/local compressed name for a backup file."""
+    return filename if filename.endswith(".sql.gz") else f"{filename}.gz"
+
+
+def is_gzip_file(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(2) == b"\x1f\x8b"
+    except OSError:
+        return False
 
 
 def backup_entry(path: Path) -> dict:
@@ -87,6 +102,7 @@ def backup_entry(path: Path) -> dict:
         "created_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
         "kind": kind,
         "kind_label": KIND_LABELS[kind],
+        "compressed": path.name.endswith(".sql.gz"),
     }
 
 
@@ -178,9 +194,10 @@ def plain_dump_is_compatible(path: Path) -> bool:
 
 async def create_backup(kind: str = "manual") -> dict:
     directory = backup_dir()
-    filename = new_backup_name(kind)
+    filename = new_backup_name(kind, compressed=True)
     destination = directory / filename
-    temporary = directory / f".{filename}.part"
+    plain_temporary = directory / f".{filename}.sql.part"
+    archive_temporary = directory / f".{filename}.part"
     command = [
         "pg_dump",
         "--format=plain",
@@ -192,25 +209,58 @@ async def create_backup(kind: str = "manual") -> dict:
         "--dbname",
         database_url(),
         "--file",
-        str(temporary),
+        str(plain_temporary),
     ]
 
     try:
         returncode, _, stderr = await run_pg(command)
-        if returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
+        if (
+            returncode != 0
+            or not plain_temporary.is_file()
+            or plain_temporary.stat().st_size == 0
+        ):
             command_error("pg_dump", stderr)
             raise AppError("backup_failed", "backup_failed", 500)
-        if not plain_dump_is_compatible(temporary):
+        if not plain_dump_is_compatible(plain_temporary):
             raise AppError("backup_failed", "backup_failed", 500)
-        temporary.replace(destination)
+        await run_in_threadpool(
+            _gzip_backup_sync, plain_temporary, archive_temporary
+        )
+        archive_temporary.replace(destination)
         return backup_entry(destination)
     finally:
-        temporary.unlink(missing_ok=True)
+        plain_temporary.unlink(missing_ok=True)
+        archive_temporary.unlink(missing_ok=True)
 
 
-async def validate_dump(path: Path) -> None:
-    if not plain_dump_is_compatible(path):
+def _decompress_sync(path: Path, destination: Path) -> None:
+    with gzip.open(path, "rb") as source, destination.open("wb") as target:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            target.write(chunk)
+    destination.chmod(0o600)
+
+
+async def prepare_restore(path: Path) -> tuple[Path, Path | None]:
+    """Return a validated plain-SQL path, decompressing .sql.gz if needed."""
+    temporary: Path | None = None
+    target = path
+    if path.name.endswith(".sql.gz"):
+        temporary = path.with_name(f".{path.name}.restore.sql")
+        try:
+            await run_in_threadpool(_decompress_sync, path, temporary)
+        except (OSError, EOFError) as exc:
+            temporary.unlink(missing_ok=True)
+            raise AppError("invalid_backup_file", "invalid_backup_file", 422) from exc
+        target = temporary
+
+    if not await run_in_threadpool(plain_dump_is_compatible, target):
+        if temporary:
+            temporary.unlink(missing_ok=True)
         raise AppError("invalid_backup_file", "invalid_backup_file", 422)
+    return target, temporary
 
 
 def s3_prefix() -> str:
@@ -232,7 +282,7 @@ def s3_configured() -> bool:
 
 
 def remote_key(filename: str) -> str:
-    return f"{s3_prefix()}{filename}.gz"
+    return f"{s3_prefix()}{archive_name(filename)}"
 
 
 def _list_remote_sync() -> dict[str, dict]:
@@ -302,23 +352,38 @@ def _gzip_backup_sync(path: Path, destination: Path) -> tuple[int, str]:
     return destination.stat().st_size, sha256.hexdigest()
 
 
-def _upload_compressed_sync(path: Path, key: str) -> int:
+def _uncompressed_sha256_sync(path: Path) -> str:
+    sha256 = hashlib.sha256()
+    opener = gzip.open if path.name.endswith(".sql.gz") else open
+    with opener(path, "rb") as source:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def _put_archive_sync(path: Path, key: str) -> int:
+    archive = archive_name(path.name)
+    extra_args = {
+        "ContentType": "application/gzip",
+        "ContentDisposition": f'attachment; filename="{archive}"',
+        "Metadata": {"original-filename": path.name.removesuffix(".gz")},
+    }
+    client = storage.s3_client()
+    if path.name.endswith(".sql.gz"):
+        # Already compressed at creation: upload the exact same archive without
+        # spending CPU and disk on a second gzip pass.
+        extra_args["Metadata"]["sha256"] = _uncompressed_sha256_sync(path)
+        client.upload_file(str(path), s3_bucket(), key, ExtraArgs=extra_args)
+        return path.stat().st_size
+
     temporary = path.with_name(f".{path.name}.gz.part")
     try:
         compressed_size, sha256 = _gzip_backup_sync(path, temporary)
-        storage.s3_client().upload_file(
-            str(temporary),
-            s3_bucket(),
-            key,
-            ExtraArgs={
-                "ContentType": "application/gzip",
-                "ContentDisposition": f'attachment; filename="{path.name}.gz"',
-                "Metadata": {
-                    "original-filename": path.name,
-                    "sha256": sha256,
-                },
-            },
-        )
+        extra_args["Metadata"]["sha256"] = sha256
+        client.upload_file(str(temporary), s3_bucket(), key, ExtraArgs=extra_args)
         return compressed_size
     finally:
         temporary.unlink(missing_ok=True)
@@ -331,10 +396,11 @@ async def upload_backup(
     known_remote: set[str] | None = None,
     prune: bool = True,
 ) -> dict:
-    """Gzip one local backup and put it in the private ArvanCloud bucket.
+    """Upload a compressed backup to the private ArvanCloud bucket.
 
-    Upload failures are reported in the result instead of failing the local
-    backup operation; the dashboard can retry with the sync action.
+    New backups are already ``.sql.gz``; legacy plain files are compressed on
+    the fly. Upload failures are reported in the result instead of failing the
+    local backup operation; the dashboard can retry with the sync action.
     """
     if kind not in CLOUD_KINDS:
         return {"status": "skipped", "reason": "kind_not_archived"}
@@ -345,7 +411,7 @@ async def upload_backup(
         return {"status": "already_uploaded", "key": key}
 
     try:
-        compressed_size = await run_in_threadpool(_upload_compressed_sync, path, key)
+        compressed_size = await run_in_threadpool(_put_archive_sync, path, key)
         pruned = await prune_remote_backups() if prune else []
     except (BotoCoreError, ClientError, OSError) as exc:
         logger.exception("Could not archive backup %s in S3", path.name)
@@ -394,7 +460,7 @@ async def sync_backups() -> dict:
     uploaded: list[dict] = []
     failed: list[dict] = []
     for path in _local_cloud_backups():
-        remote_name = f"{path.name}.gz"
+        remote_name = archive_name(path.name)
         if remote_name in remote:
             continue
         result = await upload_backup(
@@ -405,7 +471,7 @@ async def sync_backups() -> dict:
         )
         if result["status"] == "uploaded":
             uploaded.append({"filename": path.name, **result})
-            remote[remote_name] = {"key": remote_key(path.name)}
+            remote[remote_name] = {"key": result["key"]}
             remote_object_keys.add(result["key"])
         else:
             failed.append({"filename": path.name, **result})

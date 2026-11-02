@@ -1,12 +1,15 @@
 """Superadmin database backup and restore.
 
-Local backups are portable PostgreSQL SQL dumps in ``BACKUP_DIR``. Manual and
-automatic dumps are also gzipped into the private ArvanCloud S3 bucket. Restores
-are always preceded by a safety backup and run in a single transaction, so a
-failed restore leaves the current database untouched.
+Local backups are gzip-compressed PostgreSQL SQL dumps in ``BACKUP_DIR`` and
+the same archive is copied to the private ArvanCloud S3 bucket. Restores are
+always preceded by a safety backup and run in a single transaction, so a failed
+restore leaves the current database untouched. Older plain ``.sql`` backups
+remain supported.
 """
 
 import logging
+import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
@@ -43,45 +46,48 @@ async def _audit_restore(actor_id, source: str, safety_backup: str) -> None:
 
 
 async def _restore_from(path, actor_id, session: AsyncSession) -> dict:
-    await backups.validate_dump(path)
+    source, temporary = await backups.prepare_restore(path)
+    try:
+        async with backups.BACKUP_LOCK:
+            safety = await backups.create_backup("pre-restore")
 
-    async with backups.BACKUP_LOCK:
-        safety = await backups.create_backup("pre-restore")
+            # End the request transaction before DDL so it cannot hold ACCESS
+            # SHARE locks that block pg_restore's DROP TABLE statements.
+            await session.rollback()
+            command = [
+                "psql",
+                "--no-password",
+                "--quiet",
+                "--dbname",
+                backups.database_url(),
+                "--single-transaction",
+                "--set",
+                "ON_ERROR_STOP=1",
+                "--file",
+                str(source),
+            ]
+            returncode, _, stderr = await backups.run_pg(command)
+            if returncode != 0:
+                backups.command_error("psql restore", stderr)
+                raise AppError(
+                    "restore_failed",
+                    "restore_failed",
+                    500,
+                    {"safety_backup": safety["filename"]},
+                )
 
-        # End the request transaction before DDL so it cannot hold ACCESS
-        # SHARE locks that block pg_restore's DROP TABLE statements.
-        await session.rollback()
-        command = [
-            "psql",
-            "--no-password",
-            "--quiet",
-            "--dbname",
-            backups.database_url(),
-            "--single-transaction",
-            "--set",
-            "ON_ERROR_STOP=1",
-            "--file",
-            str(path),
-        ]
-        returncode, _, stderr = await backups.run_pg(command)
-        if returncode != 0:
-            backups.command_error("psql restore", stderr)
-            raise AppError(
-                "restore_failed",
-                "restore_failed",
-                500,
-                {"safety_backup": safety["filename"]},
-            )
-
-        # Old pooled connections still carry prepared statements for the
-        # replaced schema. Recreate the pool before serving more requests.
-        await engine.dispose()
-        await _audit_restore(actor_id, path.name, safety["filename"])
-        return {
-            "restored": path.name,
-            "safety_backup": safety["filename"],
-            "restart_recommended": True,
-        }
+            # Old pooled connections still carry prepared statements for the
+            # replaced schema. Recreate the pool before serving more requests.
+            await engine.dispose()
+            await _audit_restore(actor_id, path.name, safety["filename"])
+            return {
+                "restored": path.name,
+                "safety_backup": safety["filename"],
+                "restart_recommended": True,
+            }
+    finally:
+        if temporary:
+            temporary.unlink(missing_ok=True)
 
 
 @router.get("")
@@ -100,7 +106,7 @@ async def list_backups(actor: User = Depends(require_superadmin)) -> dict:
     snapshot = await backups.remote_snapshot()
     remote_keys = set(snapshot.get("items", {}))
     for item in items:
-        item["remote"] = f"{item['filename']}.gz" in remote_keys
+        item["remote"] = backups.archive_name(item["filename"]) in remote_keys
     return {
         "data": {
             "items": items,
@@ -140,9 +146,12 @@ async def download_backup(
 ) -> FileResponse:
     del actor
     path = backups.backup_path(filename)
+    media_type = (
+        "application/gzip" if path.name.endswith(".sql.gz") else "application/sql"
+    )
     return FileResponse(
         path,
-        media_type="application/octet-stream",
+        media_type=media_type,
         filename=path.name,
         headers={"Cache-Control": "no-store"},
     )
@@ -184,8 +193,8 @@ async def restore_uploaded_backup(
         raise AppError("restore_confirmation_required", "restore_confirmation_required", 422)
 
     directory = backups.backup_dir()
-    destination = directory / backups.new_backup_name("uploaded")
-    temporary = directory / f".{destination.name}.part"
+    destination: Path | None = None
+    temporary = directory / f".upload-{uuid.uuid4().hex}.part"
     maximum = settings.BACKUP_MAX_UPLOAD_MB * 1024 * 1024
     total = 0
     try:
@@ -202,9 +211,14 @@ async def restore_uploaded_backup(
         if total == 0:
             raise AppError("invalid_backup_file", "invalid_backup_file", 422)
         temporary.chmod(0o600)
+        compressed = backups.is_gzip_file(temporary)
+        destination = directory / backups.new_backup_name(
+            "uploaded", compressed=compressed
+        )
         temporary.replace(destination)
         return {"data": await _restore_from(destination, actor.id, session)}
     except Exception:
         temporary.unlink(missing_ok=True)
-        destination.unlink(missing_ok=True)
+        if destination:
+            destination.unlink(missing_ok=True)
         raise
