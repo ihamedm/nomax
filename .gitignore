@@ -18,6 +18,9 @@ frontend/coverage/
 # Local configuration and secrets
 .env
 .env.local
+.env.prod
+.env.production
+*.pem
 
 # Local databases / scratch files
 *.db

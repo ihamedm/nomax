@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -16,6 +17,8 @@ from app.services.otp_service import OtpService
 from app.services.sms_provider import get_sms_provider
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 
 def _client_ip(request: Request) -> str:
@@ -36,6 +39,15 @@ async def otp_request(
     client_ip = _client_ip(request)
     code = await otp_service.issue(phone, ip=client_ip, session=session)
     if code is None:
+        return {"data": {"status": "sent"}}
+    if settings.APP_ENV == "production":
+        # The console provider is a development fallback. Returning the code
+        # here would let anyone log in as any phone number, so never expose it
+        # in production: the operator reads it from Redis instead.
+        logger.warning(
+            "SMS_PROVIDER=console in production; OTP for %s was not returned to the client",
+            phone,
+        )
         return {"data": {"status": "sent"}}
     return {"data": {"status": "issued", "dev_otp": code, "expires_in": settings.OTP_TTL_SECONDS}}
 

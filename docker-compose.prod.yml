@@ -58,6 +58,18 @@ services:
       BACKUP_DAILY_HOUR: ${BACKUP_DAILY_HOUR:-3}
       BACKUP_DAILY_MINUTE: ${BACKUP_DAILY_MINUTE:-0}
       BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Tehran}
+      # SMS/OTP. Production must use a real provider: with SMS_PROVIDER=console
+      # the API never delivers codes and (since APP_ENV=production) never
+      # returns them either, so every login would fail.
+      SMS_PROVIDER: ${SMS_PROVIDER:-mellipayamak}
+      SMS_API_URL: ${SMS_API_URL:-https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber}
+      SMS_USERNAME: ${SMS_USERNAME:-}
+      SMS_PASSWORD: ${SMS_PASSWORD:-}
+      SMS_OTP_BODY_ID: ${SMS_OTP_BODY_ID:-0}
+      SMS_TIMEOUT_SECONDS: ${SMS_TIMEOUT_SECONDS:-8}
+      SMS_MAX_ATTEMPTS: ${SMS_MAX_ATTEMPTS:-2}
+      OTP_RATE_LIMIT_PER_HOUR: ${OTP_RATE_LIMIT_PER_HOUR:-3}
+      DEV_OTP_ENABLED: ${DEV_OTP_ENABLED:-false}
       GEOCODER_URL: ${GEOCODER_URL:-https://nominatim.openstreetmap.org}
       GEOCODER_USER_AGENT: "${GEOCODER_USER_AGENT:-NOMAX/1.0 (+https://nomax.ir)}"
       GEOCODER_TIMEOUT_SECONDS: ${GEOCODER_TIMEOUT_SECONDS:-8}
@@ -81,7 +93,10 @@ services:
     volumes:
       - backups:/data/backups
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8001/ready')"]
+      # Liveness only: /ready also probes Redis and ArvanCloud S3, and a
+      # transient S3 hiccup must not keep web/worker from starting. Use /ready
+      # for monitoring and alerts instead.
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -149,7 +164,18 @@ services:
       start_period: 240s
 
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # Public, build-time values baked into the JS bundle. Set
+      # VITE_NESHAN_MAP_KEY in .env.prod to enable the map; leaving it empty
+      # degrades to the manual location picker.
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_APP_ENV: ${VITE_APP_ENV:-production}
+        VITE_NESHAN_MAP_KEY: ${VITE_NESHAN_MAP_KEY:-}
+        VITE_MAP_CENTER_LAT: ${VITE_MAP_CENTER_LAT:-30.638}
+        VITE_MAP_CENTER_LNG: ${VITE_MAP_CENTER_LNG:-50.838}
+        VITE_MAP_DEFAULT_ZOOM: ${VITE_MAP_DEFAULT_ZOOM:-13}
     restart: unless-stopped
     depends_on:
       api:

@@ -1,5 +1,10 @@
 # Production deploy (Phase 9)
 
+> **First deploy on a fresh VPS (biznestly.ir, ArvanCloud CDN):** follow
+> [`docs/deploy-biznestly.md`](../docs/deploy-biznestly.md). It covers server
+> bootstrap, DNS/TLS ordering, CDN cache rules and verification. The commands
+> below assume the stack is already provisioned.
+
 Iranian VPS, Docker Compose, Caddy automatic HTTPS.
 
 ```bash

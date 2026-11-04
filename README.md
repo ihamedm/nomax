@@ -301,11 +301,18 @@ upgraded and must be rebuilt; see `deploy/README.md`.
 
 Backend variables are documented in `backend/.env.example`; frontend variables
 in `frontend/.env.example`. `MAX_BUSINESS_IMAGES` (default `6`) controls the
-business gallery limit. SMS uses the console provider and object storage uses
+business gallery limit. SMS uses the console provider in development and the
+Mellipayamak shared-service pattern in production: production **must** set
+`SMS_PROVIDER=mellipayamak` plus `SMS_USERNAME`/`SMS_PASSWORD`/`SMS_OTP_BODY_ID`,
+because the API never returns OTP codes when `APP_ENV=production` (a missing
+provider means nobody can log in, not an open door). Object storage uses
 ArvanCloud S3. Fill `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env`; `/ready`
 reports the S3 connectivity state and the dashboard file manager
 (`/admin/files`) needs the `storage.manage` permission. Without credentials,
 uploads fall back to local disk for tests.
+
+Production deploy on an Ubuntu VPS behind ArvanCloud CDN, including DNS/TLS
+ordering and CDN cache rules: [`docs/deploy-biznestly.md`](docs/deploy-biznestly.md).
 
 Laya category suggestions are **temporarily disabled** for the beta (local and
 production): `LAYA_ENABLED=false` is set in `.env` / `.env.prod.example` and the

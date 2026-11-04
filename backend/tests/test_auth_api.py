@@ -4,6 +4,16 @@ from app.core.security import create_access_token
 
 
 @pytest.mark.asyncio
+async def test_console_otp_is_not_exposed_in_production(client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "APP_ENV", "production")
+    response = await client.post("/api/v1/auth/otp/request", json={"phone": "09120001111"})
+    assert response.status_code == 200
+    assert response.json()["data"] == {"status": "sent"}
+
+
+@pytest.mark.asyncio
 async def test_health(client):
     response = await client.get("/health")
     assert response.status_code == 200
