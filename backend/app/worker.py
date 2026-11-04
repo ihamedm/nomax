@@ -22,7 +22,8 @@ import sqlalchemy as sa
 
 from app.db.session import AsyncSessionLocal
 from app.models.quote import QuoteRequest
-from app.services import quote_broker
+from app.core.redis import redis_client
+from app.services import map_cache, quote_broker
 from app.services.backup_scheduler import run_backup_scheduler
 from app.services.outbox import claim_due
 from app.services.quote_dispatcher import retry_due_quote
@@ -84,12 +85,33 @@ async def _process_quote_ids(
     return processed
 
 
-async def _sweep_scheduled_jobs(session) -> int:
+MAX_JOB_ATTEMPTS = 5
+
+
+async def _run_scheduled_job(session, job, redis) -> None:
+    """Dispatch a legacy outbox job to its handler."""
+    if job.type == map_cache.JOB_TYPE:
+        await map_cache.refresh_from_job(session, redis)
+        return
+    logger.info("no handler for job type %s", job.type)
+
+
+async def _sweep_scheduled_jobs(session, redis=None) -> int:
     jobs = await claim_due(session)
+    if not jobs:
+        return 0
+    if redis is None:
+        redis = redis_client
     for job in jobs:
-        logger.info("job %s %s", job.type, job.id)
-        job.status = "done"
         job.attempts += 1
+        try:
+            await _run_scheduled_job(session, job, redis)
+            job.status = "done"
+            job.last_error = None
+        except Exception as exc:  # noqa: BLE001 - one bad job must not block the queue
+            logger.exception("job %s (%s) failed", job.id, job.type)
+            job.last_error = str(exc)[:500]
+            job.status = "pending" if job.attempts < MAX_JOB_ATTEMPTS else "failed"
     await session.flush()
     return len(jobs)
 

@@ -49,6 +49,14 @@ async def _seed_categories() -> None:
     async with AsyncSessionLocal() as session:
         stats = await seed_categories(session)
         await session.commit()
+    # Reseeding bypasses the CMS, so drop any cached catalog snapshot.
+    try:
+        from app.core.redis import redis_client
+        from app.services import catalog_cache
+
+        await catalog_cache.flush_catalog(redis_client)
+    except Exception:  # noqa: BLE001 - catalog cache is optional for seeding
+        pass
     print(
         "categories seeded: "
         f"{stats['categories_created']} created, {stats['categories_updated']} updated; "

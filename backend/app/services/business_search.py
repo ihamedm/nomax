@@ -21,7 +21,10 @@ class BusinessSearchParams:
     subcategory_slug: str | None = None
     lat: float | None = None
     lng: float | None = None
-    radius_km: float = 10.0
+    # ``None`` means "no distance cap": results are still ordered by distance
+    # for the ``nearest`` sort, but businesses outside any radius are returned
+    # too. A caller opts into a hard cap by sending an explicit radius.
+    radius_km: float | None = None
     sort: str = "nearest"
     limit: int = 20
     offset: int = 0
@@ -215,14 +218,11 @@ async def _search_postgres(
     # for bind parameters inside a geography cast.
     point_sql = f"ST_SetSRID(ST_MakePoint({float(params.lng)!r}, {float(params.lat)!r}), 4326)::geography"
     distance_expr = sa.literal_column(f"ST_Distance(businesses.geo, {point_sql})")
-    within_expr = sa.text(
-        f"ST_DWithin(businesses.geo, {point_sql}, {float(params.radius_km) * 1000!r})"
-    )
 
     statement = (
         _base_select()
         .add_columns(distance_expr.label("distance_m"))
-        .where(*conditions, within_expr)
+        .where(*conditions)
         .order_by(
             sa.text("distance_m ASC NULLS LAST"),
             Business.rating_avg.desc(),
@@ -231,6 +231,12 @@ async def _search_postgres(
         .limit(params.limit + 1)
         .offset(params.offset)
     )
+    if params.radius_km is not None:
+        # Only cap the results when the caller explicitly asked for a radius.
+        within_expr = sa.text(
+            f"ST_DWithin(businesses.geo, {point_sql}, {float(params.radius_km) * 1000!r})"
+        )
+        statement = statement.where(within_expr)
     if params.sort == "top":
         statement = statement.order_by(None).order_by(
             Business.rating_avg.desc(), Business.rating_count.desc(), Business.id
@@ -271,13 +277,19 @@ async def _search_in_memory(
     businesses = (await session.execute(statement)).scalars().all()
 
     hits: list[BusinessHit] = []
-    radius_m = params.radius_km * 1000
+    radius_m = params.radius_km * 1000 if params.radius_km is not None else None
     for business in businesses:
-        if business.geo_lat is None or business.geo_lng is None:
+        distance = (
+            haversine_m(params.lat, params.lng, business.geo_lat, business.geo_lng)
+            if business.geo_lat is not None and business.geo_lng is not None
+            else None
+        )
+        # Without an explicit radius, businesses missing coordinates are kept
+        # (they simply sort last for the `nearest` mode) so a small city doesn't
+        # lose rows that were created before geo data existed.
+        if radius_m is not None and (distance is None or distance > radius_m):
             continue
-        distance = haversine_m(params.lat, params.lng, business.geo_lat, business.geo_lng)
-        if distance <= radius_m:
-            hits.append(BusinessHit(business=business, distance_m=distance))
+        hits.append(BusinessHit(business=business, distance_m=distance))
 
     ordered = _python_sort(hits, params.sort, params.has_coords)
     window = ordered[params.offset : params.offset + params.limit + 1]

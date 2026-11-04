@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.admin import admin_router, dev_router
+from app.api.v1.admin_cache import router as admin_cache_router
 from app.api.v1.admin_quotes import router as admin_quotes_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.auth import router as auth_router
@@ -22,6 +23,7 @@ from app.api.v1.utility import router as utility_router
 from app.api.v1.categories import router as categories_router
 from app.api.v1.geo import router as geo_router
 from app.api.v1.health import router as health_router
+from app.api.v1.map import router as map_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.cms import router as cms_router
 from app.api.v1.admin_data import router as admin_data_router
@@ -68,6 +70,7 @@ def create_app() -> FastAPI:
     application.include_router(auth_router, prefix="/api/v1")
     application.include_router(categories_router, prefix="/api/v1")
     application.include_router(geo_router, prefix="/api/v1")
+    application.include_router(map_router, prefix="/api/v1")
     application.include_router(businesses_router, prefix="/api/v1")
     application.include_router(me_router, prefix="/api/v1")
     application.include_router(bookmarks_router, prefix="/api/v1")
@@ -84,6 +87,7 @@ def create_app() -> FastAPI:
     application.include_router(admin_data_router, prefix="/api/v1")
     application.include_router(admin_backups_router, prefix="/api/v1")
     application.include_router(admin_router, prefix="/api/v1")
+    application.include_router(admin_cache_router, prefix="/api/v1")
     application.include_router(admin_quotes_router, prefix="/api/v1")
     application.include_router(analytics_router, prefix="/api/v1")
     if settings.APP_ENV != "production" and settings.DEV_OTP_ENABLED:

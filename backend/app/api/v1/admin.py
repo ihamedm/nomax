@@ -18,6 +18,7 @@ from app.services.inapp_notifications import (
     notify_business_approved,
     notify_business_rejected,
 )
+from app.services import map_cache
 from app.services.otp_service import OtpService
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
@@ -339,6 +340,7 @@ async def update_admin_business(
                 business_slug=business.slug,
                 business_name=business.name,
             )
+    await map_cache.enqueue_refresh(session)
     await _write_audit(
         session,
         actor_id=actor.id,
@@ -366,6 +368,7 @@ async def delete_admin_business(
 
     business = await _get_admin_business(session, business_id)
     business.deleted_at = datetime.now(timezone.utc)
+    await map_cache.enqueue_refresh(session)
     await _write_audit(
         session,
         actor_id=actor.id,
@@ -457,6 +460,9 @@ async def approve_business(
             business_slug=business.slug,
             business_name=business.name,
         )
+    if not was_approved:
+        # The public map reads a Redis snapshot; refresh it from the worker.
+        await map_cache.enqueue_refresh(session)
     await _write_audit(session, actor.id, "business.approve", "business", str(bid), after={"status": "approved"})
     await session.commit()
     return {"data": {"id": str(bid), "status": "approved"}}
@@ -488,6 +494,7 @@ async def reject_business(
         business_name=business.name,
         reason=reason,
     )
+    await map_cache.enqueue_refresh(session)
     await _write_audit(session, actor.id, "business.reject", "business", str(bid), after={"reason": business.rejection_reason})
     await session.commit()
     return {"data": {"id": str(bid), "status": "rejected"}}
@@ -665,19 +672,46 @@ async def list_users(
     role: Optional[UserRole] = Query(None),
     verified: Optional[bool] = Query(None),
     q: Optional[str] = Query(None, max_length=120),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
 ) -> dict:
     del actor  # superadmin gate already enforced via dependency
-    query = select(User).where(User.deleted_at.is_(None))
+    conditions = [User.deleted_at.is_(None)]
     if role is not None:
-        query = query.where(User.role == role)
+        conditions.append(User.role == role)
     if verified is not None:
-        query = query.where(User.is_verified.is_(verified))
-    if q:
-        term = f"%{q.strip()}%"
-        query = query.where(or_(User.full_name.ilike(term), User.phone.ilike(term)))
-    result = await session.execute(query.order_by(User.created_at))
-    users = list(result.scalars().all())
-    return {"data": {"items": [_to_admin_response(u) for u in users]}}
+        conditions.append(User.is_verified.is_(verified))
+
+    term = (q or "").strip()
+    if term:
+        clauses = [User.full_name.ilike(f"%{term}%")]
+        # Phones are stored as 10 digits without the leading 0/98 prefix, so
+        # accept operator input such as "0912…" or "+98912…" as well.
+        digits = "".join(ch for ch in term if ch.isdigit())
+        if digits.startswith("98") and len(digits) > 10:
+            digits = digits[2:]
+        digits = digits.lstrip("0")
+        if digits:
+            clauses.append(User.phone.ilike(f"%{digits}%"))
+        conditions.append(or_(*clauses))
+
+    total = int(
+        (await session.execute(select(func.count(User.id)).where(*conditions))).scalar() or 0
+    )
+    rows = (
+        await session.execute(
+            select(User)
+            .where(*conditions)
+            .order_by(User.created_at.desc(), User.id)
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+        )
+    ).scalars().all()
+    pages = max(1, (total + per_page - 1) // per_page)
+    return {
+        "data": {"items": [_to_admin_response(u) for u in rows]},
+        "meta": {"page": page, "per_page": per_page, "total": total, "pages": pages},
+    }
 
 
 @router.post("/users")

@@ -23,6 +23,7 @@ const NAV = [
   { to: "/admin/files", label: "مدیریت فایل‌ها", icon: "▤", end: false, superadminOnly: false, permission: "storage.manage" },
   { to: "/admin/data", label: "مدل‌های داده", icon: "⛁", end: false, superadminOnly: true, permission: null },
   { to: "/admin/backups", label: "پشتیبان‌گیری", icon: "▤", end: false, superadminOnly: true, permission: null },
+  { to: "/admin/cache", label: "کش‌ها", icon: "⚡", end: false, superadminOnly: false, permission: "admin.settings.manage" },
   { to: "/admin/users", label: "کاربران و دسترسی‌ها", icon: "☷", end: false, superadminOnly: true, permission: null },
   { to: "/admin/dev-otps", label: "کدهای ورود", icon: "⌘", end: false, superadminOnly: true, permission: null },
 ];

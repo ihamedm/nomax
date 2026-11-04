@@ -16,6 +16,14 @@ export interface MapMarker {
   zIndexOffset?: number;
   offsetX?: number;
   offsetY?: number;
+  /** When set, the pin renders as a numbered cluster bubble. */
+  count?: number;
+}
+
+export interface MapViewport {
+  zoom: number;
+  center: Coordinates;
+  bbox: { west: number; south: number; east: number; north: number };
 }
 
 interface NeshanMapProps {
@@ -27,6 +35,8 @@ interface NeshanMapProps {
   fitToMarkers?: boolean;
   onMapClick?: (coords: Coordinates) => void;
   onMarkerClick?: (marker: MapMarker) => void;
+  /** Fires after pan/zoom so callers can fetch only the visible area. */
+  onViewportChange?: (viewport: MapViewport) => void;
   pickerMarker?: Coordinates | null;
   onPickerMove?: (coords: Coordinates) => void;
 }
@@ -59,6 +69,20 @@ function markerIcon(
   });
 }
 
+function clusterIcon(L: Leaflet, count: number) {
+  const size = count >= 100 ? 56 : count >= 10 ? 46 : 38;
+  const label = count.toLocaleString("fa-IR", { useGrouping: false });
+  return L.divIcon({
+    className: "",
+    html: `<span class="nomax-map-cluster" style="width:${size}px;height:${size}px;font-size:${
+      count >= 100 ? 12 : 13
+    }px">${label}</span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+}
+
 function popupElement(marker: MapMarker): HTMLElement {
   const container = document.createElement("div");
   container.className = "text-right";
@@ -87,6 +111,7 @@ export function NeshanMap({
   fitToMarkers = false,
   onMapClick,
   onMarkerClick,
+  onViewportChange,
   pickerMarker,
   onPickerMove,
 }: NeshanMapProps) {
@@ -97,12 +122,14 @@ export function NeshanMap({
   const clickRef = useRef(onMapClick);
   const markerClickRef = useRef(onMarkerClick);
   const pickerMoveRef = useRef(onPickerMove);
+  const viewportRef = useRef(onViewportChange);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   clickRef.current = onMapClick;
   markerClickRef.current = onMarkerClick;
   pickerMoveRef.current = onPickerMove;
+  viewportRef.current = onViewportChange;
 
   const key = getNeshanKey();
 
@@ -143,6 +170,24 @@ export function NeshanMap({
             clickRef.current?.({ lat: event.latlng.lat, lng: event.latlng.lng });
           });
         }
+
+        const emitViewport = () => {
+          const bounds = map.getBounds();
+          const current = map.getCenter();
+          viewportRef.current?.({
+            zoom: Math.round(map.getZoom()),
+            center: { lat: current.lat, lng: current.lng },
+            bbox: {
+              west: bounds.getWest(),
+              south: bounds.getSouth(),
+              east: bounds.getEast(),
+              north: bounds.getNorth(),
+            },
+          });
+        };
+        map.on("moveend", emitViewport);
+        map.on("zoomend", emitViewport);
+        map.whenReady(() => emitViewport());
 
         setReady(true);
       })
@@ -194,9 +239,12 @@ export function NeshanMap({
 
     for (const marker of markers) {
       const instance = L.marker([marker.lat, marker.lng], {
-        icon: markerIcon(L, false, marker.color, marker.offsetX, marker.offsetY),
+        icon:
+          marker.count !== undefined
+            ? clusterIcon(L, marker.count)
+            : markerIcon(L, false, marker.color, marker.offsetX, marker.offsetY),
         title: marker.title ?? "",
-        zIndexOffset: marker.zIndexOffset ?? 0,
+        zIndexOffset: marker.count !== undefined ? 500 : marker.zIndexOffset ?? 0,
       });
       if (markerClickRef.current) {
         instance.on("click", () => markerClickRef.current?.(marker));

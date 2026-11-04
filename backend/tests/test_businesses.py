@@ -228,6 +228,70 @@ async def test_radius_filter_and_sort_modes(client, db_session, create_user, cat
 
 
 @pytest.mark.asyncio
+async def test_nearest_without_radius_returns_every_business(client, db_session, create_user, catalog):
+    """Searching with coordinates must not silently drop far-away businesses.
+
+    The radius cap is opt-in: without ``radius_km`` the results are sorted by
+    distance but every approved business (including ones with no coordinates)
+    is still returned.
+    """
+    owner = await create_user("9130000005")
+    automotive = catalog["categories"]["automotive"]
+    mechanic = catalog["subcategories"][(automotive.id, "mechanic")]
+
+    near = await make_business(
+        db_session,
+        owner.id,
+        automotive,
+        mechanic,
+        slug="no-radius-near",
+        name="نزدیک بدون شعاع",
+        lat=BEHBAHAN["lat"] + 0.01,
+        lng=BEHBAHAN["lng"],
+    )
+    # ~40km away: would have been filtered out by the old implicit 10km cap.
+    far = await make_business(
+        db_session,
+        owner.id,
+        automotive,
+        mechanic,
+        slug="no-radius-far",
+        name="دور بدون شعاع",
+        lat=BEHBAHAN["lat"] + 0.36,
+        lng=BEHBAHAN["lng"],
+    )
+    no_geo = Business(
+        owner_id=owner.id,
+        category_id=automotive.id,
+        subcategory_id=mechanic.id,
+        name="بدون مختصات",
+        slug="no-radius-no-geo",
+        address="بهبهان",
+        status=BusinessStatus.APPROVED,
+    )
+    db_session.add(no_geo)
+    await db_session.commit()
+
+    response = await client.get(
+        "/api/v1/businesses", params={**BEHBAHAN, "sort": "nearest"}
+    )
+    assert response.status_code == 200
+    items = _items(response)
+    slugs = [item["slug"] for item in items]
+    assert set(slugs) == {near.slug, far.slug, no_geo.slug}
+    # Distance ordering keeps the closest first; rows without geo sort last.
+    assert slugs[:2] == [near.slug, far.slug]
+    assert items[0]["distance_m"] < items[1]["distance_m"]
+    assert items[-1]["distance_m"] is None
+
+    # An explicit radius still filters exactly as before.
+    capped = await client.get(
+        "/api/v1/businesses", params={**BEHBAHAN, "sort": "nearest", "radius_km": 10}
+    )
+    assert [item["slug"] for item in _items(capped)] == [near.slug]
+
+
+@pytest.mark.asyncio
 async def test_cursor_pagination(client, db_session, create_user, catalog):
     owner = await create_user("9130000004")
     automotive = catalog["categories"]["automotive"]

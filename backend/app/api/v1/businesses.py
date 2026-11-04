@@ -26,6 +26,7 @@ from app.services.business_search import (
     decode_cursor,
     search_businesses,
 )
+from app.services import map_cache
 from app.services.inapp_notifications import (
     notify_business_approved,
     notify_business_rejected,
@@ -143,7 +144,9 @@ async def list_businesses(
     subcat: str | None = Query(None, max_length=80),
     lat: float | None = Query(None, ge=-90, le=90),
     lng: float | None = Query(None, ge=-180, le=180),
-    radius_km: float = Query(10, gt=0, le=50),
+    # No cap by default: `nearest` only changes the ordering. Operators/clients
+    # that want a hard distance limit pass `radius_km` explicitly.
+    radius_km: float | None = Query(None, gt=0, le=50),
     sort: SortMode = "nearest",
     cursor: str | None = Query(None, max_length=200),
     limit: int = Query(20, ge=1, le=50),
@@ -936,6 +939,9 @@ async def update_business(
 
     # Explicit so gallery-only edits also move the public "last updated" time.
     business.updated_at = datetime.now(timezone.utc)
+    if business.status == BusinessStatus.APPROVED:
+        # Name/address/coordinates may have changed under the map snapshot.
+        await map_cache.enqueue_refresh(session)
     await session.commit()
     await session.refresh(business)
     data = _business_payload(BusinessHit(business=business), detail=True)

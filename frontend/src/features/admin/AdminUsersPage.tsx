@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { Badge, RoleBadge } from "@/components/ui/badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
@@ -10,14 +10,12 @@ import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { formatPhone, GROUP_LABELS, permissionLabel, ROLE_LABELS } from "@/lib/format";
 import { formatJalali } from "@/lib/jalali";
-import { useApi } from "@/lib/query";
-import { DataTable, type DataColumn } from "@/features/admin/data-table";
+import { useApi, useApiWithMeta } from "@/lib/query";
+import { DataTable, type DataColumn, type PageMeta } from "@/features/admin/data-table";
 import { useAuth } from "@/stores/auth";
 import type { AdminUser, PermissionItem, Role } from "@/types";
 
 const ROLES: Role[] = ["customer", "owner", "admin", "superadmin"];
-
-type VerifiedFilter = "all" | "verified" | "unverified";
 
 interface UserFormState {
   full_name: string;
@@ -144,13 +142,31 @@ export function AdminUsersPage() {
   const me = useAuth((state) => state.user);
   const toast = useToast();
   const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
 
-  const usersQuery = useApi<{ items: AdminUser[] }>(["admin", "users"], "/admin/users");
+  const roleFilter = (params.get("role") ?? "") as "" | Role;
+  const verifiedFilter = (params.get("verified") ?? "") as "" | "verified" | "unverified";
+  const qParam = params.get("q") ?? "";
+  const page = Math.max(1, Number(params.get("page") ?? "1") || 1);
+
+  const [search, setSearch] = useState(qParam);
+  useEffect(() => setSearch(qParam), [qParam]);
+
+  const query = new URLSearchParams({ page: String(page), per_page: "15" });
+  if (roleFilter) query.set("role", roleFilter);
+  if (verifiedFilter) query.set("verified", verifiedFilter === "verified" ? "true" : "false");
+  if (qParam) query.set("q", qParam);
+
+  const usersQuery = useApiWithMeta<{ items: AdminUser[] }, PageMeta>(
+    ["admin", "users", roleFilter, verifiedFilter, qParam, page],
+    `/admin/users?${query.toString()}`,
+  );
   const permissionsQuery = useApi<{ items: PermissionItem[] }>(
     ["admin", "permissions"],
     "/admin/permissions",
   );
-  const users = usersQuery.data?.items ?? [];
+  const users = usersQuery.data?.data.items ?? [];
+  const meta = usersQuery.data?.meta;
   const permissions = permissionsQuery.data?.items ?? [];
   const loading = usersQuery.isLoading || permissionsQuery.isLoading;
   const error = usersQuery.error
@@ -168,15 +184,14 @@ export function AdminUsersPage() {
   const [newForm, setNewForm] = useState<UserFormState>(emptyForm);
   const [creating, setCreating] = useState(false);
 
-  const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
-  const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>("all");
-
-  const filteredUsers = users.filter((user) => {
-    if (roleFilter !== "all" && user.role !== roleFilter) return false;
-    if (verifiedFilter === "verified" && !user.is_verified) return false;
-    if (verifiedFilter === "unverified" && user.is_verified) return false;
-    return true;
-  });
+  function updateParams(patch: Record<string, string | null>) {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
+    setParams(next);
+  }
 
   function reload() {
     void usersQuery.refetch();
@@ -384,14 +399,33 @@ export function AdminUsersPage() {
 
       <DataTable
         columns={userColumns}
-        rows={filteredUsers}
+        rows={users}
         rowKey={(user) => user.id}
         loading={loading}
         error={error}
         empty="کاربری با این فیلترها پیدا نشد."
         minWidthClassName="min-w-[960px]"
+        meta={meta ? { page: meta.page, pages: meta.pages, total: meta.total } : undefined}
+        onPageChange={(next) => updateParams({ page: String(next) })}
         toolbar={
           <div className="flex flex-wrap items-center gap-3">
+            <form
+              className="flex min-w-64 flex-1 items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                updateParams({ q: search.trim() || null, page: null });
+              }}
+            >
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="جستجوی نام یا شماره موبایل…"
+                aria-label="جستجوی کاربر"
+              />
+              <Button size="sm" type="submit" variant="outline">
+                جستجو
+              </Button>
+            </form>
             <div className="flex items-center gap-2">
               <label htmlFor="role-filter" className="text-xs text-slate-500">
                 فیلتر نقش
@@ -399,10 +433,12 @@ export function AdminUsersPage() {
               <select
                 id="role-filter"
                 value={roleFilter}
-                onChange={(event) => setRoleFilter(event.target.value as "all" | Role)}
-                className="h-10 w-56 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                onChange={(event) =>
+                  updateParams({ role: event.target.value || null, page: null })
+                }
+                className="h-11 w-56 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               >
-                <option value="all">همه نقش‌ها</option>
+                <option value="">همه نقش‌ها</option>
                 <option value="customer">مشتری</option>
                 <option value="owner">کسب‌وکار</option>
                 <option value="admin">مدیر</option>
@@ -416,10 +452,12 @@ export function AdminUsersPage() {
               <select
                 id="verified-filter"
                 value={verifiedFilter}
-                onChange={(event) => setVerifiedFilter(event.target.value as VerifiedFilter)}
-                className="h-10 w-48 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                onChange={(event) =>
+                  updateParams({ verified: event.target.value || null, page: null })
+                }
+                className="h-11 w-48 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               >
-                <option value="all">همه کاربران</option>
+                <option value="">همه کاربران</option>
                 <option value="verified">تأییدشده</option>
                 <option value="unverified">تأییدنشده</option>
               </select>

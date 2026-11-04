@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -8,24 +8,26 @@ import { Button, Spinner } from "@/components/ui/button";
 import { SearchIcon } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { apiWithMeta, errorMessage } from "@/lib/api";
+import { api, apiWithMeta, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { fa } from "@/lib/format";
 import { getCurrentPosition } from "@/lib/geolocation";
 import { useApi } from "@/lib/query";
 import { useUi } from "@/stores/ui";
 import { BusinessCard } from "@/features/business/BusinessCard";
-import { NeshanMap, type MapMarker } from "@/features/map/NeshanMap";
+import { NeshanMap, type MapMarker, type MapViewport } from "@/features/map/NeshanMap";
 import type {
+  BusinessCategory,
   BusinessListItem,
   BusinessSort,
   Category,
+  Coordinates,
   SearchMeta,
   Subcategory,
 } from "@/types";
 
 const SORT_OPTIONS: Array<{ value: BusinessSort; label: string; hint: string }> = [
-  { value: "nearest", label: "نزدیک‌ترین", hint: "نزدیک‌ترین کسب‌وکارها به موقعیت شما" },
+  { value: "nearest", label: "نزدیکترین", hint: "نزدیکترین کسب‌وکارها اول فهرست می‌شوند" },
   { value: "top", label: "بهترین امتیاز", hint: "بیشترین امتیاز و تعداد نظر" },
   { value: "newest", label: "جدیدترین", hint: "تازه‌ترین کسب‌وکارهای تأییدشده" },
   { value: "urgent", label: "۲۴ ساعته", hint: "کسب‌وکارهای فعال در تمام ساعات" },
@@ -38,9 +40,41 @@ function parseSort(value: string | null): BusinessSort {
   return SORT_OPTIONS.some((option) => option.value === value) ? (value as BusinessSort) : "nearest";
 }
 
-function parseRadius(value: string | null): number {
+/** `null` means "no distance limit"; results are still ordered by distance. */
+function parseRadius(value: string | null): number | null {
   const parsed = Number(value);
-  return RADIUS_OPTIONS.includes(parsed) ? parsed : 10;
+  return value && RADIUS_OPTIONS.includes(parsed) ? parsed : null;
+}
+
+interface MapCluster {
+  id: string;
+  lat: number;
+  lng: number;
+  count: number;
+}
+
+interface MapPoint {
+  id: string;
+  slug: string;
+  name: string;
+  lat: number;
+  lng: number;
+  address: string;
+  short_description?: string | null;
+  rating_avg: number;
+  rating_count: number;
+  is_24h: boolean;
+  is_verified: boolean;
+  profile_image_url?: string | null;
+  category?: BusinessCategory | null;
+}
+
+interface MapFeed {
+  mode: "clusters" | "points";
+  zoom: number;
+  generated_at?: string | null;
+  clusters: MapCluster[];
+  items: MapPoint[];
 }
 
 function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
@@ -75,7 +109,10 @@ export function SearchPage() {
   const trendingQuery = useApi<{ items: string[] }>(["search", "trending"], "/search/trending");
 
   const [view, setView] = useState<"list" | "map">("list");
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<MapPoint | null>(null);
+  const [viewport, setViewport] = useState<MapViewport | null>(null);
+  const [camera, setCamera] = useState<{ center: Coordinates; zoom: number } | null>(null);
+  const viewportTimer = useRef<number | null>(null);
 
   const [locating, setLocating] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -137,10 +174,10 @@ export function SearchPage() {
       const search = new URLSearchParams({
         limit: "12",
         sort,
-        radius_km: String(radius),
         lat: String(location.lat),
         lng: String(location.lng),
       });
+      if (radius !== null) search.set("radius_km", String(radius));
       if (qParam) search.set("q", qParam);
       if (catParam) search.set("cat", catParam);
       if (subcatParam) search.set("subcat", subcatParam);
@@ -155,13 +192,59 @@ export function SearchPage() {
     () => searchQuery.data?.pages.flatMap((page) => page.data.items) ?? [],
     [searchQuery.data],
   );
+
+  // The map never downloads every business: it asks for the current viewport at
+  // the current zoom and receives either grid clusters (low zoom) or the
+  // individual businesses inside that box (detail zoom).
+  const bboxKey = viewport
+    ? [viewport.bbox.west, viewport.bbox.south, viewport.bbox.east, viewport.bbox.north]
+        .map((value) => value.toFixed(4))
+        .join(",")
+    : "";
+  const mapFeed = useQuery({
+    queryKey: ["map", "businesses", viewport?.zoom ?? null, bboxKey, qParam, catParam, subcatParam],
+    enabled: view === "map" && viewport !== null,
+    placeholderData: keepPreviousData,
+    queryFn: () => {
+      if (!viewport) throw new Error("no_viewport");
+      const search = new URLSearchParams({
+        zoom: String(viewport.zoom),
+        west: String(viewport.bbox.west),
+        south: String(viewport.bbox.south),
+        east: String(viewport.bbox.east),
+        north: String(viewport.bbox.north),
+      });
+      if (qParam) search.set("q", qParam);
+      if (catParam) search.set("cat", catParam);
+      if (subcatParam) search.set("subcat", subcatParam);
+      return api<MapFeed>(`/map/businesses?${search.toString()}`);
+    },
+  });
+
+  const mapLoading = mapFeed.isFetching && !mapFeed.data;
+
+  const handleViewport = useCallback((next: MapViewport) => {
+    if (viewportTimer.current) window.clearTimeout(viewportTimer.current);
+    viewportTimer.current = window.setTimeout(() => setViewport(next), 220);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (viewportTimer.current) window.clearTimeout(viewportTimer.current);
+    },
+    [],
+  );
+
+  // Entering the map view seeds the camera from the user's location.
+  useEffect(() => {
+    if (view === "map" && camera === null) {
+      setCamera({ center: location, zoom: 13 });
+    }
+  }, [view, camera, location]);
   const loading = searchQuery.isLoading;
   const loadingMore = searchQuery.isFetchingNextPage;
   const hasMore = searchQuery.hasNextPage;
   const error = searchQuery.error ? errorMessage(searchQuery.error) : null;
-  const selectedBusiness = selectedBusinessId
-    ? items.find((business) => business.id === selectedBusinessId) ?? null
-    : null;
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -181,19 +264,68 @@ export function SearchPage() {
 
   const sortLabel = SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "";
 
-  const mapMarkers = useMemo<MapMarker[]>(
-    () =>
-      items
-        .filter((business) => business.geo)
-        .map((business) => ({
-          id: business.id,
-          lat: business.geo!.lat,
-          lng: business.geo!.lng,
-          title: business.name,
-          subtitle: business.address,
-        })),
-    [items],
-  );
+  const mapMarkers = useMemo<MapMarker[]>(() => {
+    const feed = mapFeed.data;
+    if (!feed) return [];
+    if (feed.mode === "clusters") {
+      return feed.clusters.map((cluster) => ({
+        id: cluster.id,
+        lat: cluster.lat,
+        lng: cluster.lng,
+        count: cluster.count,
+        title: `${fa(cluster.count)} کسب‌وکار`,
+      }));
+    }
+    return feed.items.map((point) => ({
+      id: point.id,
+      lat: point.lat,
+      lng: point.lng,
+      title: point.name,
+      subtitle: point.address,
+    }));
+  }, [mapFeed.data]);
+
+  const mapTotal = useMemo(() => {
+    const feed = mapFeed.data;
+    if (!feed) return 0;
+    return feed.mode === "clusters"
+      ? feed.clusters.reduce((sum, cluster) => sum + cluster.count, 0)
+      : feed.items.length;
+  }, [mapFeed.data]);
+
+  function handleMapMarker(marker: MapMarker) {
+    const feed = mapFeed.data;
+    if (!feed) return;
+    if (feed.mode === "clusters") {
+      const currentZoom = viewport?.zoom ?? camera?.zoom ?? 13;
+      setCamera({
+        center: { lat: marker.lat, lng: marker.lng },
+        zoom: Math.min(currentZoom + 2, 18),
+      });
+      return;
+    }
+    const point = feed.items.find((item) => item.id === marker.id);
+    if (point) setSelectedPoint(point);
+  }
+
+  function pointAsListItem(point: MapPoint): BusinessListItem {
+    return {
+      id: point.id,
+      slug: point.slug,
+      name: point.name,
+      short_description: point.short_description ?? "",
+      address: point.address,
+      category: point.category ?? null,
+      subcategory: null,
+      geo: { lat: point.lat, lng: point.lng },
+      distance_m: null,
+      rating_avg: point.rating_avg,
+      rating_count: point.rating_count,
+      is_24h: point.is_24h,
+      is_verified: point.is_verified,
+      profile_image_url: point.profile_image_url ?? null,
+    };
+  }
 
   function updateParams(patch: Record<string, string | null>) {
     const next = new URLSearchParams(params);
@@ -332,7 +464,7 @@ export function SearchPage() {
           </div>
         </div>
 
-        {(qParam || catParam || subcatParam) && (
+        {(qParam || catParam || subcatParam || radius !== null) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {qParam && <FilterChip label={`جستجو: ${qParam}`} onClear={() => updateParams({ q: null })} />}
             {catParam && (
@@ -344,7 +476,12 @@ export function SearchPage() {
             {subcatParam && (
               <FilterChip label={activeSubcategoryName} onClear={() => updateParams({ subcat: null })} />
             )}
-            <FilterChip label={`تا ${fa(radius)} کیلومتر`} onClear={() => updateParams({ radius: null })} />
+            {radius !== null && (
+              <FilterChip
+                label={`تا ${fa(radius)} کیلومتر`}
+                onClear={() => updateParams({ radius: null })}
+              />
+            )}
           </div>
         )}
       </section>
@@ -369,17 +506,31 @@ export function SearchPage() {
       <section className="px-4 py-4">
         {view === "map" ? (
           <div className="space-y-3">
-            <NeshanMap
-              center={location}
-              markers={mapMarkers}
-              fitToMarkers
-              onMarkerClick={(marker) => setSelectedBusinessId(marker.id)}
-              className="h-[55dvh]"
-              zoom={13}
-            />
+            <div className="relative">
+              <NeshanMap
+                center={camera?.center ?? location}
+                markers={mapMarkers}
+                onMarkerClick={handleMapMarker}
+                onViewportChange={handleViewport}
+                className="h-[55dvh]"
+                zoom={camera?.zoom ?? 13}
+              />
+              {mapLoading && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-white/60 text-brand-600 backdrop-blur-[1px]">
+                  <Spinner />
+                </div>
+              )}
+              {mapFeed.data && mapFeed.data.mode === "clusters" && (
+                <div className="pointer-events-none absolute inset-x-3 top-3 rounded-xl bg-white/95 px-3 py-2 text-center text-[11px] text-slate-600 shadow-sm">
+                  نمایش خوشه‌ای {fa(mapTotal)} کسب‌وکار — برای دیدن جزئیات بیشتر روی هر
+                  خوشه بزنید.
+                </div>
+              )}
+            </div>
             <p className="text-center text-[11px] text-slate-400">
-              {fa(items.length)} کسب‌وکار روی نقشه نمایش داده می‌شود. برای دیدن اطلاعات، روی
-              نشان هر کسب‌وکار بزنید.
+              {mapFeed.data?.mode === "points"
+                ? `${fa(mapTotal)} کسب‌وکار در این محدوده؛ روی نشان هر کسب‌وکار بزنید.`
+                : "با بزرگ‌نمایی نقشه، کسب‌وکارهای بیشتری نمایش داده می‌شود."}
             </p>
           </div>
         ) : (
@@ -413,7 +564,8 @@ export function SearchPage() {
                 <p className="text-2xl">🔍</p>
                 <p className="mt-3 text-sm font-bold text-slate-900">نتیجه‌ای پیدا نشد</p>
                 <p className="mt-1 text-xs leading-6 text-slate-500">
-                  عبارت دیگری را امتحان کنید یا فیلترها و محدوده فاصله را تغییر دهید.
+                  عبارت دیگری را امتحان کنید یا دسته‌بندی را تغییر دهید. محدودیت فاصله
+                  به‌صورت پیش‌فرض غیرفعال است.
                 </p>
                 <Button size="sm" variant="outline" className="mt-4" onClick={clearFilters}>
                   حذف فیلترها
@@ -440,13 +592,13 @@ export function SearchPage() {
       </section>
 
       <BottomSheet
-        open={selectedBusiness !== null}
+        open={selectedPoint !== null}
         title="کسب‌وکار روی نقشه"
-        onClose={() => setSelectedBusinessId(null)}
+        onClose={() => setSelectedPoint(null)}
       >
-        {selectedBusiness && (
+        {selectedPoint && (
           <div className="space-y-3">
-            <BusinessCard business={selectedBusiness} />
+            <BusinessCard business={pointAsListItem(selectedPoint)} />
             <p className="text-center text-[11px] text-slate-400">
               برای دیدن جزئیات، تصاویر و نظرات روی کارت بزنید.
             </p>
@@ -533,7 +685,23 @@ export function SearchPage() {
 
           <div>
             <p className="mb-2 text-xs font-bold text-slate-400">حداکثر فاصله</p>
+            <p className="mb-2 text-[11px] leading-5 text-slate-500">
+              به‌طور پیش‌فرض محدودیتی روی فاصله اعمال نمی‌شود و نتایج همه شهر نمایش داده
+              می‌شوند؛ نزدیک‌ترین کسب‌وکارها همیشه اول فهرست می‌آیند.
+            </p>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => updateParams({ radius: null })}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-[11px]",
+                  radius === null
+                    ? "border-brand-400 bg-brand-50 text-brand-700"
+                    : "border-slate-200 text-slate-600",
+                )}
+              >
+                بدون محدودیت فاصله
+              </button>
               {RADIUS_OPTIONS.map((option) => (
                 <button
                   key={option}

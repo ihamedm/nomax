@@ -18,6 +18,12 @@ Usage (inside the API container or any environment with the backend installed):
       --root /tmp/import-data \
       --offset 10 --count 3
 
+    # Fill galleries for rows imported without the <index>/images folders:
+    python /tmp/import_behbahan_businesses.py \
+      --csv /tmp/import-data/businesses.csv \
+      --root /tmp/import-data \
+      --images-only
+
 Ownership rules:
 
 * Rows whose dataset phone is an Iranian mobile (``09xxxxxxxxx``) become the
@@ -212,7 +218,13 @@ def _resolve_category(
     return category, subcategory
 
 
-async def _upload_images(owner_id, root: Path, index: str) -> list[str]:
+async def _upload_images(
+    owner_id,
+    root: Path,
+    index: str,
+    *,
+    include_variants: bool = False,
+) -> list[str]:
     urls: list[str] = []
     for path in _image_paths(root, index):
         try:
@@ -220,12 +232,20 @@ async def _upload_images(owner_id, root: Path, index: str) -> list[str]:
             processed = await asyncio.to_thread(
                 process_image, data, crop="original"
             )
-            saved = await save_image_bundle(
-                processed.main.data,
+            # The app only persists the main URL; the extra crops are returned
+            # to the uploader but never referenced later. Bulk imports pass an
+            # empty variants map, which cuts S3 writes by ~80%.
+            variant_data = (
                 {
                     name: variant.data
                     for name, variant in processed.variants.items()
-                },
+                }
+                if include_variants
+                else {}
+            )
+            saved = await save_image_bundle(
+                processed.main.data,
+                variant_data,
                 prefix=user_upload_prefix("businesses", owner_id),
             )
             urls.append(saved["url"])
@@ -233,6 +253,166 @@ async def _upload_images(owner_id, root: Path, index: str) -> list[str]:
         except (InvalidImage, OSError, ValueError) as exc:
             print(f"  image {path.name}: skipped ({exc})")
     return urls
+
+
+async def _backfill_images(
+    session,
+    root: Path,
+    rows: list[dict],
+    *,
+    dry_run: bool,
+    concurrency: int = 1,
+    include_variants: bool = False,
+) -> None:
+    """Attach dataset images to businesses that were imported without them.
+
+    Normal imports skip existing rows, so an import that ran without the
+    ``<index>/images`` folders leaves galleries empty. This mode is idempotent:
+    it only fills businesses whose gallery is still empty. S3 round-trips
+    dominate the runtime, so ``concurrency`` overlaps several galleries.
+    """
+
+    total = len(rows)
+    print(f"images-only rows: {total} (concurrency {concurrency})")
+
+    prepared: list[dict] = []
+    skipped_local = 0
+    for position, row in enumerate(rows, start=1):
+        index = (row.get("index") or "").strip()
+        title = (row.get("title") or "").strip()
+        if not index or not title:
+            print(f"[{position}/{total}] skip malformed row: {row!r}")
+            continue
+        image_paths = _image_paths(root, index)
+        if not image_paths:
+            skipped_local += 1
+            continue
+        prepared.append(
+            {
+                "position": position,
+                "index": index,
+                "title": title,
+                "slug": _slug(index, title),
+                "image_count": len(image_paths),
+            }
+        )
+
+    slugs = [item["slug"] for item in prepared]
+    businesses: dict[str, tuple] = {}
+    for start in range(0, len(slugs), 500):
+        chunk = slugs[start : start + 500]
+        for business in (
+            await session.execute(sa.select(Business).where(Business.slug.in_(chunk)))
+        ).scalars():
+            businesses[business.slug] = (business.id, business.owner_id)
+
+    matched: list[dict] = []
+    for item in prepared:
+        if item["slug"] in businesses:
+            matched.append(item)
+        else:
+            print(f"[{item['position']}/{total}] {item['index']}: not imported yet ({item['slug']})")
+    missing = len(prepared) - len(matched)
+
+    business_ids = [businesses[item["slug"]][0] for item in matched]
+    existing: dict = {}
+    for start in range(0, len(business_ids), 500):
+        chunk = business_ids[start : start + 500]
+        counts = await session.execute(
+            sa.select(BusinessImage.business_id, sa.func.count(BusinessImage.id))
+            .where(BusinessImage.business_id.in_(chunk))
+            .group_by(BusinessImage.business_id)
+        )
+        for business_id, count in counts:
+            existing[business_id] = count
+    candidates = [
+        item for item in matched if not existing.get(businesses[item["slug"]][0])
+    ]
+    already = len(matched) - len(candidates)
+
+    if dry_run:
+        for item in candidates[:50]:
+            print(
+                f"[{item['position']}/{total}] {item['index']}: {item['title']} "
+                f"({item['image_count']} images)"
+            )
+        if len(candidates) > 50:
+            print(f"... and {len(candidates) - 50} more galleries")
+        print(
+            f"dry run: {len(candidates)} galleries would be filled, "
+            f"{already} already have images, {skipped_local} without local "
+            f"images, {missing} not imported"
+        )
+        return
+
+    queue: asyncio.Queue = asyncio.Queue()
+    for item in candidates:
+        queue.put_nowait(item)
+
+    filled = failed = uploaded = 0
+
+    async def worker() -> None:
+        nonlocal filled, failed, uploaded
+        async with AsyncSessionLocal() as worker_session:
+            while True:
+                try:
+                    item = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                business_id, owner_id = businesses[item["slug"]]
+                try:
+                    urls = await _upload_images(
+                        owner_id,
+                        root,
+                        item["index"],
+                        include_variants=include_variants,
+                    )
+                    if not urls:
+                        failed += 1
+                        print(
+                            f"[{item['position']}/{total}] {item['index']}: "
+                            "no images uploaded",
+                            flush=True,
+                        )
+                        continue
+                    for sort_order, url in enumerate(urls):
+                        worker_session.add(
+                            BusinessImage(
+                                business_id=business_id,
+                                url=url,
+                                is_main=sort_order == 0,
+                                sort_order=sort_order,
+                            )
+                        )
+                    business = await worker_session.get(Business, business_id)
+                    if business is not None:
+                        business.profile_image_url = urls[0]
+                    await worker_session.commit()
+                    filled += 1
+                    uploaded += len(urls)
+                    print(
+                        f"[{item['position']}/{total}] {item['index']}: filled "
+                        f"{len(urls)} images ({filled}/{len(candidates)})",
+                        flush=True,
+                    )
+                except Exception as exc:  # noqa: BLE001 - keep the batch going
+                    failed += 1
+                    await worker_session.rollback()
+                    print(
+                        f"[{item['position']}/{total}] {item['index']}: "
+                        f"failed ({exc})",
+                        flush=True,
+                    )
+
+    if candidates:
+        workers = max(1, min(concurrency, len(candidates)))
+        await asyncio.gather(*(worker() for _ in range(workers)))
+
+    print(
+        f"done: {filled} galleries filled ({uploaded} images), "
+        f"{already} already had images, {skipped_local} without local images, "
+        f"{failed} failures, {missing} not imported"
+    )
 
 
 async def import_rows(args) -> None:
@@ -244,6 +424,21 @@ async def import_rows(args) -> None:
         raise SystemExit(f"dataset root not found: {root}")
 
     async with AsyncSessionLocal() as session:
+        with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            rows = list(itertools.islice(reader, args.offset, args.offset + args.limit))
+
+        if args.images_only:
+            await _backfill_images(
+                session,
+                root,
+                rows,
+                dry_run=args.dry_run,
+                concurrency=args.concurrency,
+                include_variants=args.with_variants,
+            )
+            return
+
         categories = {
             row.slug: row
             for row in (await session.execute(sa.select(Category))).scalars()
@@ -257,10 +452,6 @@ async def import_rows(args) -> None:
         owners: dict[str, User] = {}
         manager: User | None = None
         created = skipped = malformed = 0
-        with csv_path.open(encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle)
-            rows = list(itertools.islice(reader, args.offset, args.offset + args.limit))
-
         total = len(rows)
         print(
             f"import rows: {total} "
@@ -336,7 +527,9 @@ async def import_rows(args) -> None:
             session.add(business)
             await session.flush()
 
-            image_urls = await _upload_images(owner.id, root, index)
+            image_urls = await _upload_images(
+                owner.id, root, index, include_variants=args.with_variants
+            )
             for sort_order, url in enumerate(image_urls):
                 session.add(
                     BusinessImage(
@@ -379,11 +572,33 @@ def main() -> None:
         help="number of CSV rows to skip before importing (for test batches)",
     )
     parser.add_argument(
+        "--images-only",
+        action="store_true",
+        help=(
+            "fill missing galleries for already-imported rows; "
+            "does not create businesses"
+        ),
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=8,
+        help="parallel gallery uploads in --images-only mode (default 8)",
+    )
+    parser.add_argument(
         "--manager-phone",
         default=None,
         help=(
             "admin/superadmin phone that owns rows without a mobile phone; "
             "defaults to the first superadmin/admin"
+        ),
+    )
+    parser.add_argument(
+        "--with-variants",
+        action="store_true",
+        help=(
+            "also upload the square/card/wide/thumb crops (slower; the app "
+            "only persists the main image URL)"
         ),
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -392,6 +607,8 @@ def main() -> None:
         parser.error("--limit/--count must be at least 1")
     if args.offset < 0:
         parser.error("--offset must be zero or greater")
+    if args.concurrency < 1:
+        parser.error("--concurrency must be at least 1")
     asyncio.run(import_rows(args))
 
 

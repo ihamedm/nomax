@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_permissions
 from app.core.errors import AppError
+from app.core.redis import get_redis
 from app.db.session import get_db
 from app.models.ad import Ad
 from app.models.category import Category, Subcategory
@@ -15,6 +16,7 @@ from app.models.tag import BusinessTag, Tag
 from app.models.user import User
 from app.schemas.category_suggestion import CategorySuggestionDiagnosticRequest
 from app.services.category_suggestions import diagnose_category
+from app.services import catalog_cache
 
 router = APIRouter(tags=["cms"])
 
@@ -130,6 +132,7 @@ async def create_category(
     payload: dict,
     actor: User = Depends(require_permissions("category.manage")),
     session: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ) -> dict:
     del actor
     name = (payload.get("name") or "").strip()
@@ -146,6 +149,7 @@ async def create_category(
     )
     session.add(category)
     await session.commit()
+    await catalog_cache.invalidate_catalog(redis)
     await session.refresh(category)
     return {"data": _category_item(category, [])}
 
@@ -156,6 +160,7 @@ async def update_category(
     payload: dict,
     actor: User = Depends(require_permissions("category.manage")),
     session: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ) -> dict:
     del actor
     category = await session.get(Category, category_id)
@@ -168,6 +173,7 @@ async def update_category(
         if field in payload:
             setattr(category, field, payload[field])
     await session.commit()
+    await catalog_cache.invalidate_catalog(redis)
     return {"data": _category_item(category, [])}
 
 
@@ -176,6 +182,7 @@ async def delete_category(
     category_id: int,
     actor: User = Depends(require_permissions("category.manage")),
     session: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ) -> dict:
     del actor
     category = await session.get(Category, category_id)
@@ -188,6 +195,7 @@ async def delete_category(
         .values(deleted_at=datetime.now(timezone.utc))
     )
     await session.commit()
+    await catalog_cache.invalidate_catalog(redis)
     return {"data": {"id": category_id, "deleted": True}}
 
 
@@ -196,6 +204,7 @@ async def create_subcategory(
     payload: dict,
     actor: User = Depends(require_permissions("category.manage")),
     session: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ) -> dict:
     del actor
     name = (payload.get("name") or "").strip()
@@ -216,6 +225,7 @@ async def create_subcategory(
     )
     session.add(sub)
     await session.commit()
+    await catalog_cache.invalidate_catalog(redis)
     await session.refresh(sub)
     return {"data": {"id": sub.id, "category_id": sub.category_id, "name": sub.name, "slug": sub.slug}}
 
@@ -226,6 +236,7 @@ async def update_subcategory(
     payload: dict,
     actor: User = Depends(require_permissions("category.manage")),
     session: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ) -> dict:
     del actor
     sub = await session.get(Subcategory, subcategory_id)
@@ -243,6 +254,7 @@ async def update_subcategory(
         if field in payload:
             setattr(sub, field, payload[field])
     await session.commit()
+    await catalog_cache.invalidate_catalog(redis)
     return {"data": {"id": sub.id, "category_id": sub.category_id, "name": sub.name, "slug": sub.slug}}
 
 
@@ -251,6 +263,7 @@ async def delete_subcategory(
     subcategory_id: int,
     actor: User = Depends(require_permissions("category.manage")),
     session: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
 ) -> dict:
     del actor
     sub = await session.get(Subcategory, subcategory_id)
@@ -258,6 +271,7 @@ async def delete_subcategory(
         raise AppError("not_found", "subcategory_not_found", 404)
     sub.deleted_at = datetime.now(timezone.utc)
     await session.commit()
+    await catalog_cache.invalidate_catalog(redis)
     return {"data": {"id": subcategory_id, "deleted": True}}
 
 
