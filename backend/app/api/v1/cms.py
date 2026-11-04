@@ -13,6 +13,8 @@ from app.models.ad import Ad
 from app.models.category import Category, Subcategory
 from app.models.tag import BusinessTag, Tag
 from app.models.user import User
+from app.schemas.category_suggestion import CategorySuggestionDiagnosticRequest
+from app.services.category_suggestions import diagnose_category
 
 router = APIRouter(tags=["cms"])
 
@@ -99,6 +101,28 @@ async def admin_list_categories(
     for sub in subcategories:
         by_category.setdefault(sub.category_id, []).append(sub)
     return {"data": {"items": [_category_item(cat, by_category.get(cat.id, [])) for cat in categories]}}
+
+
+@router.post("/admin/categories/suggest/diagnose")
+async def diagnose_category_suggestion(
+    payload: CategorySuggestionDiagnosticRequest,
+    actor: User = Depends(require_permissions("category.read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Run the Laya pipeline with logs and tuning hints for the admin modal.
+
+    Read-only: toggles affect this run only. Diagnostics sit behind the same
+    permission as the categories page, and the Laya API key is never returned.
+    """
+    del actor
+    result = await diagnose_category(
+        session,
+        payload.title,
+        payload.description,
+        rules_enabled=payload.rules_enabled,
+        probe_laya=payload.probe_laya,
+    )
+    return {"data": result}
 
 
 @router.post("/admin/categories")

@@ -141,3 +141,31 @@ async def test_admin_business_cms_crud_and_pagination(client, db_session, create
     assert deleted.status_code == 200
     missing = await client.get(f"/api/v1/admin/businesses/{business_id}", headers=auth(admin))
     assert missing.status_code == 404
+
+
+async def test_admin_business_list_filters_by_owner_and_returns_thumbnail(
+    client, db_session, create_user
+):
+    owner, business = await _setup(db_session, create_user)
+    await create_user("9140000009", UserRole.OWNER)
+    business.profile_image_url = "/uploads/businesses/demo/main.webp"
+    db_session.add(business)
+    await db_session.commit()
+
+    admin = await create_user("0914000010", UserRole.ADMIN, permissions=["business.read"])
+    listed = await client.get(
+        f"/api/v1/admin/businesses?owner_id={owner.id}", headers=auth(admin)
+    )
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert payload["meta"]["total"] == 1
+    item = payload["data"]["items"][0]
+    assert item["owner"]["id"] == str(owner.id)
+    assert item["profile_image_url"] == "/uploads/businesses/demo/main.webp"
+    assert item["category"]["icon"]
+
+    invalid = await client.get(
+        "/api/v1/admin/businesses?owner_id=not-a-uuid", headers=auth(admin)
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["message"] == "invalid_owner_id"

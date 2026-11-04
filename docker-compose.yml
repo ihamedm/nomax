@@ -78,6 +78,20 @@ services:
       GEOCODER_VIEWBOX: ${GEOCODER_VIEWBOX:-50.18,30.65,50.30,30.54}
       GEOCODER_BOUNDED: ${GEOCODER_BOUNDED:-true}
       CORS_ORIGINS: '["http://localhost:5175","http://localhost:8080"]'
+      # Optional Laya sidecar, temporarily disabled for the beta. Start it with
+      # `--profile laya` and set LAYA_ENABLED=true to re-enable.
+      LAYA_ENABLED: ${LAYA_ENABLED:-false}
+      LAYA_BASE_URL: http://laya:8000
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+      LAYA_MODEL: multilingual
+      LAYA_RULES_ENABLED: ${LAYA_RULES_ENABLED:-true}
+      LAYA_TIMEOUT_SECONDS: ${LAYA_TIMEOUT_SECONDS:-8}
+      LAYA_MIN_CATEGORY_CONFIDENCE: ${LAYA_MIN_CATEGORY_CONFIDENCE:-0.55}
+      LAYA_MIN_CATEGORY_MARGIN: ${LAYA_MIN_CATEGORY_MARGIN:-0.08}
+      LAYA_MIN_SUBCATEGORY_CONFIDENCE: ${LAYA_MIN_SUBCATEGORY_CONFIDENCE:-0.40}
+      LAYA_HIGH_CONFIDENCE: ${LAYA_HIGH_CONFIDENCE:-0.80}
+      LAYA_MEDIUM_CONFIDENCE: ${LAYA_MEDIUM_CONFIDENCE:-0.55}
+      LAYA_MAX_SUGGESTIONS: ${LAYA_MAX_SUGGESTIONS:-3}
     volumes:
       - nomax_uploads:/data/uploads
       - nomax_backups:/data/backups
@@ -128,6 +142,30 @@ services:
     volumes:
       - nomax_backups:/data/backups
 
+  # Optional System-1 classifier, temporarily disabled for the beta. Start it with:
+  #   docker compose --profile laya up
+  # The API stays fully usable when this service is absent or unhealthy.
+  laya:
+    profiles: ["laya"]
+    build:
+      context: ./deploy/laya
+      dockerfile: Dockerfile
+    container_name: nomax-laya
+    environment:
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+      LAYA_THREADS: ${LAYA_THREADS:-2}
+    volumes:
+      - laya_models:/data/huggingface
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 180s
+
   web:
     build: ./frontend
     container_name: nomax-web
@@ -143,3 +181,4 @@ volumes:
   nomax_redisdata:
   nomax_uploads:
   nomax_backups:
+  laya_models:

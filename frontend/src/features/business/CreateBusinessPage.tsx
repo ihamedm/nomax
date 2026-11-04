@@ -20,8 +20,10 @@ import { useAuth } from "@/stores/auth";
 import type { BusinessListItem, Category, Subcategory } from "@/types";
 
 import { CategoryPickerSheet } from "./create/CategoryPickerSheet";
+import { CategorySuggestionCard } from "./create/CategorySuggestionCard";
 import { MapPickerSheet } from "./create/MapPickerSheet";
 import { RulesSheet } from "./create/RulesSheet";
+import { useCategorySuggestion } from "./create/useCategorySuggestion";
 import {
   MAX_CUSTOM_TAGS,
   MAX_INTRO,
@@ -166,6 +168,8 @@ export default function CreateBusinessPage({
   const [data, setData] = useState<WizardData>(initialData ?? EMPTY);
   const [acceptedRules, setAcceptedRules] = useState(isEdit);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [autoApplied, setAutoApplied] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
@@ -173,6 +177,7 @@ export default function CreateBusinessPage({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const lastAppliedSuggestion = useRef<string | null>(null);
 
   const mine = useApi<{
     items: BusinessListItem[];
@@ -183,10 +188,34 @@ export default function CreateBusinessPage({
     enabled: ready && Boolean(user),
   });
   const maxPhotos = mine.data?.max_images ?? MAX_PHOTOS;
+  const categorySuggestion = useCategorySuggestion({
+    title: data.title,
+    description: data.description,
+    enabled: !isEdit && !categoryTouched && ready && Boolean(user) && step === 0,
+  });
 
   useEffect(() => {
     if (step === 0) setError(null);
   }, [step]);
+
+  useEffect(() => {
+    if (isEdit || categoryTouched) return;
+    const result = categorySuggestion.result;
+    if (!result || result.status !== "ok") {
+      setAutoApplied(false);
+      return;
+    }
+    const top = result.suggestions.find((item) => item.quality === "high");
+    if (!top) {
+      setAutoApplied(false);
+      return;
+    }
+    const key = `${top.category.id}:${top.subcategory?.id ?? "none"}`;
+    if (lastAppliedSuggestion.current === key) return;
+    lastAppliedSuggestion.current = key;
+    applyCategory(top.category, top.subcategory);
+    setAutoApplied(true);
+  }, [categorySuggestion.result, categoryTouched, isEdit]);
 
   if (!ready) {
     return (
@@ -222,12 +251,25 @@ export default function CreateBusinessPage({
     setError(null);
   }
 
-  function selectCategory(category: Category, subcategory: Subcategory | null) {
+  function applyCategory(category: Category, subcategory: Subcategory | null) {
     patch({
       category,
       subcategory,
       standardTags: subcategory ? Array.from(new Set(subcategory.standard_tags)) : [],
     });
+  }
+
+  function selectCategory(category: Category, subcategory: Subcategory | null) {
+    setCategoryTouched(true);
+    setAutoApplied(false);
+    lastAppliedSuggestion.current = null;
+    applyCategory(category, subcategory);
+  }
+
+  function openManualCategoryPicker() {
+    setCategoryTouched(true);
+    setAutoApplied(false);
+    setCategoryOpen(true);
   }
 
   function next() {
@@ -475,6 +517,27 @@ export default function CreateBusinessPage({
                 <ChevronLeft className="shrink-0 text-slate-400" />
               )}
             </button>
+
+            {!isEdit && !categoryTouched && (
+              <>
+                {categorySuggestion.loading && !categorySuggestion.result && (
+                  <p className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-400">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" />
+                    در حال بررسی نام و توضیحات برای پیشنهاد دسته…
+                  </p>
+                )}
+                {categorySuggestion.result && (
+                  <CategorySuggestionCard
+                    suggestions={categorySuggestion.result.suggestions}
+                    autoApplied={autoApplied}
+                    onApply={(suggestion) =>
+                      selectCategory(suggestion.category, suggestion.subcategory)
+                    }
+                    onChange={openManualCategoryPicker}
+                  />
+                )}
+              </>
+            )}
           </div>
         </section>
       )}

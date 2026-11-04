@@ -63,6 +63,16 @@ function ShieldIcon({ className }: { className?: string }) {
   );
 }
 
+function WarningIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </Icon>
+  );
+}
+
 function InstagramIcon({ className }: { className?: string }) {
   return (
     <Icon className={className}>
@@ -219,8 +229,10 @@ export function BusinessDetailPage() {
   }, [business]);
 
   const instagramHandle = business?.instagram?.replace(/^@/, "").replace(/[^A-Za-z0-9._]/g, "");
-  const ownerName = business?.owner?.name?.trim() || "مالک نومکس";
-  const ownerPhone = business?.owner?.phone?.trim() || null;
+  const owner = business?.owner ?? null;
+  const ownerVerified = owner?.is_verified === true;
+  const ownerName = owner?.name?.trim() || "مالک نومکس";
+  const ownerPhone = owner?.phone?.trim() || null;
   const displayPhone = business?.phone_business?.trim() || ownerPhone;
   const callNumber = telHref(displayPhone);
   const neshanLink = business?.geo
@@ -442,17 +454,40 @@ export function BusinessDetailPage() {
 
           {business.owner && (
             <section className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-50 text-base font-black text-brand-700">
-                {Array.from(ownerName)[0] || "ن"}
+              <span
+                className={cn(
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base font-black",
+                  ownerVerified
+                    ? "bg-brand-50 text-brand-700"
+                    : "bg-amber-50 text-amber-600",
+                )}
+              >
+                {ownerVerified ? (
+                  Array.from(ownerName)[0] || "ن"
+                ) : (
+                  <WarningIcon className="h-5 w-5" />
+                )}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] text-slate-400">مالک کسب‌وکار</p>
-                <p className="mt-0.5 truncate text-sm font-bold text-slate-900">{ownerName}</p>
+                {ownerVerified ? (
+                  <p className="mt-0.5 truncate text-sm font-bold text-slate-900">
+                    {ownerName}
+                  </p>
+                ) : (
+                  <p
+                    role="status"
+                    className="mt-0.5 flex items-center gap-1 text-sm font-bold text-amber-700"
+                  >
+                    <WarningIcon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">مالک تایید هویت نشده</span>
+                  </p>
+                )}
               </div>
               {ownerPhone && (
                 <a
                   href={telHref(ownerPhone) ?? undefined}
-                  aria-label={`تماس با ${ownerName}`}
+                  aria-label={`تماس با ${ownerVerified ? ownerName : "مالک کسب‌وکار"}`}
                   className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
                 >
                   <PhoneIcon className="h-3.5 w-3.5" />

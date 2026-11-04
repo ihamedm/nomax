@@ -16,7 +16,9 @@ class DeviceToken(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(20), nullable=False)
     token: Mapped[str] = mapped_column(String(255), nullable=False)
-    platform: Mapped[str] = mapped_column(String(20), nullable=False, default="android")
+    platform: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="android", server_default="android"
+    )
     app_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=sa.true())
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -31,7 +33,9 @@ class Notification(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     type: Mapped[str] = mapped_column(String(40), nullable=False, default="system", server_default="system")
-    payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
+    payload: Mapped[dict] = mapped_column(
+        sa.JSON, nullable=False, default=dict, server_default=sa.text("'{}'")
+    )
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa.false())

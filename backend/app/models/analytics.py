@@ -94,9 +94,15 @@ class QuoteDispatchRun(Base):
         ForeignKey("quote_requests.id", ondelete="CASCADE"), nullable=False, index=True
     )
     round: Mapped[int] = mapped_column(Integer, nullable=False)
-    trigger: Mapped[str] = mapped_column(String(20), nullable=False, default="initial")
-    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    delivered_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trigger: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="initial", server_default="initial"
+    )
+    candidate_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    delivered_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     detail: Mapped[dict] = mapped_column(sa.JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False, index=True

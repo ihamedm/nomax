@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +54,7 @@ export default function AdminReviewsPage() {
 
   const status = params.get("status") ?? "";
   const businessId = params.get("business_id") ?? "";
+  const businessName = params.get("business_name") ?? "";
   const qParam = params.get("q") ?? "";
   const page = Math.max(1, Number(params.get("page") ?? "1") || 1);
   const [search, setSearch] = useState(qParam);
@@ -76,6 +77,8 @@ export default function AdminReviewsPage() {
 
   const items = reviews.data?.data.items ?? [];
   const meta = reviews.data?.meta;
+  const businessOptions = businesses.data?.items ?? [];
+  const hasCurrentBusinessOption = businessOptions.some((item) => item.id === businessId);
 
   const setStatus = useMutation({
     mutationFn: ({ id, next }: { id: string; next: string }) =>
@@ -104,6 +107,7 @@ export default function AdminReviewsPage() {
     const next = new URLSearchParams();
     if (qParam) next.set("q", qParam);
     if (businessId) next.set("business_id", businessId);
+    if (businessName) next.set("business_name", businessName);
     if (value) next.set("status", value);
     const suffix = next.toString();
     return `/admin/reviews${suffix ? `?${suffix}` : ""}`;
@@ -185,6 +189,20 @@ export default function AdminReviewsPage() {
 
       <FilterLinks items={STATUS_FILTERS} active={status} hrefFor={filterHref} />
 
+      {businessId && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-800">
+          <span>
+            نظرات کسب‌وکار <b className="font-bold">{businessName || "انتخاب‌شده"}</b>
+          </span>
+          <Link
+            to={`/admin/reviews${status ? `?status=${status}` : ""}`}
+            className="font-medium text-brand-700 hover:underline"
+          >
+            حذف فیلتر کسب‌وکار
+          </Link>
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         rows={items}
@@ -216,14 +234,23 @@ export default function AdminReviewsPage() {
             </form>
             <select
               value={businessId}
-              onChange={(event) =>
-                updateParams({ business_id: event.target.value || null, page: null })
-              }
+              onChange={(event) => {
+                const nextId = event.target.value;
+                const nextName = businessOptions.find((item) => item.id === nextId)?.name;
+                updateParams({
+                  business_id: nextId || null,
+                  business_name: nextId ? nextName ?? businessName ?? null : null,
+                  page: null,
+                });
+              }}
               className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 sm:w-auto"
               aria-label="فیلتر کسب‌وکار"
             >
               <option value="">همه کسب‌وکارها</option>
-              {businesses.data?.items.map((business) => (
+              {businessId && !hasCurrentBusinessOption && (
+                <option value={businessId}>{businessName || "کسب‌وکار انتخاب‌شده"}</option>
+              )}
+              {businessOptions.map((business) => (
                 <option key={business.id} value={business.id}>
                   {business.name}
                 </option>

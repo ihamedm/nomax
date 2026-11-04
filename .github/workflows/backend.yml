@@ -29,3 +29,45 @@ jobs:
           pip install -e ".[dev]"
       - name: Run tests
         run: python -m pytest -q --timeout=30 --cov=app --cov-report=term-missing --cov-fail-under=60
+
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: nomax
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: nomax
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nomax -d nomax"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://nomax:secret@localhost:5432/nomax
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Apply migrations from scratch
+        run: alembic upgrade head
+      - name: Verify downgrade is reversible
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+      - name: Check models and database agree
+        run: alembic check

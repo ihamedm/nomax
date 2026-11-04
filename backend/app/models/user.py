@@ -35,6 +35,10 @@ class User(Base):
         server_default=UserRole.CUSTOMER.value,
     )
     permissions: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=sa.text("'[]'"))
+    # Account-level trust flag shown/filtered on the public frontend. Users who
+    # sign in through the OTP flow are verified automatically; accounts created
+    # by operators (dashboard/importer scripts) start unverified until reviewed.
+    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa.false())
     is_phone_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa.false())
     is_national_id_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa.false())
     national_id_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

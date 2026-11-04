@@ -2,7 +2,7 @@ import uuid
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,7 @@ from app.core.permissions import permission_catalog, validate_permission_codes
 from app.db.session import get_db
 from app.models.admin import AuditLog
 from app.models.user import User, UserRole
-from app.schemas.admin import AdminUserResponse, AdminUserUpdate
+from app.schemas.admin import AdminUserCreate, AdminUserResponse, AdminUserUpdate
 from app.services.inapp_notifications import (
     notify_business_approved,
     notify_business_rejected,
@@ -55,12 +55,39 @@ def _to_admin_response(user: User) -> dict:
     return AdminUserResponse(
         id=str(user.id),
         phone=user.phone,
+        national_id=user.national_id,
         full_name=user.full_name,
         role=user.role.value,
         permissions=list(user.permissions or []),
+        is_verified=user.is_verified,
         is_phone_verified=user.is_phone_verified,
+        is_national_id_verified=user.is_national_id_verified,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
+        updated_at=user.updated_at,
     ).model_dump(mode="json")
+
+
+def _clean_text(value: str | None) -> str | None:
+    cleaned = (value or "").strip()
+    return cleaned or None
+
+
+async def _validate_national_id(
+    session: AsyncSession, national_id: str | None, *, exclude_id=None
+) -> str | None:
+    """Normalise and uniqueness-check an operator-supplied national ID."""
+    cleaned = _clean_text(national_id)
+    if cleaned is None:
+        return None
+    if not security.validate_iranian_national_id(cleaned):
+        raise AppError("validation_error", "invalid_national_id", 422, {"national_id": cleaned})
+    query = select(User.id).where(User.national_id == cleaned)
+    if exclude_id is not None:
+        query = query.where(User.id != exclude_id)
+    if (await session.execute(query)).scalar_one_or_none() is not None:
+        raise AppError("conflict", "national_id_in_use", 409, {"national_id": cleaned})
+    return cleaned
 
 
 def _admin_business_payload(business, owner: User | None = None) -> dict:
@@ -84,21 +111,27 @@ def _admin_business_payload(business, owner: User | None = None) -> dict:
             else None
         ),
         "category": (
-            {"id": category.id, "slug": category.slug, "name": category.name}
+            {"id": category.id, "slug": category.slug, "name": category.name, "icon": category.icon}
             if category is not None
             else None
         ),
         "subcategory": (
-            {"id": subcategory.id, "slug": subcategory.slug, "name": subcategory.name}
+            {"id": subcategory.id, "slug": subcategory.slug, "name": subcategory.name, "icon": subcategory.icon}
             if subcategory is not None
             else None
         ),
         "rating_avg": round(business.rating_avg or 0, 2),
         "rating_count": business.rating_count or 0,
         "view_count": business.view_count or 0,
+        "profile_image_url": business.profile_image_url,
         "rejection_reason": business.rejection_reason,
         "owner": (
-            {"id": str(owner.id), "phone": owner.phone, "full_name": owner.full_name}
+            {
+                "id": str(owner.id),
+                "phone": owner.phone,
+                "full_name": owner.full_name,
+                "is_verified": owner.is_verified,
+            }
             if owner is not None
             else None
         ),
@@ -130,6 +163,7 @@ async def list_admin_businesses(
     status: Optional[str] = None,
     q: Optional[str] = None,
     category_id: Optional[int] = None,
+    owner_id: Optional[str] = None,
     page: int = 1,
     per_page: int = 20,
     actor: User = Depends(require_permissions("business.read")),
@@ -145,6 +179,11 @@ async def list_admin_businesses(
         conditions.append(Business.status == status)
     if category_id:
         conditions.append(Business.category_id == category_id)
+    if owner_id:
+        try:
+            conditions.append(Business.owner_id == UUID(owner_id))
+        except ValueError:
+            raise AppError("validation_error", "invalid_owner_id", 422, {"owner_id": owner_id})
     if q:
         term = f"%{q.strip()}%"
         conditions.append(
@@ -623,35 +662,52 @@ async def list_permissions(actor: User = Depends(require_superadmin)) -> dict:
 async def list_users(
     actor: User = Depends(require_superadmin),
     session: AsyncSession = Depends(get_db),
+    role: Optional[UserRole] = Query(None),
+    verified: Optional[bool] = Query(None),
+    q: Optional[str] = Query(None, max_length=120),
 ) -> dict:
     del actor  # superadmin gate already enforced via dependency
-    result = await session.execute(
-        select(User).where(User.deleted_at.is_(None)).order_by(User.created_at)
-    )
+    query = select(User).where(User.deleted_at.is_(None))
+    if role is not None:
+        query = query.where(User.role == role)
+    if verified is not None:
+        query = query.where(User.is_verified.is_(verified))
+    if q:
+        term = f"%{q.strip()}%"
+        query = query.where(or_(User.full_name.ilike(term), User.phone.ilike(term)))
+    result = await session.execute(query.order_by(User.created_at))
     users = list(result.scalars().all())
     return {"data": {"items": [_to_admin_response(u) for u in users]}}
 
 
 @router.post("/users")
-async def create_admin(
-    payload: dict,
+async def create_user(
+    payload: AdminUserCreate,
     request: Request,
     actor: User = Depends(require_superadmin),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    phone = security.normalize_phone(payload.get("phone", ""))
+    phone = security.normalize_phone(payload.phone)
     existing = (
         await session.execute(select(User).where(User.phone == phone))
     ).scalars().first()
     if existing is not None:
         raise AppError("conflict", "user_already_exists", 409, {"phone": phone})
-    permissions = validate_permission_codes(payload.get("permissions") or [])
+
+    national_id = await _validate_national_id(session, payload.national_id)
+    permissions = (
+        validate_permission_codes(payload.permissions or [])
+        if payload.role == UserRole.ADMIN
+        else []
+    )
     user = User(
         phone=phone,
-        full_name=(payload.get("full_name") or "").strip() or None,
-        role=UserRole.ADMIN,
+        national_id=national_id,
+        full_name=_clean_text(payload.full_name),
+        role=payload.role,
         permissions=permissions,
-        is_phone_verified=True,
+        is_verified=payload.is_verified,
+        is_phone_verified=payload.is_phone_verified,
     )
     session.add(user)
     await session.flush()
@@ -661,12 +717,100 @@ async def create_admin(
         action="admin.user.created",
         entity_type="user",
         entity_id=str(user.id),
-        after={"role": "admin", "permissions": permissions},
+        after={
+            "role": user.role.value,
+            "permissions": permissions,
+            "is_verified": user.is_verified,
+        },
         ip=request.client.host if request.client else None,
     )
     await session.commit()
     await session.refresh(user)
     return {"data": _to_admin_response(user)}
+
+
+@router.patch("/users/{user_id}")
+async def update_user(
+    user_id: str,
+    payload: AdminUserUpdate,
+    request: Request,
+    actor: User = Depends(require_superadmin),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    target = await session.get(User, UUID(user_id))
+    if target is None:
+        raise AppError("not_found", "user_not_found", 404)
+
+    provided = payload.model_fields_set
+    before = {
+        "full_name": target.full_name,
+        "national_id": target.national_id,
+        "role": target.role.value,
+        "permissions": list(target.permissions or []),
+        "is_verified": target.is_verified,
+        "is_phone_verified": target.is_phone_verified,
+    }
+
+    if "full_name" in provided:
+        target.full_name = _clean_text(payload.full_name)
+    if "national_id" in provided:
+        target.national_id = await _validate_national_id(
+            session, payload.national_id, exclude_id=target.id
+        )
+
+    if payload.role is not None and payload.role != target.role:
+        if target.id == actor.id and payload.role != UserRole.SUPERADMIN:
+            raise AppError("conflict", "cannot_change_own_role", 409)
+        if target.role == UserRole.SUPERADMIN and payload.role != UserRole.SUPERADMIN:
+            remaining = await session.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(
+                    User.role == UserRole.SUPERADMIN,
+                    User.deleted_at.is_(None),
+                    User.id != target.id,
+                )
+            )
+            if not remaining:
+                raise AppError("conflict", "last_superadmin_required", 409)
+        target.role = payload.role
+        # A demoted admin must not keep dormant grants.
+        if target.role != UserRole.ADMIN:
+            target.permissions = []
+
+    if payload.permissions is not None:
+        target.permissions = (
+            validate_permission_codes(payload.permissions)
+            if target.role == UserRole.ADMIN
+            else []
+        )
+
+    if payload.is_verified is not None:
+        target.is_verified = payload.is_verified
+    if payload.is_phone_verified is not None:
+        target.is_phone_verified = payload.is_phone_verified
+
+    after = {
+        "full_name": target.full_name,
+        "national_id": target.national_id,
+        "role": target.role.value,
+        "permissions": list(target.permissions or []),
+        "is_verified": target.is_verified,
+        "is_phone_verified": target.is_phone_verified,
+    }
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.user.updated",
+        entity_type="user",
+        entity_id=str(user_id),
+        before=before,
+        after=after,
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(target)
+    return {"data": _to_admin_response(target)}
 
 
 @router.patch("/users/{user_id}/role")

@@ -113,7 +113,11 @@ async def test_only_approved_businesses_are_searchable(client, db_session, creat
     assert body["name"] == "مکانیکی تأییدشده"
     assert body["reviews"] == []
     assert body["geo"] == {"lat": BEHBAHAN["lat"], "lng": BEHBAHAN["lng"]}
-    assert body["owner"] == {"name": "حسین رضایی", "phone": "9130000001"}
+    assert body["owner"] == {
+        "name": "حسین رضایی",
+        "phone": "9130000001",
+        "is_verified": False,
+    }
     assert body["updated_at"] is not None
 
     # A public view increments view_count but must not look like an edit.

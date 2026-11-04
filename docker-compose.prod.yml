@@ -64,6 +64,20 @@ services:
       GEOCODER_COUNTRY_CODES: ${GEOCODER_COUNTRY_CODES:-ir}
       GEOCODER_VIEWBOX: ${GEOCODER_VIEWBOX:-50.18,30.65,50.30,30.54}
       GEOCODER_BOUNDED: ${GEOCODER_BOUNDED:-true}
+      # Optional Laya sidecar, temporarily disabled for the beta. Default off;
+      # set LAYA_ENABLED=true after starting the `laya` compose profile.
+      LAYA_ENABLED: ${LAYA_ENABLED:-false}
+      LAYA_BASE_URL: http://laya:8000
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+      LAYA_MODEL: multilingual
+      LAYA_RULES_ENABLED: ${LAYA_RULES_ENABLED:-true}
+      LAYA_TIMEOUT_SECONDS: ${LAYA_TIMEOUT_SECONDS:-8}
+      LAYA_MIN_CATEGORY_CONFIDENCE: ${LAYA_MIN_CATEGORY_CONFIDENCE:-0.55}
+      LAYA_MIN_CATEGORY_MARGIN: ${LAYA_MIN_CATEGORY_MARGIN:-0.08}
+      LAYA_MIN_SUBCATEGORY_CONFIDENCE: ${LAYA_MIN_SUBCATEGORY_CONFIDENCE:-0.40}
+      LAYA_HIGH_CONFIDENCE: ${LAYA_HIGH_CONFIDENCE:-0.80}
+      LAYA_MEDIUM_CONFIDENCE: ${LAYA_MEDIUM_CONFIDENCE:-0.55}
+      LAYA_MAX_SUGGESTIONS: ${LAYA_MAX_SUGGESTIONS:-3}
     volumes:
       - backups:/data/backups
     healthcheck:
@@ -111,6 +125,29 @@ services:
     volumes:
       - backups:/data/backups
 
+  # Optional Laya System-1 classifier, temporarily disabled for the beta.
+  # Enable with LAYA_ENABLED=true and:
+  #   docker compose --profile laya up -d
+  laya:
+    profiles: ["laya"]
+    build:
+      context: ./deploy/laya
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+      LAYA_THREADS: ${LAYA_THREADS:-2}
+    volumes:
+      - laya_models:/data/huggingface
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 240s
+
   web:
     build: ./frontend
     restart: unless-stopped
@@ -147,5 +184,6 @@ volumes:
   pgdata:
   redisdata:
   backups:
+  laya_models:
   caddy_data:
   caddy_config:

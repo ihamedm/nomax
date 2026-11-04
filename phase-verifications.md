@@ -724,3 +724,76 @@ Status: `[x]` verified implemented, `[~]` partial, `[ ]` missing / to verify.
   them, detail returns the gallery, and an S3 image URL returns `200 image/jpeg`.
 - [x] Re-running the importer skips existing rows (`0 imported, 2 skipped`).
   Test owner, imported rows and S3 images remain for UI testing.
+
+## Y. Laya category suggestion pilot (2026-11-02)
+
+- [x] Added an optional Laya System-1 category/subcategory suggestion for the
+  business wizard. The main API never imports PyTorch; it calls a separate
+  `laya-serve` sidecar over HTTP, so the existing API/worker images remain
+  unchanged.
+- [x] Added `POST /api/v1/categories/suggest` (authenticated). The endpoint
+  always returns a result object; when Laya is disabled, down, slow or
+  uncertain, `suggestions` is empty and the manual picker remains available.
+  Form submission is never blocked by the classifier.
+- [x] Implemented a two-stage taxonomy decision under Laya's documented
+  large-choice-set limit: 17 real categories (soft-deleted/inactive and
+  `سایر` excluded), then the subcategories of the selected category. Each
+  request contains at most 17 or 16 choices.
+- [x] Added a high-precision Persian alias layer after the live benchmark
+  showed pure zero-shot Laya was unreliable on noisy business names. Aliases
+  shortlist/override obvious category and subcategory phrases; Laya handles
+  ties and unknown text. `category_source` / `subcategory_source` expose which
+  path produced each suggestion.
+- [x] Corrected the prompt after the benchmark: long keyword descriptions in
+  Laya `criteria` made accuracy worse, so criteria now use plain category and
+  subcategory names. Subcategory tags are used only by the deterministic
+  alias layer, not as Laya criteria.
+- [x] Added confidence gating: minimum category confidence and margin, a
+  subcategory threshold, and high/medium bands. High-confidence suggestions
+  preselect the category (with a visible «تغییر دسته‌بندی» action); medium
+  suggestions require an explicit click; low suggestions never render.
+- [x] Wired the wizard with a 700 ms debounced, abortable request. Manual
+  category selection, edit mode and form-step changes suppress suggestions;
+  stale responses and stale auto-selection state are cleared.
+- [x] Added `deploy/laya/Dockerfile` (CPU-only torch, pinned transformers,
+  multilingual checkpoint cached in a volume), optional `--profile laya`
+  services in dev/prod Compose, health checks, `LAYA_*` env examples and docs.
+- [x] Benchmark on the live 12-business Behbahan sample (real
+  `laya-multilingual` 322M checkpoint on CPU): pure zero-shot Laya was weak
+  on 17-way category choice; the final hybrid produced **12/12 correct
+  categories, 11/12 correct subcategories, and 10/11 correct high-confidence
+  automatic suggestions** in 1.3–3.5 s per two-stage request. The only miss
+  was left as category-only rather than forcing a wrong subcategory.
+- [x] The benchmark also confirmed Laya subcategory names-only accuracy on
+  clear cases (7/8), while tag-enriched criteria fell to 3/8.
+- [x] Tests: **177 backend tests** pass, including auth, disabled sidecar,
+  Laya two-stage parsing, low-confidence abstention, sidecar failure,
+  category-only fallback, veterinary-vs-medical aliases and automotive
+  phrases. Frontend **28 Vitest tests**, typecheck and production build pass.
+
+## Z. Admin Laya diagnostics modal (2026-11-02)
+
+- [x] Added `POST /api/v1/admin/categories/suggest/diagnose` behind
+  `category.read` (the same permission as the dashboard categories page). It
+  is read-only and never changes settings or persisted data.
+- [x] Added `SuggestionTrace` instrumentation to the existing suggestion
+  pipeline. Normal requests pass `trace=None`; diagnostics receive a timeline
+  of normalization, taxonomy counts, alias hits/scores, raw Laya probability
+  rankings, margins, thresholds and final decisions.
+- [x] Added a sidecar `/health` probe with a short timeout and an independent
+  direct-Laya probe. The probe calls the real two-stage choice even when the
+  alias layer decided, so an admin can distinguish "rules worked" from "the
+  model actually responds".
+- [x] Added safe one-run overrides (`rules_enabled`, `probe_laya`) for
+  hybrid-vs-raw comparison without mutating global settings.
+- [x] Added tuning hints for disabled/unreachable sidecar, failed inference,
+  alias misses, near-threshold confidence/margin, category-only fallback,
+  rule-vs-Laya disagreement, raw-mode reminders and slow responses. The API
+  key is never returned.
+- [x] Added the **تست Laya** modal to `AdminCategoriesPage` with sample inputs,
+  a verdict banner, health/taxonomy/config cards, suggestions, direct-model
+  comparison, tuning hints and expandable raw JSON logs per stage.
+- [x] Tests: **183 backend tests** pass (14 category-suggestion tests,
+  including permission, disabled config, real-model probe, raw mode and
+  unreachable sidecar). Frontend **28 Vitest tests**, typecheck and production
+  build pass.

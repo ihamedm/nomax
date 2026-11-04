@@ -168,3 +168,132 @@ async def test_superadmin_creates_admin_with_permissions(client, create_user, db
 
     logs = (await db_session.execute(select(AuditLog))).scalars().all()
     assert any(log.action == "admin.user.created" for log in logs)
+
+
+def _national_id(base9: str) -> str:
+    weights = [10, 9, 8, 7, 6, 5, 4, 3, 2]
+    total = sum(int(d) * w for d, w in zip(base9, weights))
+    remainder = total % 11
+    return base9 + str(remainder if remainder < 2 else 11 - remainder)
+
+
+@pytest.mark.asyncio
+async def test_superadmin_can_create_every_user_role(client, create_user, db_session):
+    superadmin = await create_user("9110000020", role=UserRole.SUPERADMIN)
+    headers = {"Authorization": f"Bearer {create_access_token(superadmin.id, superadmin.role.value)}"}
+
+    for index, role in enumerate(("customer", "owner", "admin", "superadmin")):
+        response = await client.post(
+            "/api/v1/admin/users",
+            json={
+                "phone": f"0912555100{index}",
+                "full_name": f"کاربر {role}",
+                "role": role,
+                "permissions": ["business.read"] if role == "admin" else [],
+                "is_verified": index == 0,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["role"] == role
+        assert data["full_name"] == f"کاربر {role}"
+        assert data["is_verified"] is (index == 0)
+        # Accounts created by an operator are unverified unless explicitly set.
+        assert data["is_phone_verified"] is False
+
+        created = await db_session.get(User, uuid.UUID(data["id"]))
+        assert created is not None
+        assert created.role.value == role
+        if role == "admin":
+            assert created.permissions == ["business.read"]
+        else:
+            assert created.permissions == []
+
+
+@pytest.mark.asyncio
+async def test_superadmin_can_edit_user_profile_and_verification(
+    client, create_user, db_session
+):
+    superadmin = await create_user("9110000021", role=UserRole.SUPERADMIN)
+    target = await create_user("9120000021", full_name="نام قدیمی")
+    headers = {"Authorization": f"Bearer {create_access_token(superadmin.id, superadmin.role.value)}"}
+    nid = _national_id("123456789")
+
+    response = await client.patch(
+        f"/api/v1/admin/users/{target.id}",
+        json={
+            "full_name": "نام نمایشی جدید",
+            "national_id": nid,
+            "role": "owner",
+            "is_verified": True,
+            "is_phone_verified": True,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["full_name"] == "نام نمایشی جدید"
+    assert data["national_id"] == nid
+    assert data["role"] == "owner"
+    assert data["is_verified"] is True
+    assert data["is_phone_verified"] is True
+
+    refreshed = (await db_session.execute(select(User).where(User.id == target.id))).scalar_one()
+    assert refreshed.full_name == "نام نمایشی جدید"
+    assert refreshed.national_id == nid
+    assert refreshed.is_verified is True
+
+    # Sending null clears an optional display field.
+    response = await client.patch(
+        f"/api/v1/admin/users/{target.id}",
+        json={"full_name": None},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["full_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_users_filters_by_verified_and_role(client, create_user):
+    superadmin = await create_user("9110000022", role=UserRole.SUPERADMIN)
+    verified_user = await create_user("9120000022")
+    await create_user("9120000023", role=UserRole.OWNER)
+    headers = {"Authorization": f"Bearer {create_access_token(superadmin.id, superadmin.role.value)}"}
+
+    response = await client.patch(
+        f"/api/v1/admin/users/{verified_user.id}",
+        json={"is_verified": True},
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+    response = await client.get(
+        "/api/v1/admin/users", params={"verified": "true"}, headers=headers
+    )
+    assert response.status_code == 200
+    phones = {item["phone"] for item in response.json()["data"]["items"]}
+    assert "9120000022" in phones
+    assert "9120000023" not in phones
+
+    response = await client.get(
+        "/api/v1/admin/users", params={"role": "owner"}, headers=headers
+    )
+    assert response.status_code == 200
+    phones = {item["phone"] for item in response.json()["data"]["items"]}
+    assert "9120000023" in phones
+    assert "9120000022" not in phones
+
+
+@pytest.mark.asyncio
+async def test_verified_account_defaults_false_for_operator_creation(client, create_user):
+    superadmin = await create_user("9110000024", role=UserRole.SUPERADMIN)
+    headers = {"Authorization": f"Bearer {create_access_token(superadmin.id, superadmin.role.value)}"}
+
+    response = await client.post(
+        "/api/v1/admin/users",
+        json={"phone": "09125552000", "role": "customer"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["is_verified"] is False

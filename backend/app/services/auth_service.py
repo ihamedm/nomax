@@ -38,6 +38,7 @@ async def authenticate_user(
         session.add(user)
         await session.flush()
 
+    user.is_verified = True
     user.is_phone_verified = True
     user.last_login_at = _now()
     if national_id:

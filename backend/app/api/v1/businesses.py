@@ -1193,6 +1193,10 @@ async def get_business(
         {
             "name": (owner.full_name or "").strip() or None,
             "phone": owner.phone,
+            # The public owner card hides the display name and shows the
+            # «مالک تایید هویت نشده» warning until an operator verifies the
+            # account (imported or dashboard-created owners start unverified).
+            "is_verified": owner.is_verified,
         }
         if owner is not None
         else None

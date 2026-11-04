@@ -255,6 +255,14 @@ export default function MeHomePage() {
               <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1 text-[10px] font-medium text-white/75">
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
+                    user.is_verified ? "bg-emerald-400" : "bg-amber-300"
+                  }`}
+                />
+                {user.is_verified ? "حساب تأییدشده" : "حساب تأییدنشده"}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1 text-[10px] font-medium text-white/75">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
                     user.is_phone_verified ? "bg-emerald-400" : "bg-amber-300"
                   }`}
                 />

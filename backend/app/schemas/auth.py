@@ -25,6 +25,7 @@ class UserResponse(BaseModel):
     full_name: Optional[str] = None
     role: str
     permissions: list[str] = []
+    is_verified: bool = False
     is_phone_verified: bool = False
     is_national_id_verified: bool = False
     last_login_at: Optional[datetime] = None

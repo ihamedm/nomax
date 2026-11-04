@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/toast";
 import { api, errorMessage, type ApiError } from "@/lib/api";
 import { useApi } from "@/lib/query";
 import { AdminModal } from "@/features/admin/AdminModal";
+import { LayaDiagnosticsModal } from "@/features/admin/LayaDiagnosticsModal";
 import { DataTable, type DataColumn } from "@/features/admin/data-table";
 
 interface SubcategoryRow {
@@ -44,6 +45,7 @@ export default function AdminCategoriesPage() {
   const [subCategory, setSubCategory] = useState<CategoryRow | null>(null);
   const [subEditingId, setSubEditingId] = useState<number | null>(null);
   const [subForm, setSubForm] = useState({ name: "", slug: "", icon: "❓", sort_order: 0 });
+  const [layaOpen, setLayaOpen] = useState(false);
 
   const items = data?.items ?? [];
   const filtered = items.filter(
@@ -283,7 +285,12 @@ export default function AdminCategoriesPage() {
           <h1 className="text-lg font-black text-slate-900">دسته‌بندی‌ها</h1>
           <p className="mt-1 text-xs text-slate-500">مدیریت دسته‌ها و زیردسته‌های خدمات</p>
         </div>
-        <Button onClick={openCreate}>افزودن دسته</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setLayaOpen(true)}>
+            تست Laya
+          </Button>
+          <Button onClick={openCreate}>افزودن دسته</Button>
+        </div>
       </div>
 
       <DataTable
@@ -423,6 +430,8 @@ export default function AdminCategoriesPage() {
           />
         </AdminModal>
       )}
+
+      {layaOpen && <LayaDiagnosticsModal onClose={() => setLayaOpen(false)} />}
     </div>
   );
 }

@@ -22,6 +22,17 @@ class Review(Base):
     __table_args__ = (
         UniqueConstraint("business_id", "user_id", name="uq_review_business_user"),
         CheckConstraint("rating BETWEEN 1 AND 5", name="ck_review_rating"),
+        # Rating aggregation and the admin dashboard filter on both columns.
+        sa.Index("idx_reviews_business_status", "business_id", "status"),
+        # Owner "unseen feedback" badge.
+        sa.Index(
+            "idx_reviews_owner_unseen",
+            "business_id",
+            "status",
+            postgresql_where=sa.text(
+                "owner_seen_at IS NULL AND status IN ('pending', 'private')"
+            ),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

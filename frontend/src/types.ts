@@ -7,6 +7,7 @@ export interface User {
   full_name?: string | null;
   role: Role;
   permissions: string[];
+  is_verified: boolean;
   is_phone_verified: boolean;
   is_national_id_verified: boolean;
   last_login_at?: string | null;
@@ -16,11 +17,16 @@ export interface User {
 export interface AdminUser {
   id: string;
   phone: string;
+  national_id?: string | null;
   full_name?: string | null;
   role: Role;
   permissions: string[];
+  is_verified: boolean;
   is_phone_verified: boolean;
+  is_national_id_verified: boolean;
+  last_login_at?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface PermissionItem {
@@ -125,6 +131,7 @@ export interface BusinessImage {
 export interface BusinessOwner {
   name?: string | null;
   phone?: string | null;
+  is_verified?: boolean;
 }
 
 export interface BusinessDetail extends BusinessListItem {
@@ -147,4 +154,25 @@ export interface SearchMeta {
 export interface Coordinates {
   lat: number;
   lng: number;
+}
+
+export type CategorySuggestionQuality = "high" | "medium" | "low";
+
+export interface CategorySuggestion {
+  category: Category;
+  subcategory: Subcategory | null;
+  category_confidence: number;
+  subcategory_confidence: number | null;
+  confidence: number;
+  quality: CategorySuggestionQuality;
+  category_source: "rules" | "laya";
+  subcategory_source: "rules" | "laya" | null;
+}
+
+export interface CategorySuggestionResult {
+  status: "ok" | "disabled" | "unavailable" | "no_match";
+  enabled: boolean;
+  model: string;
+  elapsed_ms: number;
+  suggestions: CategorySuggestion[];
 }

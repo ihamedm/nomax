@@ -10,7 +10,23 @@ Usage (inside the API container or any environment with the backend installed):
     python /tmp/import_behbahan_businesses.py \
       --csv /tmp/import-data/businesses.csv \
       --root /tmp/import-data \
-      --limit 10
+      --count 25
+
+    # Test a small batch that starts after the rows already imported:
+    python /tmp/import_behbahan_businesses.py \
+      --csv /tmp/import-data/businesses.csv \
+      --root /tmp/import-data \
+      --offset 10 --count 3
+
+Ownership rules:
+
+* Rows whose dataset phone is an Iranian mobile (``09xxxxxxxxx``) become the
+  owner account for that business. A newly created owner has no display name
+  and is unverified; reused accounts keep their existing profile/verification.
+* Rows without a mobile phone (no phone, or a landline only) are assigned to an
+  admin/superadmin manager so an operator can claim or complete them later.
+  Pass ``--manager-phone`` to choose the manager explicitly, otherwise the
+  first superadmin (falling back to an admin) is used.
 
 The importer is idempotent by deterministic slug: rerunning it skips businesses
 that already exist. Images in ``<root>/<index>/images`` are processed by the
@@ -23,6 +39,7 @@ import argparse
 import asyncio
 import csv
 import hashlib
+import itertools
 import re
 from pathlib import Path
 
@@ -53,6 +70,7 @@ CATEGORY_MAP: dict[str, tuple[str, str]] = {
 }
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 FALLBACK_CATEGORY = ("other", "other")
+MOBILE_RE = re.compile(r"09\d{9}")
 
 
 def _natural_key(path: Path) -> tuple:
@@ -106,6 +124,10 @@ def _image_paths(root: Path, index: str) -> list[Path]:
     return sorted(files, key=_natural_key)[: settings.MAX_BUSINESS_IMAGES]
 
 
+def _is_mobile_phone(phone: str | None) -> bool:
+    return bool(phone and MOBILE_RE.fullmatch(phone))
+
+
 async def _get_or_create_owner(session, phone: str) -> User:
     normalized = normalize_phone(phone)
     owner = (
@@ -114,21 +136,66 @@ async def _get_or_create_owner(session, phone: str) -> User:
     if owner is None:
         owner = User(
             phone=normalized,
-            full_name="واردات تست بهبهان",
+            # Imported owners stay unnamed until they complete their profile;
+            # the public page then shows the «unverified owner» warning.
+            full_name=None,
             role=UserRole.OWNER,
             permissions=[],
+            # Imported rows have not completed the OTP/identity flow, so they
+            # stay unverified until an operator marks them from the dashboard.
+            is_verified=False,
             is_phone_verified=True,
         )
         session.add(owner)
         await session.flush()
         print(f"owner created: {normalized} ({owner.id})")
     else:
+        if owner.deleted_at is not None:
+            owner.deleted_at = None
         if owner.role == UserRole.CUSTOMER:
             owner.role = UserRole.OWNER
         owner.is_phone_verified = True
         await session.flush()
         print(f"owner reused: {normalized} ({owner.id})")
     return owner
+
+
+async def _get_manager(session, manager_phone: str | None) -> User:
+    manager_roles = (UserRole.ADMIN, UserRole.SUPERADMIN)
+    if manager_phone:
+        normalized = normalize_phone(manager_phone)
+        manager = (
+            await session.execute(sa.select(User).where(User.phone == normalized))
+        ).scalar_one_or_none()
+        if (
+            manager is None
+            or manager.deleted_at is not None
+            or manager.role not in manager_roles
+        ):
+            raise SystemExit(
+                f"manager account not found or not an admin: {normalized}; "
+                "create one with `nomax create-superadmin` or pass --manager-phone"
+            )
+        print(f"manager selected: {manager.phone} ({manager.id})")
+        return manager
+
+    manager = (
+        await session.execute(
+            sa.select(User)
+            .where(User.role.in_(manager_roles), User.deleted_at.is_(None))
+            .order_by(
+                sa.case((User.role == UserRole.SUPERADMIN, 0), else_=1),
+                User.created_at,
+            )
+        )
+    ).scalars().first()
+    if manager is None:
+        raise SystemExit(
+            "no admin/superadmin manager exists to own rows without a mobile "
+            "phone; create one with `nomax create-superadmin` or pass --manager-phone"
+        )
+    print(f"manager selected: {manager.phone} ({manager.id})")
+    return manager
 
 
 def _resolve_category(
@@ -187,16 +254,24 @@ async def import_rows(args) -> None:
             for row in (await session.execute(sa.select(Subcategory))).scalars()
         }
 
-        owner = None
-        created = skipped = 0
+        owners: dict[str, User] = {}
+        manager: User | None = None
+        created = skipped = malformed = 0
         with csv_path.open(encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.DictReader(handle))[: args.limit]
+            reader = csv.DictReader(handle)
+            rows = list(itertools.islice(reader, args.offset, args.offset + args.limit))
 
-        for row in rows:
+        total = len(rows)
+        print(
+            f"import rows: {total} "
+            f"(offset {args.offset}, limit {args.limit})"
+        )
+        for position, row in enumerate(rows, start=1):
             index = (row.get("index") or "").strip()
             title = (row.get("title") or "").strip()
             if not index or not title:
-                print(f"skip malformed row: {row!r}")
+                print(f"[{position}/{total}] skip malformed row: {row!r}")
+                malformed += 1
                 continue
             slug = _slug(index, title)
             existing = (
@@ -205,7 +280,7 @@ async def import_rows(args) -> None:
                 )
             ).scalar_one_or_none()
             if existing is not None:
-                print(f"skip existing {index}: {title} ({slug})")
+                print(f"[{position}/{total}] skip existing {index}: {title} ({slug})")
                 skipped += 1
                 continue
 
@@ -220,15 +295,27 @@ async def import_rows(args) -> None:
             except ValueError:
                 lat = lng = None
 
+            mobile_phone = phone if _is_mobile_phone(phone) else None
             print(
-                f"[{index}] {title} -> {category.name}/{subcategory.name} "
-                f"({len(_image_paths(root, index))} images)"
+                f"[{position}/{total}] {index}: {title} -> "
+                f"{category.name}/{subcategory.name} "
+                f"({len(_image_paths(root, index))} images, "
+                f"owner {'mobile ' + mobile_phone if mobile_phone else 'manager'})"
             )
             if args.dry_run:
                 continue
 
-            if owner is None:
-                owner = await _get_or_create_owner(session, args.owner_phone)
+            if mobile_phone is not None:
+                owner = owners.get(mobile_phone)
+                if owner is None:
+                    owner = await _get_or_create_owner(session, mobile_phone)
+                    owners[mobile_phone] = owner
+            else:
+                # Landline-only rows have no identifiable mobile owner yet;
+                # park them under a manager account for later triage.
+                if manager is None:
+                    manager = await _get_manager(session, args.manager_phone)
+                owner = manager
 
             business = Business(
                 owner_id=owner.id,
@@ -265,19 +352,46 @@ async def import_rows(args) -> None:
             print(f"  imported {business.id} with {len(image_urls)} images")
 
         if args.dry_run:
-            print(f"dry run: {len(rows)} rows inspected, nothing written")
+            print(f"dry run: {total} rows inspected, nothing written")
         else:
-            print(f"done: {created} imported, {skipped} skipped")
+            print(
+                f"done: {created} imported, {skipped} skipped, "
+                f"{malformed} malformed out of {total} rows"
+            )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Import Behbahan businesses")
     parser.add_argument("--csv", required=True, help="path to businesses.csv")
     parser.add_argument("--root", required=True, help="folder containing <index>/images")
-    parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--owner-phone", default="09120000000")
+    parser.add_argument(
+        "--limit",
+        "--count",
+        dest="limit",
+        type=int,
+        default=10,
+        help="maximum number of CSV rows to inspect (default 10)",
+    )
+    parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="number of CSV rows to skip before importing (for test batches)",
+    )
+    parser.add_argument(
+        "--manager-phone",
+        default=None,
+        help=(
+            "admin/superadmin phone that owns rows without a mobile phone; "
+            "defaults to the first superadmin/admin"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.limit < 1:
+        parser.error("--limit/--count must be at least 1")
+    if args.offset < 0:
+        parser.error("--offset must be zero or greater")
     asyncio.run(import_rows(args))
 
 

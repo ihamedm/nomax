@@ -78,6 +78,24 @@ class Settings(BaseSettings):
     BACKUP_DAILY_MINUTE: int = 0
     BACKUP_TIMEZONE: str = "Asia/Tehran"
 
+    # Optional Laya System-1 sidecar. The API never imports torch; it only
+    # talks HTTP to a separately deployed `laya-serve` process. Leaving this
+    # disabled (or the sidecar down) simply hides category suggestions.
+    LAYA_ENABLED: bool = False
+    LAYA_BASE_URL: str = "http://127.0.0.1:8000"
+    LAYA_API_KEY: str = ""
+    LAYA_MODEL: str = "multilingual"
+    # Keep the deterministic Persian alias layer on by default. Turn it off
+    # when measuring raw Laya accuracy for a pilot/ABA test.
+    LAYA_RULES_ENABLED: bool = True
+    LAYA_TIMEOUT_SECONDS: float = 8.0
+    LAYA_MIN_CATEGORY_CONFIDENCE: float = 0.55
+    LAYA_MIN_CATEGORY_MARGIN: float = 0.08
+    LAYA_MIN_SUBCATEGORY_CONFIDENCE: float = 0.40
+    LAYA_HIGH_CONFIDENCE: float = 0.80
+    LAYA_MEDIUM_CONFIDENCE: float = 0.55
+    LAYA_MAX_SUGGESTIONS: int = 3
+
     # Address geocoding used by the map picker. Nominatim is the default
     # because it needs no key; set GEOCODER_URL to switch providers.
     GEOCODER_URL: str = "https://nominatim.openstreetmap.org"
@@ -87,6 +105,34 @@ class Settings(BaseSettings):
     # Restrict searches to Behbahan (left,top,right,bottom in WGS84).
     GEOCODER_VIEWBOX: str = "50.18,30.65,50.30,30.54"
     GEOCODER_BOUNDED: bool = True
+
+    @field_validator("LAYA_BASE_URL")
+    @classmethod
+    def _normalize_laya_url(cls, value: str) -> str:
+        value = (value or "").strip().rstrip("/")
+        if value and not value.startswith(("http://", "https://")):
+            value = f"http://{value}"
+        return value
+
+    @field_validator(
+        "LAYA_MIN_CATEGORY_CONFIDENCE",
+        "LAYA_MIN_CATEGORY_MARGIN",
+        "LAYA_MIN_SUBCATEGORY_CONFIDENCE",
+        "LAYA_HIGH_CONFIDENCE",
+        "LAYA_MEDIUM_CONFIDENCE",
+    )
+    @classmethod
+    def _validate_laya_confidence(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("LAYA confidence thresholds must be between 0 and 1")
+        return value
+
+    @field_validator("LAYA_MAX_SUGGESTIONS", "LAYA_TIMEOUT_SECONDS")
+    @classmethod
+    def _validate_laya_positive(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("LAYA limits must be positive")
+        return value
 
     @field_validator("S3_ENDPOINT_URL", "S3_PUBLIC_URL")
     @classmethod

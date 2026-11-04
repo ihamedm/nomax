@@ -1,6 +1,6 @@
 # NOMAX roadmap status
 
-Last updated: 2026-11-01
+Last updated: 2026-11-04
 
 This file is the hand-off point between agent sessions. Update it at the end of
 every working session so the next agent knows what actually runs.
@@ -11,7 +11,7 @@ every working session so the next agent knows what actually runs.
 |---|---|---|
 | Compose: Postgres/PostGIS + Redis | ✅ | `docker compose up -d`; ports 5433 / 6380 |
 | ArvanCloud S3 + health | ✅ | `S3_*` env in `.env`; `/ready` reports storage; `nomax-public` / `nomax-private` buckets |
-| Alembic baseline + 0002 catalog/sms | ✅ | `alembic upgrade head` |
+| Alembic squashed baseline (`0001`) | ✅ | `alembic upgrade head` + `alembic check`; old `0001`–`0023` chain removed |
 | Response envelope + `/health` + `/ready` | ✅ | `/ready` checks DB, Redis and configured S3, returns 503 when degraded |
 | Provider boundaries + ADRs | ✅ | `docs/adr/0001-provider-boundaries.md` |
 | Tailwind, RTL, BottomSheet, Toasts | ✅ | `components/ui/*` |
@@ -552,6 +552,38 @@ verified data counts and kept `/ready` green.
   pipeline. Ten approved test businesses (16 images) were imported under the
   dedicated owner `09120000000`; the rest of the 7,474-row dataset remains
   unimported for manual/batched work.
+
+## Post-v1 — Laya category suggestion pilot (2026-11-02)
+
+- Added an optional, authenticated `POST /api/v1/categories/suggest` endpoint
+  that suggests a category/subcategory from the wizard's title and
+  description.
+- Laya runs as a separate CPU-only `laya-serve` sidecar (optional Compose
+  `laya` profile); the API image does not install PyTorch. Missing, disabled
+  or slow Laya degrades to an empty suggestion and the manual picker.
+- Two-stage `choice` requests keep every Laya decision below 17 options:
+  top-level category first, then subcategories of that category.
+- A high-precision Persian alias layer handles obvious names (veterinary,
+  automotive, food, retail, banking, etc.) and gives Laya a shortlist for
+  ambiguous text. This was added after the live benchmark showed pure
+  zero-shot Laya was weak on 17-way Persian category decisions.
+- The wizard debounces requests by 700 ms, aborts stale requests, auto-selects
+  only high-confidence results with a visible change action, and shows medium
+  results as opt-in choices. Low confidence renders nothing.
+- Live 12-business Behbahan benchmark: 12/12 categories, 11/12 subcategories,
+  10/11 high-confidence automatic suggestions; 1.3–3.5 s per two-stage CPU
+  request.
+- Added an admin-only diagnostics modal (`دسته‌بندی‌ها → تست Laya`) and
+  `POST /api/v1/admin/categories/suggest/diagnose`. It reports sidecar health,
+  rule hits, raw Laya probability rankings, threshold decisions, timing, a
+  direct model probe that runs even when aliases decide, and tuning hints.
+  The rules/probe toggles affect only that diagnostic run.
+- 183 backend tests, 28 frontend tests, typecheck/build.
+- **Status (2026-11-04): temporarily disabled for the beta.** Local and
+  production run with `LAYA_ENABLED=false` and no sidecar; the wizard falls
+  back to the manual picker. The code and Compose profile stay for future
+  development; re-enable with `docker compose --profile laya up -d` plus
+  `LAYA_ENABLED=true`.
 
 ## UI snapshots
 

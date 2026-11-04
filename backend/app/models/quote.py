@@ -27,16 +27,22 @@ class QuoteRequest(Base):
     subcategory_id: Mapped[int | None] = mapped_column(ForeignKey("subcategories.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    address: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    address: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="", server_default=""
+    )
     neighborhood: Mapped[str | None] = mapped_column(String(120), nullable=True)
     geo_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     geo_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_urgent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa.false())
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active", server_default="active")
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active", index=True
+    )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_offer_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     phone_revealed_to: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
-    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     # Operational state of the dispatch engine. `dispatch_round` counts every
     # wave that actually reached at least one business, including manual waves.
     dispatch_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -47,7 +53,9 @@ class QuoteRequest(Base):
     next_dispatch_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False, index=True
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     customer: Mapped["User"] = relationship(lazy="joined", foreign_keys=[customer_id])
@@ -57,7 +65,15 @@ class QuoteRequest(Base):
 
 class Offer(Base):
     __tablename__ = "offers"
-    __table_args__ = (sa.UniqueConstraint("business_id", "request_id", name="uq_offer_business_request"),)
+    __table_args__ = (
+        sa.UniqueConstraint("business_id", "request_id", name="uq_offer_business_request"),
+        # The owner inbox only looks at pending offers per request.
+        sa.Index(
+            "idx_offers_pending",
+            "request_id",
+            postgresql_where=sa.text("status = 'pending'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quote_requests.id", ondelete="CASCADE"), nullable=False, index=True)

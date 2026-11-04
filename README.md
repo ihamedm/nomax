@@ -193,6 +193,8 @@ standard service tags used later by search.
 | GET | `/health` | public | liveness |
 | GET | `/ready` | public | readiness (DB + Redis, 503 when degraded) |
 | GET | `/api/v1/categories` | public | 18 categories with subcategory counts |
+| POST | `/api/v1/categories/suggest` | authenticated | two-stage Laya category/subcategory suggestion; always degrades to an empty result |
+| POST | `/api/v1/admin/categories/suggest/diagnose` | `category.read` | admin Laya diagnostics: health, rule/model scores, timings, probe and tuning hints |
 | GET | `/api/v1/categories/{id}/subcategories` | public | subcategories + standard tags |
 | POST | `/api/v1/auth/otp/request` | public | send (or, in dev, return) an OTP |
 | POST | `/api/v1/auth/otp/verify` | public | exchange OTP for access + refresh tokens |
@@ -245,7 +247,7 @@ npm test -- --run                      # 28 Vitest tests
 ```
 
 Tests use a temporary SQLite database and an in-memory Redis fake, so no
-services are needed. CI runs the backend suite
+services are needed. CI runs the backend suite plus a PostGIS migration check
 (`.github/workflows/backend.yml`).
 
 ## Layout
@@ -260,7 +262,7 @@ backend/
     schemas/     request/response models
     services/    auth, OTP, SMS provider
     cli.py       create-superadmin, seed-categories
-  alembic/       migrations 0001–0002
+  alembic/       single squashed baseline (0001) + env.py/script.py.mako
   tests/
 frontend/
   src/
@@ -277,16 +279,54 @@ docker-compose.yml
 .github/workflows/backend.yml
 ```
 
+## Migrations
+
+`alembic/versions` holds a single squashed baseline (`0001_initial_schema.py`)
+generated from `app/models`; the 23 development revisions it replaced remain in
+git history. The ORM metadata is the source of truth:
+
+```bash
+cd backend
+alembic upgrade head   # create or upgrade the schema
+alembic check          # fail if models and database diverge (needs PostGIS)
+```
+
+Create new revisions with `alembic revision --autogenerate -m "..."`. The
+PostGIS-only objects (extension, generated `businesses.geo` column, GIST index)
+are added with raw SQL in the baseline and filtered in `alembic/env.py`, so
+autogenerate leaves them alone. Databases created before the squash cannot be
+upgraded and must be rebuilt; see `deploy/README.md`.
+
 ## Environment
 
 Backend variables are documented in `backend/.env.example`; frontend variables
 in `frontend/.env.example`. `MAX_BUSINESS_IMAGES` (default `6`) controls the
-business gallery limit. Nothing calls a foreign runtime service in
-development: SMS uses the console provider and object storage uses ArvanCloud
-S3. Fill `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env`; `/ready` reports the
-S3 connectivity state and the dashboard file manager (`/admin/files`) needs the
-`storage.manage` permission. Without credentials, uploads fall back to local
-disk for tests.
+business gallery limit. SMS uses the console provider and object storage uses
+ArvanCloud S3. Fill `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env`; `/ready`
+reports the S3 connectivity state and the dashboard file manager
+(`/admin/files`) needs the `storage.manage` permission. Without credentials,
+uploads fall back to local disk for tests.
+
+Laya category suggestions are **temporarily disabled** for the beta (local and
+production): `LAYA_ENABLED=false` is set in `.env` / `.env.prod.example` and the
+sidecar is stopped. The wizard falls back to the manual picker and the admin
+diagnostics modal reports «Laya غیرفعال است». The implementation is kept for
+future development:
+
+- The API does not install PyTorch; it talks HTTP to a separate `laya-serve`
+  sidecar on `http://laya:8000`.
+- To re-enable: `docker compose --profile laya up -d` (first start downloads
+  the multilingual checkpoint), set `LAYA_ENABLED=true`, then recreate the API.
+- A small high-precision Persian alias layer resolves obvious
+  categories/subcategories first; Laya decides the ambiguous remainder in two
+  stages (one of the 17 real categories, then a subcategory inside it). Only
+  high-confidence results are auto-selected. Disabled, down or uncertain → the
+  owner sees the normal manual picker.
+- Thresholds and the timeout live in the `LAYA_*` variables. Set
+  `LAYA_RULES_ENABLED=false` to benchmark raw Laya without the Persian alias
+  layer. Admins can open **دسته‌بندی‌ها → تست Laya** to run one diagnostic
+  request and see sidecar health, rule hits, raw Laya probabilities, threshold
+  decisions, a direct model probe and tuning hints.
 
 Database backups use the same Arvan credentials. Manual and automatic dumps
 are gzipped into `S3_BUCKET_PRIVATE` (or `BACKUP_S3_BUCKET`) under

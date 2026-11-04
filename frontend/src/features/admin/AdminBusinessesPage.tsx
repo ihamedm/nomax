@@ -26,6 +26,7 @@ interface CategoryRef {
   id: number;
   slug: string;
   name: string;
+  icon?: string;
 }
 
 interface BusinessRow {
@@ -45,6 +46,7 @@ interface BusinessRow {
   subcategory: CategoryRef | null;
   rating_avg: number;
   rating_count: number;
+  profile_image_url?: string | null;
   rejection_reason?: string | null;
   owner: Owner | null;
   created_at?: string | null;
@@ -127,6 +129,41 @@ function ActionButton({
   );
 }
 
+function RowLink({
+  children,
+  onClick,
+  disabled,
+  tone = "brand",
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "brand" | "rose";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "text-xs font-medium hover:underline disabled:pointer-events-none disabled:opacity-50",
+        tone === "rose" ? "text-rose-600 hover:text-rose-700" : "text-brand-600 hover:text-brand-700",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Secondary row actions stay out of the way until the row is hovered/focused. */
+function HoverActions({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+      {children}
+    </div>
+  );
+}
+
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid grid-cols-[8rem_1fr] gap-3 border-b border-slate-100 py-2 text-sm last:border-0">
@@ -145,6 +182,8 @@ export default function AdminBusinessesPage() {
   const status = params.get("status") ?? "";
   const qParam = params.get("q") ?? "";
   const categoryParam = params.get("category_id") ?? "";
+  const ownerId = params.get("owner_id") ?? "";
+  const ownerName = params.get("owner_name") ?? "";
   const page = Math.max(1, Number(params.get("page") ?? "1") || 1);
 
   const [search, setSearch] = useState(qParam);
@@ -154,9 +193,10 @@ export default function AdminBusinessesPage() {
   if (status) query.set("status", status);
   if (qParam) query.set("q", qParam);
   if (categoryParam) query.set("category_id", categoryParam);
+  if (ownerId) query.set("owner_id", ownerId);
 
   const businesses = useApiWithMeta<{ items: BusinessRow[] }, Meta>(
-    ["admin", "businesses", status, qParam, categoryParam, page],
+    ["admin", "businesses", status, qParam, categoryParam, ownerId, page],
     `/admin/businesses?${query.toString()}`,
   );
   const categories = useApi<{ items: CategoryRef[] }>(["categories"], "/categories");
@@ -191,6 +231,8 @@ export default function AdminBusinessesPage() {
     const next = new URLSearchParams();
     if (qParam) next.set("q", qParam);
     if (categoryParam) next.set("category_id", categoryParam);
+    if (ownerId) next.set("owner_id", ownerId);
+    if (ownerName) next.set("owner_name", ownerName);
     if (value) next.set("status", value);
     const suffix = next.toString();
     return `/admin/businesses${suffix ? `?${suffix}` : ""}`;
@@ -307,12 +349,32 @@ export default function AdminBusinessesPage() {
       key: "business",
       header: "کسب‌وکار",
       cell: (business) => (
-        <div>
-          <p className="font-bold text-slate-900">{business.name}</p>
-          <p className="mt-0.5 text-[11px] text-slate-400" dir="ltr">
-            {business.slug}
-          </p>
-          <p className="mt-1 max-w-64 truncate text-xs text-slate-500">{business.address}</p>
+        <div className="flex items-start gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-xl">
+            {business.profile_image_url ? (
+              <img
+                src={business.profile_image_url}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <span aria-hidden>{business.category?.icon ?? "🏪"}</span>
+            )}
+          </div>
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={() => setDetail(business)}
+              className="block max-w-64 truncate text-right font-bold text-slate-900 transition-colors hover:text-brand-600"
+            >
+              {business.name}
+            </button>
+            <p className="mt-0.5 text-[11px] text-slate-400" dir="ltr">
+              {business.slug}
+            </p>
+            <p className="mt-1 max-w-64 truncate text-xs text-slate-500">{business.address}</p>
+          </div>
         </div>
       ),
     },
@@ -387,7 +449,7 @@ export default function AdminBusinessesPage() {
       header: "عملیات",
       className: "text-left",
       cell: (business) => (
-        <div className="flex flex-wrap justify-end gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-3">
           {business.status === "pending" && can("business.approve") && (
             <>
               <ActionButton
@@ -406,20 +468,29 @@ export default function AdminBusinessesPage() {
               </ActionButton>
             </>
           )}
-          <ActionButton onClick={() => setDetail(business)}>جزئیات</ActionButton>
-          {can("business.update") && (
-            <ActionButton tone="brand" onClick={() => openEdit(business)}>
-              ویرایش
-            </ActionButton>
-          )}
-          {can("business.delete") && (
-            <ActionButton
-              disabled={remove.isPending}
-              onClick={() => confirmDelete(business)}
-            >
-              حذف
-            </ActionButton>
-          )}
+          <HoverActions>
+            <RowLink onClick={() => setDetail(business)}>جزئیات</RowLink>
+            {can("business.update") && (
+              <RowLink onClick={() => openEdit(business)}>ویرایش</RowLink>
+            )}
+            {can("business.delete") && (
+              <RowLink
+                tone="rose"
+                disabled={remove.isPending}
+                onClick={() => confirmDelete(business)}
+              >
+                حذف
+              </RowLink>
+            )}
+          </HoverActions>
+          <Link
+            to={`/admin/reviews?business_id=${business.id}&business_name=${encodeURIComponent(
+              business.name,
+            )}`}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+          >
+            نمایش نظرات
+          </Link>
         </div>
       ),
     },
@@ -463,6 +534,21 @@ export default function AdminBusinessesPage() {
           </Link>
         ))}
       </div>
+
+      {ownerId && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-800">
+          <span>
+            فقط کسب‌وکارهای{" "}
+            <b className="font-bold">{ownerName || "کاربر انتخاب‌شده"}</b>
+          </span>
+          <Link
+            to={`/admin/businesses${status ? `?status=${status}` : ""}`}
+            className="font-medium text-brand-700 hover:underline"
+          >
+            حذف فیلتر مالک
+          </Link>
+        </div>
+      )}
 
       <DataTable
         columns={businessColumns}
@@ -518,6 +604,55 @@ export default function AdminBusinessesPage() {
 
       {detail && (
         <AdminModal title={`جزئیات ${detail.name}`} onClose={() => setDetail(null)}>
+          <div className="mb-4 flex items-start gap-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-3xl">
+              {detail.profile_image_url ? (
+                <img
+                  src={detail.profile_image_url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span aria-hidden>{detail.category?.icon ?? "🏪"}</span>
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="font-bold text-slate-900">{detail.name}</p>
+              <p className="mt-0.5 text-[11px] text-slate-400" dir="ltr">
+                {detail.slug}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                <Link
+                  to={`/businesses/${detail.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-brand-600 hover:underline"
+                >
+                  مشاهده صفحه عمومی
+                </Link>
+                <Link
+                  to={`/admin/reviews?business_id=${detail.id}&business_name=${encodeURIComponent(
+                    detail.name,
+                  )}`}
+                  className="font-medium text-brand-600 hover:underline"
+                >
+                  نمایش نظرات
+                </Link>
+                {can("business.update") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetail(null);
+                      openEdit(detail);
+                    }}
+                    className="font-medium text-brand-600 hover:underline"
+                  >
+                    ویرایش
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
           <div className="space-y-1">
             <DetailRow label="شناسه">{detail.slug}</DetailRow>
             <DetailRow label="وضعیت">

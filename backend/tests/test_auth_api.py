@@ -24,6 +24,7 @@ async def test_otp_flow_end_to_end(client, db_session, fake_redis):
     tokens = response.json()["data"]
     assert tokens["access"]
     assert tokens["refresh"]
+    assert tokens["user"]["is_verified"] is True
     assert tokens["user"]["is_phone_verified"] is True
     assert tokens["user"]["role"] == "customer"
 

@@ -2,9 +2,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import get_current_user
 from app.core.errors import AppError
 from app.db.session import get_db
 from app.models.category import Category, Subcategory
+from app.models.user import User
+from app.schemas.category_suggestion import CategorySuggestionRequest
+from app.services.category_suggestions import suggest_category
 
 router = APIRouter(prefix="/categories", tags=["catalog"])
 
@@ -34,6 +38,22 @@ async def list_categories(session: AsyncSession = Depends(get_db)) -> dict:
     )
     rows = (await session.execute(statement)).all()
     return {"data": {"items": [_category_item(category, count) for category, count in rows]}}
+
+
+@router.post("/suggest")
+async def suggest_business_category(
+    payload: CategorySuggestionRequest,
+    session: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Suggest a category/subcategory for the business wizard.
+
+    Suggestions are advisory. A disabled or unavailable model returns an empty
+    result rather than failing the form, so the owner can always pick manually.
+    """
+    del user
+    result = await suggest_category(session, payload.title, payload.description)
+    return {"data": result}
 
 
 @router.get("/subcategories")

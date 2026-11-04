@@ -96,7 +96,7 @@ export function DataTable<T>({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((row) => (
-                <tr key={rowKey(row)} className="align-top hover:bg-slate-50/70">
+                <tr key={rowKey(row)} className="group align-top hover:bg-slate-50/70">
                   {columns.map((column) => (
                     <td key={column.key} className={cn("px-3 py-2.5", column.className)}>
                       {column.cell(row)}

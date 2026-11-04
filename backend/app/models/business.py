@@ -34,6 +34,14 @@ class Business(Base):
         ),
         CheckConstraint("rating_avg >= 0 AND rating_avg <= 5", name="ck_business_rating_avg"),
         CheckConstraint("rating_count >= 0", name="ck_business_rating_count"),
+        # Public listing always filters on approved rows.
+        sa.Index(
+            "idx_businesses_status",
+            "status",
+            postgresql_where=sa.text("status = 'approved'"),
+        ),
+        # Covers category-only and category+subcategory filters.
+        sa.Index("idx_businesses_category_pair", "category_id", "subcategory_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4, nullable=False)
@@ -41,19 +49,21 @@ class Business(Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     category_id: Mapped[int] = mapped_column(
-        ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False
     )
     subcategory_id: Mapped[int | None] = mapped_column(
         ForeignKey("subcategories.id", ondelete="SET NULL"), nullable=True, index=True
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     slug: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
-    short_description: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    short_description: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="", server_default=""
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone_business: Mapped[str | None] = mapped_column(String(11), nullable=True)
     address: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Coordinates are the source of truth. Postgres adds a generated PostGIS
-    # `geo` geography column + GIST index in migration 0003 for radius search;
+    # Coordinates are the source of truth. The baseline migration adds a
+    # generated PostGIS `geo` geography column + GIST index for radius search;
     # keeping the ORM free of a GIS type lets the test suite run on SQLite.
     geo_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     geo_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
