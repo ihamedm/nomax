@@ -90,10 +90,10 @@ export function BusinessGallery({ name, images, icon }: BusinessGalleryProps) {
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setLightboxIndex(null);
-      else if (event.key === "ArrowRight") {
+      else if (event.key === "ArrowLeft") {
         event.preventDefault();
         changeLightbox(1);
-      } else if (event.key === "ArrowLeft") {
+      } else if (event.key === "ArrowRight") {
         event.preventDefault();
         changeLightbox(-1);
       }
@@ -113,10 +113,12 @@ export function BusinessGallery({ name, images, icon }: BusinessGalleryProps) {
 
   function handleTouchEnd(event: TouchEvent) {
     if (touchStart.current === null) return;
-    const delta = touchStart.current - (event.changedTouches[0]?.clientX ?? touchStart.current);
+    // The strip is RTL, so the next slide sits to the left: dragging the
+    // photos to the right (finger moves +X) advances the carousel.
+    const drag = (event.changedTouches[0]?.clientX ?? touchStart.current) - touchStart.current;
     touchStart.current = null;
-    if (Math.abs(delta) < 45) return;
-    goTo(index + (delta > 0 ? 1 : -1));
+    if (Math.abs(drag) < 45) return;
+    goTo(index + (drag > 0 ? 1 : -1));
   }
 
   function handleLightboxTouchStart(event: TouchEvent) {
@@ -125,11 +127,11 @@ export function BusinessGallery({ name, images, icon }: BusinessGalleryProps) {
 
   function handleLightboxTouchEnd(event: TouchEvent) {
     if (lightboxTouchStart.current === null) return;
-    const delta =
-      lightboxTouchStart.current - (event.changedTouches[0]?.clientX ?? lightboxTouchStart.current);
+    const drag =
+      (event.changedTouches[0]?.clientX ?? lightboxTouchStart.current) - lightboxTouchStart.current;
     lightboxTouchStart.current = null;
-    if (Math.abs(delta) < 45) return;
-    changeLightbox(delta > 0 ? 1 : -1);
+    if (Math.abs(drag) < 45) return;
+    changeLightbox(drag > 0 ? 1 : -1);
   }
 
   if (count === 0) {
@@ -167,9 +169,9 @@ export function BusinessGallery({ name, images, icon }: BusinessGalleryProps) {
         }}
       >
         <div
-          dir="ltr"
+          dir="rtl"
           className="flex h-full transition-transform duration-500 ease-out motion-reduce:transition-none"
-          style={{ transform: `translateX(-${index * 100}%)` }}
+          style={{ transform: `translateX(${index * 100}%)` }}
         >
           {images.map((photo, photoIndex) => (
             <button

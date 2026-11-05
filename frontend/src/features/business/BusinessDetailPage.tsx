@@ -15,6 +15,7 @@ import { useApi } from "@/lib/query";
 import { returnPath } from "@/lib/auth-redirect";
 import { useAuth } from "@/stores/auth";
 import { LoginRequiredSheet } from "@/features/auth/LoginRequiredSheet";
+import { LocationPermissionSheet } from "@/features/location/LocationPermissionSheet";
 import { NeshanMap, type MapMarker } from "@/features/map/NeshanMap";
 import { ReviewSheet } from "@/features/reviews/ReviewSheet";
 import type { BusinessDetail } from "@/types";
@@ -214,6 +215,7 @@ export function BusinessDetailPage() {
         lng: business.geo.lng,
         title: business.name,
         subtitle: business.address,
+        variant: "pushpin" as const,
       },
     ];
   }, [business]);
@@ -236,11 +238,14 @@ export function BusinessDetailPage() {
   const displayPhone = business?.phone_business?.trim() || ownerPhone;
   const callNumber = telHref(displayPhone);
   const neshanLink = business?.geo
-    ? `https://neshan.org/maps/@${business.geo.lat},${business.geo.lng},16z`
+    ? `https://neshan.org/maps#c${business.geo.lat.toFixed(5)}-${business.geo.lng.toFixed(
+        5,
+      )}-17z-0p`
     : null;
 
   return (
     <main className="mx-auto min-h-[100dvh] w-full max-w-3xl pb-16">
+      <LocationPermissionSheet />
       {loading && (
         <div className="flex justify-center py-24 text-brand-600">
           <Spinner />
@@ -535,24 +540,11 @@ export function BusinessDetailPage() {
 
           {business.geo && (
             <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-slate-900">موقعیت روی نقشه</h2>
-                {neshanLink && (
-                  <a
-                    href={neshanLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] text-brand-600"
-                  >
-                    باز کردن در نشان
-                  </a>
-                )}
-              </div>
+              <h2 className="text-sm font-bold text-slate-900">موقعیت روی نقشه</h2>
               <NeshanMap
                 center={business.geo}
                 markers={mapMarkers}
-                zoom={15}
-                fitToMarkers
+                zoom={17}
                 className="h-56"
               />
             </section>

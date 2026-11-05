@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import select
 
 from app.core.security import create_access_token
 from app.models.user import UserRole
@@ -77,3 +78,62 @@ async def test_users_list_search_by_name_and_phone(client, create_user):
     no_match = await client.get("/api/v1/admin/users?q=9999999", headers=headers)
     assert no_match.status_code == 200
     assert no_match.json()["data"]["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_superadmin_soft_deletes_user(client, create_user, db_session):
+    from app.models.admin import AuditLog
+    from app.models.user import User
+
+    admin = await create_user("9111222500", role=UserRole.SUPERADMIN)
+    target = await create_user("9121112001", full_name="کاربر حذفی")
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id, admin.role.value)}"}
+
+    response = await client.delete(f"/api/v1/admin/users/{target.id}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["data"]["deleted"] is True
+
+    row = (
+        await db_session.execute(select(User).where(User.id == target.id))
+    ).scalar_one()
+    assert row.deleted_at is not None
+
+    listing = await client.get("/api/v1/admin/users?q=9121112001", headers=headers)
+    assert listing.json()["data"]["items"] == []
+
+    # A deleted account can no longer authenticate.
+    me = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {create_access_token(target.id, target.role.value)}"},
+    )
+    assert me.status_code == 401
+
+    logs = (
+        await db_session.execute(select(AuditLog).where(AuditLog.action == "admin.user.deleted"))
+    ).scalars().all()
+    assert len(logs) == 1
+    assert logs[0].entity_id == str(target.id)
+    assert logs[0].before["phone"] == "9121112001"
+
+    again = await client.delete(f"/api/v1/admin/users/{target.id}", headers=headers)
+    assert again.status_code == 404
+    assert again.json()["error"]["code"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_delete_self_or_non_superadmin(client, create_user):
+    admin = await create_user("9111222600", role=UserRole.SUPERADMIN)
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id, admin.role.value)}"}
+
+    self_delete = await client.delete(f"/api/v1/admin/users/{admin.id}", headers=headers)
+    assert self_delete.status_code == 409
+    assert self_delete.json()["error"]["code"] == "conflict"
+
+    plain_admin = await create_user(
+        "9111222601", role=UserRole.ADMIN, permissions=["user.manage"]
+    )
+    plain_headers = {
+        "Authorization": f"Bearer {create_access_token(plain_admin.id, plain_admin.role.value)}"
+    }
+    forbidden = await client.delete(f"/api/v1/admin/users/{admin.id}", headers=plain_headers)
+    assert forbidden.status_code == 403

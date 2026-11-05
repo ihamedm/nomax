@@ -872,6 +872,60 @@ async def update_user(
     return {"data": _to_admin_response(target)}
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    request: Request,
+    actor: User = Depends(require_superadmin),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Soft-delete a user account.
+
+    The row is kept so owned businesses, quotes and reviews stay referentially
+    intact; `deleted_at` hides the account from lists and invalidates its
+    access tokens (see `get_current_user`).
+    """
+    from datetime import datetime, timezone
+
+    target = await session.get(User, UUID(user_id))
+    if target is None or target.deleted_at is not None:
+        raise AppError("not_found", "user_not_found", 404)
+    if target.id == actor.id:
+        raise AppError("conflict", "cannot_delete_self", 409)
+    if target.role == UserRole.SUPERADMIN:
+        remaining = await session.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.role == UserRole.SUPERADMIN,
+                User.deleted_at.is_(None),
+                User.id != target.id,
+            )
+        )
+        if not remaining:
+            raise AppError("conflict", "last_superadmin_required", 409)
+
+    before = {
+        "phone": target.phone,
+        "full_name": target.full_name,
+        "role": target.role.value,
+        "permissions": list(target.permissions or []),
+    }
+    target.deleted_at = datetime.now(timezone.utc)
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.user.deleted",
+        entity_type="user",
+        entity_id=str(user_id),
+        before=before,
+        after=None,
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    return {"data": {"id": str(user_id), "deleted": True}}
+
+
 @router.patch("/users/{user_id}/role")
 async def patch_user_role(
     user_id: str,

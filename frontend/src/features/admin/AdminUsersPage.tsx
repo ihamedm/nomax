@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Badge, RoleBadge } from "@/components/ui/badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
@@ -178,6 +179,8 @@ export function AdminUsersPage() {
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [form, setForm] = useState<UserFormState>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<AdminUser | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newPhone, setNewPhone] = useState("");
@@ -266,6 +269,22 @@ export function AdminUsersPage() {
       toast(errorMessage(saveError));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function removeUser() {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await api(`/admin/users/${confirmDelete.id}`, { method: "DELETE" });
+      toast("کاربر حذف شد.");
+      if (editing?.id === confirmDelete.id) setEditing(null);
+      setConfirmDelete(null);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+    } catch (deleteError) {
+      toast(errorMessage(deleteError));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -574,9 +593,48 @@ export function AdminUsersPage() {
                 انصراف
               </Button>
             </div>
+
+            {editing.id !== me?.id && (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
+                <p className="text-sm font-bold text-rose-700">حذف کاربر</p>
+                <p className="mt-1 text-[11px] leading-6 text-rose-600">
+                  حساب کاربر حذف می‌شود و دیگر نمی‌تواند وارد شود. کسب‌وکارها، نظرات و
+                  استعلام‌های ثبت‌شده او در سامانه باقی می‌مانند.
+                </p>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  className="mt-3"
+                  disabled={saving}
+                  onClick={() => setConfirmDelete(editing)}
+                >
+                  حذف کاربر
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </BottomSheet>
+
+      <ConfirmSheet
+        open={confirmDelete !== null}
+        title="حذف کاربر"
+        description={
+          <>
+            حساب{" "}
+            <span className="font-bold text-slate-800">
+              {confirmDelete?.full_name || formatPhone(confirmDelete?.phone ?? "")}
+            </span>{" "}
+            حذف شود؟ این کاربر دیگر نمی‌تواند وارد شود. این عملیات از دید کاربر نهایی
+            بازگشت‌ناپذیر است.
+          </>
+        }
+        confirmLabel="حذف کن"
+        tone="rose"
+        loading={deleting}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={() => void removeUser()}
+      />
 
       <BottomSheet
         open={createOpen}

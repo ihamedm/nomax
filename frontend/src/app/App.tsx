@@ -6,7 +6,6 @@ import { AppLayout } from "@/app/AppLayout";
 import { AdminHomePage } from "@/features/admin/AdminHomePage";
 import { AdminLayout } from "@/features/admin/AdminLayout";
 import { AdminUsersPage } from "@/features/admin/AdminUsersPage";
-import { DevOtpsPage } from "@/features/admin/DevOtpsPage";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { RequireAuth } from "@/features/auth/RequireAuth";
 import { BusinessDetailPage } from "@/features/business/BusinessDetailPage";
@@ -172,7 +171,6 @@ export function App() {
           <Route path="cache" element={<AdminCachePage />} />
           <Route path="files" element={<AdminFilesPage />} />
           <Route path="users" element={<AdminUsersPage />} />
-          <Route path="dev-otps" element={<DevOtpsPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

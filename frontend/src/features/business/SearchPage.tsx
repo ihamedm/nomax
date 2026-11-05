@@ -15,6 +15,7 @@ import { getCurrentPosition } from "@/lib/geolocation";
 import { useApi } from "@/lib/query";
 import { useUi } from "@/stores/ui";
 import { BusinessCard } from "@/features/business/BusinessCard";
+import { LocationPermissionSheet } from "@/features/location/LocationPermissionSheet";
 import { NeshanMap, type MapMarker, type MapViewport } from "@/features/map/NeshanMap";
 import type {
   BusinessCategory,
@@ -374,6 +375,7 @@ export function SearchPage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl pb-10">
+      <LocationPermissionSheet />
       <section className="sticky top-14 z-20 border-b border-slate-200 bg-slate-50/95 px-4 pb-3 pt-3 backdrop-blur">
         <form onSubmit={submitSearch} className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">

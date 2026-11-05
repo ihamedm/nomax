@@ -18,6 +18,11 @@ export interface MapMarker {
   offsetY?: number;
   /** When set, the pin renders as a numbered cluster bubble. */
   count?: number;
+  /**
+   * Marker shape. `dot` (default) is the small round pin used in feeds;
+   * `pushpin` is the taller teardrop marker used to highlight one place.
+   */
+  variant?: "dot" | "pushpin";
 }
 
 export interface MapViewport {
@@ -50,9 +55,11 @@ function markerIcon(
   color?: string,
   offsetX = 0,
   offsetY = 0,
+  variant: "dot" | "pushpin" = "dot",
 ) {
-  // The picker pin has a circular head plus a tail, so it needs a larger
-  // canvas and its anchor sits at the tip of the tail.
+  // The picker and pushpin markers have a circular head plus a tail, so they
+  // need a larger canvas and their anchor sits at the tip of the tail.
+  const tail = picker || variant === "pushpin";
   const styles = [
     color ? `background:${color}` : "",
     offsetX || offsetY ? `position:relative;left:${offsetX}px;top:${offsetY}px` : "",
@@ -60,11 +67,16 @@ function markerIcon(
     .filter(Boolean)
     .join(";");
   const colorStyle = styles ? ` style="${styles}"` : "";
+  const modifier = picker
+    ? " nomax-map-pin--picker"
+    : variant === "pushpin"
+      ? " nomax-map-pin--pushpin"
+      : "";
   return L.divIcon({
     className: "",
-    html: `<span class="nomax-map-pin${picker ? " nomax-map-pin--picker" : ""}"${colorStyle}></span>`,
-    iconSize: picker ? [46, 58] : [24, 24],
-    iconAnchor: picker ? [23, 56] : [12, 12],
+    html: `<span class="nomax-map-pin${modifier}"${colorStyle}></span>`,
+    iconSize: picker ? [46, 58] : tail ? [36, 46] : [24, 24],
+    iconAnchor: picker ? [23, 56] : tail ? [16, 42] : [12, 12],
     popupAnchor: [0, -14],
   });
 }
@@ -242,7 +254,14 @@ export function NeshanMap({
         icon:
           marker.count !== undefined
             ? clusterIcon(L, marker.count)
-            : markerIcon(L, false, marker.color, marker.offsetX, marker.offsetY),
+            : markerIcon(
+                L,
+                false,
+                marker.color,
+                marker.offsetX,
+                marker.offsetY,
+                marker.variant,
+              ),
         title: marker.title ?? "",
         zIndexOffset: marker.count !== undefined ? 500 : marker.zIndexOffset ?? 0,
       });

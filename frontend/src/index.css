@@ -77,6 +77,40 @@
   box-shadow: 0 2px 10px rgb(15 23 42 / 0.35);
 }
 
+/* Teardrop marker used to highlight a single place (business detail page). */
+.nomax-map-pin--pushpin {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border: 3px solid #ffffff;
+  background: #0b8a5c;
+  box-shadow: 0 8px 20px rgb(11 138 92 / 0.45);
+}
+
+.nomax-map-pin--pushpin::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: #ffffff;
+}
+
+.nomax-map-pin--pushpin::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% - 1px);
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 11px solid #0b8a5c;
+}
+
 .nomax-map-cluster {
   display: flex;
   align-items: center;
