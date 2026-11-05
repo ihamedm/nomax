@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import security
 from app.core.deps import get_current_user, get_otp_service, require_permissions, require_superadmin
 from app.core.errors import AppError
-from app.core.permissions import permission_catalog, validate_permission_codes
+from app.core.permissions import has_permission, permission_catalog, validate_permission_codes
 from app.db.session import get_db
 from app.models.admin import AuditLog
 from app.models.user import User, UserRole
@@ -18,6 +18,7 @@ from app.services.inapp_notifications import (
     notify_business_approved,
     notify_business_rejected,
 )
+from app.services import dashboard as dashboard_service
 from app.services import map_cache
 from app.services.otp_service import OtpService
 
@@ -631,6 +632,30 @@ async def stats_overview(
         "rejected": await count(Business.status == "rejected"),
         "urgent": await count(Business.is_24h.is_(True)),
     }}
+
+
+@router.get("/dashboard")
+async def dashboard(
+    days: int = Query(14, ge=7, le=30),
+    actor: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Single-shot payload for the admin home page.
+
+    Analytics blocks are omitted for admins without `stats.read`; actionable
+    queues are filtered by the permissions the viewer actually holds.
+    """
+    is_super = actor.role == UserRole.SUPERADMIN
+    return {
+        "data": await dashboard_service.overview(
+            session,
+            days=days,
+            can_stats=is_super or has_permission(actor, "stats.read"),
+            can_business=is_super or has_permission(actor, "business.read"),
+            can_review=is_super or has_permission(actor, "review.read"),
+            can_quote=is_super or has_permission(actor, "quote.read"),
+        )
+    }
 
 
 @router.get("/audit-log")
