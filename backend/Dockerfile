@@ -7,6 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DEFAULT_TIMEOUT=120 \
     PIP_RETRIES=10
 
+# PyPI index for the project install and its isolated build dependencies
+# (hatchling). Override it on networks where files.pythonhosted.org does not
+# resolve, e.g. PIP_INDEX_URL=https://mirror-pypi.runflare.com/simple
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=$PIP_INDEX_URL
+
 COPY pyproject.toml ./
 
 # psql/pg_dump power the superadmin database backup dashboard. Keep this

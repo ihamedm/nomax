@@ -2,7 +2,14 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci || npm install
+
+# npm registry for the install step. Override on networks where
+# registry.npmjs.org is blocked, e.g. NPM_REGISTRY=https://registry.npmmirror.com
+# (replace-registry-host rewrites the lockfile's npmjs URLs to the mirror).
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry "$NPM_REGISTRY" \
+    && npm config set replace-registry-host always \
+    && (npm ci || npm install)
 COPY . .
 
 # Vite inlines these values into the bundle at build time, so they must be

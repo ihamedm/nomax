@@ -23,7 +23,10 @@ services:
       - redisdata:/data
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     restart: unless-stopped
     depends_on:
       db:
@@ -103,7 +106,10 @@ services:
       start_period: 30s
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     depends_on:
@@ -170,6 +176,7 @@ services:
       # VITE_NESHAN_MAP_KEY in .env.prod to enable the map; leaving it empty
       # degrades to the manual location picker.
       args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
         VITE_APP_ENV: ${VITE_APP_ENV:-production}
         VITE_NESHAN_MAP_KEY: ${VITE_NESHAN_MAP_KEY:-}

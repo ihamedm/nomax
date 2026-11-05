@@ -8,7 +8,7 @@ origin and **ArvanCloud CDN** in front of it.
 browser ──TLS──▶ ArvanCloud edge (biznestly.ir, Arvan cert, cache/WAF)
                       │  HTTPS, Host: biznestly.ir
                       ▼
-                VPS :443  Caddy (Let's Encrypt cert)
+                VPS :443  Caddy (Let's Encrypt or internal CA, see §4)
                       │
                       ▼
                 web :80   nginx  ──/api/*──▶ api:8001 ──▶ db / redis
@@ -56,9 +56,10 @@ export VPS_IP=203.0.113.10          # ← your server's public IPv4
 | A | `www` | `$VPS_IP` | Off (optional, see Appendix C) |
 | CNAME | `s3` (optional) | your Arvan S3 public endpoint | per Arvan docs |
 
-Keep the proxy **off** until Caddy has obtained its certificate (step 4).
-Otherwise the HTTP-01 challenge may be answered by the CDN instead of the
-origin, and issuance fails.
+With option A (Let's Encrypt) keep the proxy **off** until Caddy has its
+certificate (step 4); otherwise the HTTP-01 challenge may be answered by the
+CDN instead of the origin. With option B (internal CA, §4) the proxy can be
+on from the start.
 
 Verify:
 
@@ -233,7 +234,32 @@ source ~/.bashrc
 
 ---
 
-## 4. First start (with the CDN still off)
+## 4. Origin TLS: choose a setup
+
+ArvanCloud terminates the browser-facing TLS. This section is only about the
+**Arvan → VPS** hop, and there are three valid options:
+
+| Setup | VPS certificate | Issuance | Arvan → VPS hop | Use when |
+| --- | --- | --- | --- | --- |
+| **A. ACME** (below) | Let's Encrypt | HTTP-01 (needs proxy off once) | encrypted + authenticated | Arvan validates the origin cert, or the origin is also reachable directly |
+| **B. Internal CA** (Option B) | Caddy self-signed | none | encrypted, **not** authenticated | default behind a CDN that accepts untrusted origins |
+| **C. No TLS at origin** (Option C) | none | none | **plaintext** | only over a private link/VPN |
+
+Check the ArvanCloud panel: if the origin SSL mode is **Full** (not
+**Full Strict**) and the origin protocol is HTTPS, option B works and there is
+nothing to renew. If Arvan insists on a trusted origin certificate, use A.
+
+### Seed the catalog and create the superadmin
+
+```bash
+dc exec api python -m app.cli seed-categories
+dc exec api python -m app.cli create-superadmin --phone 09123456789 --name "Super Admin"
+```
+
+`create-superadmin` only creates/promotes the row; logging in still requires a
+working SMS provider (or the console fallback described in §9).
+
+### Option A — Let's Encrypt (CDN proxy off for the first issue)
 
 Build and start. The API container runs `alembic upgrade head` on boot, so a
 fresh database is migrated automatically.
@@ -259,29 +285,82 @@ curl -fsS --resolve biznestly.ir:443:127.0.0.1 https://biznestly.ir/health; echo
 curl -fsS -o /dev/null -w 'HTTP %{http_code}\n' https://biznestly.ir/
 ```
 
-### Seed the catalog and create the superadmin
+Then continue with §5 (enable the proxy).
 
-```bash
-dc exec api python -m app.cli seed-categories
-dc exec api python -m app.cli create-superadmin --phone 09123456789 --name "Super Admin"
+### Option B — self-signed origin, no ACME, no renewals
+
+Edit `deploy/Caddyfile` to:
+
+```
+{$DOMAIN} {
+	tls internal
+	encode gzip zstd
+	reverse_proxy web:80
+}
 ```
 
-`create-superadmin` only creates/promotes the row; logging in still requires a
-working SMS provider (or the console fallback described in §9).
+`tls internal` tells Caddy to issue its own CA-signed certificate and to skip
+ACME entirely: no HTTP-01, no Let's Encrypt rate limits, no 60-day renewal, no
+need to turn the CDN proxy off, and no `/.well-known` bypass rule.
+
+```bash
+cd "$APP_DIR"
+dc up -d --build
+dc exec caddy caddy validate --config /etc/caddy/Caddyfile
+dc exec caddy caddy reload --config /etc/caddy/Caddyfile
+dc logs --tail=50 caddy
+```
+
+Arvan must use origin protocol **HTTPS** with SSL mode **Full** (non-strict).
+Verify from the server, accepting the self-signed cert:
+
+```bash
+curl -fsSk --resolve biznestly.ir:443:127.0.0.1 https://biznestly.ir/health; echo
+```
+
+Then enable the proxy (§5). If Arvan answers with a 526/525 or "origin
+certificate" error, it is validating the origin: switch to Option A.
+
+Trade-off: the Arvan → VPS hop is encrypted but the origin is not
+cryptographically authenticated, so someone positioned between the edge and
+your VPS could impersonate it. For a CDN-fronted beta that is usually accepted;
+enabling WAF, keeping the origin IP private, and restricting 443 to ArvanCloud
+ranges (Appendix C) reduce the exposure. Choose A if that is not acceptable.
+
+Keep the `caddy_data` volume: it stores the internal CA. Deleting it just
+regenerates the CA, which Arvan does not pin in Full mode.
+
+### Option C — drop Caddy, HTTP origin
+
+This works, but sends every JWT, OTP and admin request in **plaintext** between
+Arvan and your VPS, and anyone who learns the VPS IP bypasses the CDN, WAF and
+rate limits by hitting port 80 directly. Only do it if that path is private
+(WireGuard/tunnel) or the box is disposable.
+
+In `docker-compose.prod.yml`:
+
+- remove the `caddy` service (and the `caddy_data` / `caddy_config` volumes),
+- give `web` the published port `ports: ["80:80"]`,
+- in Arvan set the origin protocol to **HTTP** and SSL mode to **Flexible**.
+
+The app does not depend on `X-Forwarded-Proto` (JWTs travel in headers, not
+scheme-bound cookies), so it keeps working — but HSTS can then only be set at
+the Arvan edge.
 
 ---
 
 ## 5. Turn on the ArvanCloud CDN
 
-Back in the ArvanCloud panel, with the origin already serving a valid
-certificate:
+Back in the ArvanCloud panel, with the origin already serving HTTPS (option A
+or B):
 
 1. **DNS** — enable the proxy (cloud toggle) on the `A @` record.
    `dig +short biznestly.ir` now returns ArvanCloud edge IPs, not `$VPS_IP`.
 2. **SSL/TLS** —
    - Enable ArvanCloud's free certificate for `biznestly.ir` (and `www` if used).
    - Mode: **Full** (origin speaks HTTPS). **Do not use Flexible** — Caddy
-     force-redirects HTTP to HTTPS, which causes a redirect loop.
+     force-redirects HTTP to HTTPS, which causes a redirect loop. Flexible is
+     only valid for option C, which has no Caddy.
    - Force HTTPS: on.
 3. Confirm traffic flows through the edge:
 
@@ -290,13 +369,13 @@ curl -sSI https://biznestly.ir | grep -Ei 'server|ar-|cache'
 ```
 
 > Browser ↔ Arvan is encrypted with Arvan's certificate; Arvan ↔ Caddy uses the
-> Let's Encrypt certificate Caddy obtained in step 4.
+> certificate from §4 (Let's Encrypt, or Caddy's internal CA).
 
-### Certificate renewals
+### Certificate renewals (option A only)
 
-Caddy renews at ~2/3 of the certificate lifetime (around day 60). Renewal uses
-the same HTTP-01 challenge, now through the CDN. Add a CDN rule so it always
-reaches the origin:
+Skip this whole subsection with option B. Caddy renews at ~2/3 of the
+certificate lifetime (around day 60). Renewal uses the same HTTP-01 challenge,
+now through the CDN. Add a CDN rule so it always reaches the origin:
 
 - **Cache bypass** for path `/.well-known/acme-challenge/*` (never cache it,
   and do not cache 404s).
@@ -309,9 +388,8 @@ echo | openssl s_client -servername biznestly.ir -connect 127.0.0.1:443 2>/dev/n
   | openssl x509 -noout -dates
 ```
 
-If renewals fail, either switch to DNS-01 (Appendix B) or run Caddy with a
-self-signed internal certificate while Arvan keeps SSL mode Full (Appendix B,
-last paragraph).
+If renewals fail, switch to DNS-01 (Appendix B) or to option B (§4), which
+has no renewals at all.
 
 ---
 
@@ -475,9 +553,109 @@ A backup that has never been restored is not a backup.
 | **OTP request returns 503** | Mellipayamak rejected the credentials/template. `dc logs api` shows `SMS delivery failed`. |
 | **Nobody can log in, no SMS** | `SMS_PROVIDER=console` in production. Either configure Mellipayamak, or (temporarily, server access required) read the code from Redis: `dc exec redis redis-cli GET "dev:otp:09xxxxxxxxx"`. |
 | **Old UI after deploy** | `index.html` cached by the CDN. Purge the Arvan cache and check the no-cache rule. |
-| **Certificate never issued** | DNS proxy still on, or port 80 blocked. `dig +short biznestly.ir`, `ufw status`, `dc logs caddy`. |
+| **Certificate never issued** (option A) | DNS proxy still on, or port 80 blocked. `dig +short biznestly.ir`, `ufw status`, `dc logs caddy`. Or just use option B (§4). |
 | **Build killed (OOM)** | Not enough RAM. Add swap, or `dc build api` / `dc build web` one at a time. |
 | **Wrong client IP in audit logs** | Arvan is in front; see Appendix A. |
+| **`RuntimeError: Form data requires "python-multipart"`** | The container runs an image built before `python-multipart` was added to `pyproject.toml`. Pull and rebuild (see below). |
+| **Build fails: `Temporary failure in name resolution`** | Docker build containers cannot resolve PyPI. See "Build DNS and package mirrors" below. |
+
+### Build DNS and package mirrors
+
+Docker **build** containers do not use the host's resolver: they get the
+resolvers from `/etc/docker/daemon.json`, or Docker's default `8.8.8.8`, which
+is usually blocked on Iranian networks. That is why `apt-get` can succeed on
+the host while `pip` fails inside the build.
+
+Test it:
+
+```bash
+docker run --rm python:3.12-slim python -c \
+  "import socket; print(socket.gethostbyname('files.pythonhosted.org'))"
+```
+
+If that errors, give Docker a resolver that works and restart the daemon
+(merge the `dns` key into the `daemon.json` from §2):
+
+```bash
+cat >/etc/docker/daemon.json <<'JSON'
+{
+  "dns": ["178.22.122.100", "185.51.200.2"],
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+JSON
+systemctl restart docker
+docker run --rm python:3.12-slim python -c \
+  "import socket; print(socket.gethostbyname('files.pythonhosted.org'))"
+```
+
+Alternatives for `dns`: `10.202.10.202`, `10.202.10.102`, your provider's
+resolvers, or `1.1.1.1` if it is reachable. Restarting Docker stops the
+containers; `dc up -d` brings them back.
+
+Then rebuild — the failed layer was not cached, so a plain build retries:
+
+```bash
+dc build api worker
+dc up -d
+```
+
+If names resolve but downloads still fail or crawl, use a mirror. Both
+Dockerfiles take the registry as a build argument:
+
+```bash
+printf 'PIP_INDEX_URL=https://mirror-pypi.runflare.com/simple\n' >> .env.prod
+printf 'NPM_REGISTRY=https://registry.npmmirror.com\n' >> .env.prod
+dc build api worker web
+```
+
+or one-shot, without touching `.env.prod`:
+
+```bash
+dc build --build-arg PIP_INDEX_URL=https://mirror-pypi.runflare.com/simple \
+         --build-arg NPM_REGISTRY=https://registry.npmmirror.com api worker web
+```
+
+The backend installs its build backend (hatchling) in an isolated environment,
+which inherits `PIP_INDEX_URL`, so the mirror is used for that step too.
+
+Last resort: build with the host's network namespace, which uses the host
+`resolv.conf`:
+
+```yaml
+  api:
+    build:
+      context: ./backend
+      network: host
+```
+
+Add `network: host` the same way under `worker` (and `web` for npm), rebuild,
+then remove it if you prefer.
+
+### `python-multipart` on a development machine
+
+The dependency is already declared in `backend/pyproject.toml`
+(`python-multipart>=0.0.9`, added in commit `c5cb655`). The error means the
+running code predates it:
+
+```bash
+cd /opt/nomax          # or wherever the dev checkout lives
+git pull --ff-only
+git log -1 --oneline   # must be c5cb655 or newer
+docker compose build --no-cache api worker
+docker compose up -d
+```
+
+Running the API outside Docker:
+
+```bash
+cd backend
+pip install -e ".[dev]"
+python -c "import multipart; print(multipart.__version__)"
+```
+
+If `pip` still sees an old version, make sure you are in the same virtualenv
+that runs `uvicorn` (`which python`).
 
 ---
 
@@ -611,14 +789,14 @@ break-glass path to the VPS (provider console) in case the list changes.
 
 ## Deployment checklist
 
-- [ ] Arvan nameservers active; `A @` → VPS IP; proxy **off** for first issue
+- [ ] Arvan nameservers active; `A @` → VPS IP; proxy **off** for option A, can stay on for option B
 - [ ] Ubuntu updated; Docker + Compose v2; swap; Docker log rotation; ufw 22/80/443
 - [ ] `deploy` user, SSH key login, password auth disabled
 - [ ] Repo cloned to `/opt/nomax`; `.env.prod` chmod 600
 - [ ] `DOMAIN`, random `POSTGRES_PASSWORD` / `JWT_SECRET` set
 - [ ] Arvan S3 buckets + access key; `/ready` reports `storage: ok`
 - [ ] Mellipayamak credentials; a real OTP arrives
-- [ ] Caddy certificate obtained (`dc logs caddy`)
+- [ ] Origin TLS decided (§4): Let's Encrypt issued, or `tls internal` + Arvan Full
 - [ ] Arvan proxy enabled; SSL mode **Full**; no redirect loop
 - [ ] CDN: bypass `/api/*`, `/uploads/*`, `/.well-known/*`; no-cache HTML; long-cache `/assets/*`
 - [ ] CDN origin timeout / body limit adjusted

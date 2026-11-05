@@ -33,7 +33,10 @@ services:
       retries: 10
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     container_name: nomax-api
     depends_on:
       db:
@@ -105,7 +108,10 @@ services:
       start_period: 15s
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     container_name: nomax-worker
     command: ["python", "-m", "app.worker"]
     depends_on:
@@ -167,7 +173,10 @@ services:
       start_period: 180s
 
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     container_name: nomax-web
     depends_on:
       api:
