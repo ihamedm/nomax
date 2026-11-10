@@ -147,6 +147,7 @@ export function AdminUsersPage() {
 
   const roleFilter = (params.get("role") ?? "") as "" | Role;
   const verifiedFilter = (params.get("verified") ?? "") as "" | "verified" | "unverified";
+  const trash = params.get("trash") === "1";
   const qParam = params.get("q") ?? "";
   const page = Math.max(1, Number(params.get("page") ?? "1") || 1);
 
@@ -156,10 +157,11 @@ export function AdminUsersPage() {
   const query = new URLSearchParams({ page: String(page), per_page: "15" });
   if (roleFilter) query.set("role", roleFilter);
   if (verifiedFilter) query.set("verified", verifiedFilter === "verified" ? "true" : "false");
+  if (trash) query.set("trash", "true");
   if (qParam) query.set("q", qParam);
 
   const usersQuery = useApiWithMeta<{ items: AdminUser[] }, PageMeta>(
-    ["admin", "users", roleFilter, verifiedFilter, qParam, page],
+    ["admin", "users", roleFilter, verifiedFilter, trash, qParam, page],
     `/admin/users?${query.toString()}`,
   );
   const permissionsQuery = useApi<{ items: PermissionItem[] }>(
@@ -181,6 +183,9 @@ export function AdminUsersPage() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<AdminUser | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [confirmPermanent, setConfirmPermanent] = useState<AdminUser | null>(null);
+  const [purging, setPurging] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newPhone, setNewPhone] = useState("");
@@ -288,6 +293,35 @@ export function AdminUsersPage() {
     }
   }
 
+  async function restoreUser(user: AdminUser) {
+    setRestoringId(user.id);
+    try {
+      await api(`/admin/users/${user.id}/restore`, { method: "POST" });
+      toast("کاربر بازیابی شد.");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+    } catch (restoreError) {
+      toast(errorMessage(restoreError));
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  async function purgeUser() {
+    if (!confirmPermanent) return;
+    setPurging(true);
+    try {
+      await api(`/admin/users/${confirmPermanent.id}/permanent`, { method: "DELETE" });
+      toast("کاربر به‌طور دائمی حذف شد.");
+      if (editing?.id === confirmPermanent.id) setEditing(null);
+      setConfirmPermanent(null);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+    } catch (purgeError) {
+      toast(errorMessage(purgeError));
+    } finally {
+      setPurging(false);
+    }
+  }
+
   async function createUser() {
     if (!newPhone.trim()) {
       toast("شماره موبایل کاربر جدید را وارد کنید.");
@@ -361,38 +395,54 @@ export function AdminUsersPage() {
     },
     {
       key: "created",
-      header: "عضویت",
-      cell: (user) => (
-        <span className="text-xs text-slate-500">
-          {user.created_at ? formatJalali(user.created_at) : "—"}
-        </span>
-      ),
+      header: trash ? "حذف‌شده در" : "عضویت",
+      cell: (user) => {
+        const date = trash ? user.deleted_at : user.created_at;
+        return (
+          <span className="text-xs text-slate-500">{date ? formatJalali(date) : "—"}</span>
+        );
+      },
     },
     {
       key: "actions",
       header: "عملیات",
       className: "text-left",
-      cell: (user) => (
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <div className="flex items-center gap-3 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
-            <button
-              type="button"
-              onClick={() => openEditor(user)}
-              className="text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+      cell: (user) =>
+        trash ? (
+          <div className="flex items-center justify-end gap-3">
+            <Button
+              size="sm"
+              variant="outline"
+              loading={restoringId === user.id}
+              onClick={() => void restoreUser(user)}
             >
-              ویرایش
-            </button>
+              بازیابی
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setConfirmPermanent(user)}>
+              حذف دائمی
+            </Button>
           </div>
-          <Link
-            to={`/admin/businesses?owner_id=${user.id}&owner_name=${encodeURIComponent(
-              user.full_name || user.phone,
-            )}`}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
-          >
-            نمایش کسب‌وکارها
-          </Link>
-        </div>
-      ),
+        ) : (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="flex items-center gap-3 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+              <button
+                type="button"
+                onClick={() => openEditor(user)}
+                className="text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+              >
+                ویرایش
+              </button>
+            </div>
+            <Link
+              to={`/admin/businesses?owner_id=${user.id}&owner_name=${encodeURIComponent(
+                user.full_name || user.phone,
+              )}`}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+            >
+              نمایش کسب‌وکارها
+            </Link>
+          </div>
+        ),
     },
   ];
 
@@ -422,7 +472,7 @@ export function AdminUsersPage() {
         rowKey={(user) => user.id}
         loading={loading}
         error={error}
-        empty="کاربری با این فیلترها پیدا نشد."
+        empty={trash ? "سبد حذف‌شده‌ها خالی است." : "کاربری با این فیلترها پیدا نشد."}
         minWidthClassName="min-w-[960px]"
         meta={meta ? { page: meta.page, pages: meta.pages, total: meta.total } : undefined}
         onPageChange={(next) => updateParams({ page: String(next) })}
@@ -462,6 +512,22 @@ export function AdminUsersPage() {
                 <option value="owner">کسب‌وکار</option>
                 <option value="admin">مدیر</option>
                 <option value="superadmin">مدیر کل</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="trash-filter" className="text-xs text-slate-500">
+                وضعیت
+              </label>
+              <select
+                id="trash-filter"
+                value={trash ? "trash" : ""}
+                onChange={(event) =>
+                  updateParams({ trash: event.target.value === "trash" ? "1" : null, page: null })
+                }
+                className="h-11 w-44 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              >
+                <option value="">کاربران فعال</option>
+                <option value="trash">سبد حذف‌شده‌ها</option>
               </select>
             </div>
             <div className="flex items-center gap-2">
@@ -634,6 +700,25 @@ export function AdminUsersPage() {
         loading={deleting}
         onClose={() => setConfirmDelete(null)}
         onConfirm={() => void removeUser()}
+      />
+
+      <ConfirmSheet
+        open={confirmPermanent !== null}
+        title="حذف دائمی کاربر"
+        description={
+          <>
+            <span className="font-bold text-slate-800">
+              {confirmPermanent?.full_name || formatPhone(confirmPermanent?.phone ?? "")}
+            </span>{" "}
+            به‌طور کامل حذف شود؟ نظرات، استعلام‌ها و نشست‌های این کاربر پاک می‌شوند و
+            شماره موبایل او برای ثبت‌نام دوباره آزاد می‌شود. این عملیات بازگشت‌ناپذیر است.
+          </>
+        }
+        confirmLabel="حذف دائمی"
+        tone="rose"
+        loading={purging}
+        onClose={() => setConfirmPermanent(null)}
+        onConfirm={() => void purgeUser()}
       />
 
       <BottomSheet

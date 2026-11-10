@@ -3,7 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
@@ -67,6 +67,7 @@ def _to_admin_response(user: User) -> dict:
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
+        deleted_at=user.deleted_at,
     ).model_dump(mode="json")
 
 
@@ -696,12 +697,13 @@ async def list_users(
     session: AsyncSession = Depends(get_db),
     role: Optional[UserRole] = Query(None),
     verified: Optional[bool] = Query(None),
+    trash: bool = Query(False),
     q: Optional[str] = Query(None, max_length=120),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> dict:
     del actor  # superadmin gate already enforced via dependency
-    conditions = [User.deleted_at.is_(None)]
+    conditions = [User.deleted_at.is_not(None) if trash else User.deleted_at.is_(None)]
     if role is not None:
         conditions.append(User.role == role)
     if verified is not None:
@@ -924,6 +926,72 @@ async def delete_user(
     )
     await session.commit()
     return {"data": {"id": str(user_id), "deleted": True}}
+
+
+@router.post("/users/{user_id}/restore")
+async def restore_user(
+    user_id: str,
+    request: Request,
+    actor: User = Depends(require_superadmin),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Undelete a soft-deleted user (Trash → بازیابی)."""
+    target = await session.get(User, UUID(user_id))
+    if target is None or target.deleted_at is None:
+        raise AppError("not_found", "user_not_found", 404)
+    target.deleted_at = None
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.user.restored",
+        entity_type="user",
+        entity_id=str(user_id),
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    return {"data": {"id": str(user_id), "restored": True}}
+
+
+@router.delete("/users/{user_id}/permanent")
+async def delete_user_permanently(
+    user_id: str,
+    request: Request,
+    actor: User = Depends(require_superadmin),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Hard-delete a soft-deleted user's row so its phone can register again.
+
+    Children follow their ON DELETE rules (cascades / set-null). Businesses
+    RESTRICT on owner, so the account is undeletable while it owns any.
+    """
+    target = await session.get(User, UUID(user_id))
+    if target is None or target.deleted_at is None:
+        raise AppError("not_found", "user_not_found", 404)
+    from app.models.business import Business
+
+    owns_businesses = await session.scalar(
+        select(func.count()).select_from(Business).where(Business.owner_id == target.id)
+    )
+    if owns_businesses:
+        raise AppError("conflict", "user_has_businesses", 409, {"count": owns_businesses})
+    # Audit-log rows RESTRICT on actor_id; the user is gone, so its own trail goes too.
+    await session.execute(delete(AuditLog).where(AuditLog.actor_id == target.id))
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.user.permanently_deleted",
+        entity_type="user",
+        entity_id=str(user_id),
+        before={
+            "phone": target.phone,
+            "full_name": target.full_name,
+            "role": target.role.value,
+        },
+        ip=request.client.host if request.client else None,
+    )
+    await session.delete(target)
+    await session.commit()
+    return {"data": {"id": str(user_id), "deleted": True, "permanent": True}}
 
 
 @router.patch("/users/{user_id}/role")

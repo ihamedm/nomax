@@ -50,10 +50,14 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 
+# Probe a real project page instead of the index root: some mirrors (Liara)
+# 302 the bare root to an unreachable host, so a working index looked dead.
+# Indexes that only gate downloads (runflare answers 402 Payment Required for
+# files) still pass this probe; pip's own error then moves on to the next one.
 RUN --mount=type=cache,target=/root/.cache/pip \
     sh -c 'reachable=""; \
            for index in $PIP_INDEX_URL $PIP_FALLBACK_INDEX_URLS; do \
-             if timeout 10 python -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=5)" "$index"; then \
+             if timeout 10 python -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=5)" "${index%/}/pip/"; then \
                reachable="$reachable $index"; \
              else \
                echo "skipping unreachable index: $index"; \

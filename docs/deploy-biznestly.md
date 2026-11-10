@@ -610,10 +610,12 @@ dc up -d
 ```
 
 If names resolve but downloads still fail or crawl, use a mirror. Both
-Dockerfiles take the registry as a build argument:
+Dockerfiles take the registry as a build argument. The Liara PyPI mirror is
+the one verified to serve actual wheels from inside Iran; `runflare` answers
+`402 Payment Required` for every file download, so only its index pages work:
 
 ```bash
-printf 'PIP_INDEX_URL=https://mirror-pypi.runflare.com/simple\n' >> .env.prod
+printf 'PIP_INDEX_URL=https://package-mirror.liara.ir/repository/pypi/simple\n' >> .env.prod
 printf 'NPM_REGISTRY=https://registry.npmmirror.com\n' >> .env.prod
 dc build api worker web
 ```
@@ -621,7 +623,7 @@ dc build api worker web
 or one-shot, without touching `.env.prod`:
 
 ```bash
-dc build --build-arg PIP_INDEX_URL=https://mirror-pypi.runflare.com/simple \
+dc build --build-arg PIP_INDEX_URL=https://package-mirror.liara.ir/repository/pypi/simple \
          --build-arg NPM_REGISTRY=https://registry.npmmirror.com api worker web
 ```
 

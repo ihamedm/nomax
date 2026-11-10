@@ -19,6 +19,7 @@ class AdminUserResponse(BaseModel):
     last_login_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
 
 class AdminUserCreate(BaseModel):

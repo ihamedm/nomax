@@ -121,6 +121,50 @@ async def test_superadmin_soft_deletes_user(client, create_user, db_session):
 
 
 @pytest.mark.asyncio
+async def test_trash_restore_and_permanent_delete(client, create_user, db_session):
+    from app.models.admin import AuditLog
+    from app.models.user import User
+
+    admin = await create_user("9111222700", role=UserRole.SUPERADMIN)
+    target = await create_user("9121112701", full_name="سبد گرفتن")
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id, admin.role.value)}"}
+
+    deleted = await client.delete(f"/api/v1/admin/users/{target.id}", headers=headers)
+    assert deleted.status_code == 200
+
+    # Trash lists the soft-deleted user; the normal list excludes it.
+    trash = await client.get("/api/v1/admin/users?trash=true", headers=headers)
+    assert [item["id"] for item in trash.json()["data"]["items"]] == [str(target.id)]
+    normal = await client.get("/api/v1/admin/users?trash=false", headers=headers)
+    assert str(target.id) not in {item["id"] for item in normal.json()["data"]["items"]}
+
+    # Restore brings it back to the normal list.
+    restored = await client.post(f"/api/v1/admin/users/{target.id}/restore", headers=headers)
+    assert restored.status_code == 200
+    assert restored.json()["data"]["restored"] is True
+    normal = await client.get("/api/v1/admin/users", headers=headers)
+    assert str(target.id) in {item["id"] for item in normal.json()["data"]["items"]}
+
+    # Permanent delete only works from trash, and frees the row entirely.
+    forbidden = await client.delete(f"/api/v1/admin/users/{target.id}/permanent", headers=headers)
+    assert forbidden.status_code == 404
+
+    await client.delete(f"/api/v1/admin/users/{target.id}", headers=headers)
+    purged = await client.delete(f"/api/v1/admin/users/{target.id}/permanent", headers=headers)
+    assert purged.status_code == 200
+    assert purged.json()["data"]["permanent"] is True
+
+    remaining = (
+        await db_session.execute(select(User).where(User.id == target.id))
+    ).scalar_one_or_none()
+    assert remaining is None
+    logs = (
+        await db_session.execute(select(AuditLog).where(AuditLog.action == "admin.user.restored"))
+    ).scalars().all()
+    assert len(logs) == 1
+
+
+@pytest.mark.asyncio
 async def test_admin_cannot_delete_self_or_non_superadmin(client, create_user):
     admin = await create_user("9111222600", role=UserRole.SUPERADMIN)
     headers = {"Authorization": f"Bearer {create_access_token(admin.id, admin.role.value)}"}

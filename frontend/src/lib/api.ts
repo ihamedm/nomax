@@ -137,6 +137,7 @@ const MESSAGES: Record<string, string> = {
   invalid_block_kind: "نوع مسدودسازی معتبر نیست.",
   cannot_logout_self: "برای بستن نشست خودتان از دکمه خروج استفاده کنید.",
   account_disabled: "این حساب غیرفعال شده است.",
+  user_has_businesses: "این کاربر مالک کسب‌وکار است؛ ابتدا کسب‌وکارهای او را منتقل یا حذف کنید.",
   not_found: "موردی پیدا نشد.",
   conflict: "این اطلاعات قبلاً ثبت شده است.",
   sms_provider_unavailable: "ارسال پیامک در حال حاضر ممکن نیست. کمی بعد تلاش کنید.",
