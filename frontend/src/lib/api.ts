@@ -182,6 +182,8 @@ const MESSAGES: Record<string, string> = {
 };
 
 export function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return MESSAGES[error.code] ?? error.message;
+  // Backend errors often carry a broad code ("conflict") plus a specific one as
+  // the message ("user_has_businesses"); fall back to the specific one.
+  if (error instanceof ApiError) return MESSAGES[error.code] ?? MESSAGES[error.message] ?? error.message;
   return "خطای غیرمنتظره‌ای رخ داد.";
 }

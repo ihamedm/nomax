@@ -164,6 +164,65 @@ async def test_trash_restore_and_permanent_delete(client, create_user, db_sessio
     assert len(logs) == 1
 
 
+async def _make_business(db_session, owner, slug: str, trashed: bool):
+    from datetime import datetime, timezone
+
+    from app.db.seed import seed_categories
+    from app.models.business import Business
+    from app.models.category import Category
+
+    if (await db_session.execute(select(Category))).scalars().first() is None:
+        await seed_categories(db_session)
+        await db_session.commit()
+    category = (await db_session.execute(select(Category))).scalars().first()
+    business = Business(
+        owner_id=owner.id,
+        category_id=category.id,
+        name="کسب‌وکار",
+        slug=slug,
+        address="بهبهان",
+        deleted_at=datetime.now(timezone.utc) if trashed else None,
+    )
+    db_session.add(business)
+    await db_session.commit()
+    await db_session.refresh(business)
+    return business
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_takes_trashed_businesses(client, create_user, db_session):
+    from app.models.business import Business
+    from app.models.user import User
+
+    admin = await create_user("9111222800", role=UserRole.SUPERADMIN)
+    owner = await create_user("9121112801")
+    business = await _make_business(db_session, owner, "trashed-business", trashed=True)
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id, admin.role.value)}"}
+
+    await client.delete(f"/api/v1/admin/users/{owner.id}", headers=headers)
+    purged = await client.delete(f"/api/v1/admin/users/{owner.id}/permanent", headers=headers)
+    assert purged.status_code == 200
+
+    left_user = await db_session.execute(select(User).where(User.id == owner.id))
+    assert left_user.scalar_one_or_none() is None
+    left_business = await db_session.execute(select(Business).where(Business.id == business.id))
+    assert left_business.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_blocked_by_live_business(client, create_user, db_session):
+    admin = await create_user("9111222900", role=UserRole.SUPERADMIN)
+    owner = await create_user("9121112901")
+    await _make_business(db_session, owner, "live-business", trashed=False)
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id, admin.role.value)}"}
+
+    await client.delete(f"/api/v1/admin/users/{owner.id}", headers=headers)
+    blocked = await client.delete(f"/api/v1/admin/users/{owner.id}/permanent", headers=headers)
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "user_has_businesses"
+    assert blocked.json()["error"]["details"]["count"] == 1
+
+
 @pytest.mark.asyncio
 async def test_admin_cannot_delete_self_or_non_superadmin(client, create_user):
     admin = await create_user("9111222600", role=UserRole.SUPERADMIN)

@@ -962,18 +962,28 @@ async def delete_user_permanently(
     """Hard-delete a soft-deleted user's row so its phone can register again.
 
     Children follow their ON DELETE rules (cascades / set-null). Businesses
-    RESTRICT on owner, so the account is undeletable while it owns any.
+    RESTRICT on owner: live ones must be transferred or deleted first, while
+    already-trashed ones go with the user (otherwise a user who only ever had
+    a deleted business could never be purged).
     """
     target = await session.get(User, UUID(user_id))
     if target is None or target.deleted_at is None:
         raise AppError("not_found", "user_not_found", 404)
     from app.models.business import Business
 
-    owns_businesses = await session.scalar(
+    live_businesses = await session.scalar(
+        select(func.count())
+        .select_from(Business)
+        .where(Business.owner_id == target.id, Business.deleted_at.is_(None))
+    )
+    if live_businesses:
+        raise AppError("user_has_businesses", "user_has_businesses", 409, {"count": live_businesses})
+    trashed_businesses = await session.scalar(
         select(func.count()).select_from(Business).where(Business.owner_id == target.id)
     )
-    if owns_businesses:
-        raise AppError("conflict", "user_has_businesses", 409, {"count": owns_businesses})
+    if trashed_businesses:
+        await session.execute(delete(Business).where(Business.owner_id == target.id))
+        await map_cache.enqueue_refresh(session)
     # Audit-log rows RESTRICT on actor_id; the user is gone, so its own trail goes too.
     await session.execute(delete(AuditLog).where(AuditLog.actor_id == target.id))
     await _write_audit(
@@ -986,6 +996,7 @@ async def delete_user_permanently(
             "phone": target.phone,
             "full_name": target.full_name,
             "role": target.role.value,
+            "trashed_businesses_deleted": trashed_businesses,
         },
         ip=request.client.host if request.client else None,
     )
