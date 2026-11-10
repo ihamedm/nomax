@@ -166,7 +166,7 @@ function HoverActions({ children }: { children: ReactNode }) {
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[8rem_1fr] gap-3 border-b border-slate-100 py-2 text-sm last:border-0">
+    <div className="grid grid-cols-[5.5rem_1fr] gap-3 border-b border-slate-100 py-2 text-sm last:border-0 sm:grid-cols-[8rem_1fr]">
       <span className="text-xs text-slate-400">{label}</span>
       <span className="text-slate-800">{children}</span>
     </div>

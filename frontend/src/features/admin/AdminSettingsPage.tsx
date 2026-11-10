@@ -209,7 +209,7 @@ export default function AdminSettingsPage() {
             </span>
             راهنمای ارسال استعلام
           </button>
-          <div className="flex rounded-xl border border-slate-200 bg-white p-1">
+          <div className="flex max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
             {TABS.map((item) => (
               <button
                 key={item.value}
@@ -218,7 +218,7 @@ export default function AdminSettingsPage() {
                   setParams(item.value === "general" ? {} : { tab: item.value })
                 }
                 className={cn(
-                  "rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
+                  "shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors",
                   tab === item.value
                     ? "bg-brand-600 text-white"
                     : "text-slate-500 hover:bg-slate-50",

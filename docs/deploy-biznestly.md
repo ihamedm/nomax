@@ -96,6 +96,15 @@ docker compose version
 > are an acceptable substitute:
 > `apt-get install -y docker.io docker-compose-v2`.
 
+After you clone the repo (later bootstrap step), point the host's apt and
+Docker pulls at the fast local mirrors, controlled from `.env.prod`
+(`APT_MIRROR_URL`, `APT_MIRROR_SECURITY_URL`, `DOCKER_MIRROR_URL`; Liara
+defaults apply when the variables are omitted):
+
+```bash
+sudo ./deploy/setup-mirrors.sh .env.prod
+```
+
 Timezone, swap and log rotation:
 
 ```bash
@@ -618,6 +627,17 @@ dc build --build-arg PIP_INDEX_URL=https://mirror-pypi.runflare.com/simple \
 
 The backend installs its build backend (hatchling) in an isolated environment,
 which inherits `PIP_INDEX_URL`, so the mirror is used for that step too.
+
+The backend image also runs `apt-get` (for `postgresql-client`) against Debian,
+so it needs a Debian mirror as well. `DEBIAN_MIRROR_URL` and
+`DEBIAN_MIRROR_SECURITY_URL` default to the Liara mirror; override them in
+`.env.prod` to use another:
+
+```bash
+printf 'DEBIAN_MIRROR_URL=http://linux-mirror.liara.ir/repository/debian\n' >> .env.prod
+printf 'DEBIAN_MIRROR_SECURITY_URL=http://linux-mirror.liara.ir/repository/debian-security\n' >> .env.prod
+dc build api worker
+```
 
 Last resort: build with the host's network namespace, which uses the host
 `resolv.conf`:

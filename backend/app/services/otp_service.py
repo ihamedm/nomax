@@ -40,13 +40,13 @@ class OtpService:
             )
         return count
 
-    async def _log_attempt(self, session, phone: str, result) -> None:
+    async def _log_attempt(self, session, phone: str, result, purpose: str = "otp") -> None:
         if session is None:
             return
         session.add(
             SmsLog(
                 phone=phone,
-                purpose="otp",
+                purpose=purpose,
                 provider=self.sms_provider.name,
                 provider_message_id=result.provider_message_id,
                 status=SmsStatus.SENT if result.success else SmsStatus.FAILED,
@@ -55,7 +55,7 @@ class OtpService:
         )
         await session.flush()
 
-    async def issue(self, phone: str, ip: str, session=None) -> str | None:
+    async def issue(self, phone: str, ip: str, session=None, purpose: str = "otp") -> str | None:
         await self._rate_check(f"otp:rl:phone:{phone}")
         await self._rate_check(f"otp:rl:ip:{ip}")
 
@@ -69,7 +69,7 @@ class OtpService:
         await self.redis.set(key, security.hash_otp(code), ex=settings.OTP_TTL_SECONDS)
 
         result = await self.sms_provider.send(phone, code)
-        await self._log_attempt(session, phone, result)
+        await self._log_attempt(session, phone, result, purpose)
 
         if not result.success:
             # Do not leave a valid-but-undelivered code behind.

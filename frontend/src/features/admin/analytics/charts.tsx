@@ -25,7 +25,7 @@ export function ChartCard({
 }) {
   return (
     <section className={cn("rounded-2xl border border-slate-200 bg-white p-4", className)}>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-black text-slate-900">{title}</h2>
           {description && <p className="mt-1 text-[11px] text-slate-400">{description}</p>}

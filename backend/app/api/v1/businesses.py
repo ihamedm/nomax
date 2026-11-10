@@ -1140,6 +1140,11 @@ async def business_qr(business_id: str, session: AsyncSession = Depends(get_db))
     return Response(content=buffer.getvalue(), media_type="image/svg+xml")
 
 
+def _mask_phone(phone: str) -> str:
+    """Hide the last digits of an owner phone from anonymous visitors."""
+    return f"{phone[:-4]}****" if len(phone) > 4 else "****"
+
+
 @router.get("/{slug}")
 async def get_business(
     slug: str,
@@ -1198,7 +1203,9 @@ async def get_business(
     data["owner"] = (
         {
             "name": (owner.full_name or "").strip() or None,
-            "phone": owner.phone,
+            # Anonymous visitors only get the masked number; the full phone is
+            # available after login (see the public business page gate).
+            "phone": owner.phone if user is not None else _mask_phone(owner.phone),
             # The public owner card hides the display name and shows the
             # «مالک تایید هویت نشده» warning until an operator verifies the
             # account (imported or dashboard-created owners start unverified).

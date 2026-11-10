@@ -113,6 +113,32 @@ function telHref(phone: string | null | undefined) {
   return `tel:${phone.startsWith("0") ? phone : `0${phone}`}`;
 }
 
+function maskPhone(phone: string) {
+  return phone.length > 4 ? `${phone.slice(0, -4)}****` : "****";
+}
+
+type LoginPrompt = "review" | "save" | "phone" | "instagram";
+
+const LOGIN_PROMPTS: Record<LoginPrompt, { title: string; description: string }> = {
+  save: {
+    title: "ورود برای ذخیره کسب‌وکار",
+    description: "برای ذخیره کسب‌وکار در حساب خود، ابتدا وارد شوید یا ثبت‌نام کنید.",
+  },
+  review: {
+    title: "ورود برای ثبت نظر",
+    description: "برای ثبت امتیاز و نظر برای این کسب‌وکار، ابتدا وارد شوید یا ثبت‌نام کنید.",
+  },
+  phone: {
+    title: "ورود برای مشاهده شماره تماس",
+    description:
+      "برای مشاهده کامل شماره تماس مالک کسب‌وکار، ابتدا وارد شوید یا ثبت‌نام کنید.",
+  },
+  instagram: {
+    title: "ورود برای مشاهده اینستاگرام",
+    description: "برای مشاهده صفحه اینستاگرام این کسب‌وکار، ابتدا وارد شوید یا ثبت‌نام کنید.",
+  },
+};
+
 export function BusinessDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const queryClient = useQueryClient();
@@ -131,7 +157,7 @@ export function BusinessDetailPage() {
   const error = detailQuery.error ? errorMessage(detailQuery.error) : null;
   const saved = Boolean(business?.is_saved);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [loginPrompt, setLoginPrompt] = useState<"review" | "save" | null>(null);
+  const [loginPrompt, setLoginPrompt] = useState<LoginPrompt | null>(null);
   const reviewIntentHandled = useRef(false);
 
   const saveMutation = useMutation({
@@ -235,8 +261,15 @@ export function BusinessDetailPage() {
   const ownerVerified = owner?.is_verified === true;
   const ownerName = owner?.name?.trim() || "مالک نومکس";
   const ownerPhone = owner?.phone?.trim() || null;
-  const displayPhone = business?.phone_business?.trim() || ownerPhone;
+  const businessPhone = business?.phone_business?.trim() || null;
+  // The API already masks anonymous responses; masking again is harmless and
+  // keeps the page safe behind an older cached response.
+  const visibleOwnerPhone = ownerPhone && !user ? maskPhone(ownerPhone) : ownerPhone;
+  const displayPhone = businessPhone ?? visibleOwnerPhone;
   const callNumber = telHref(displayPhone);
+  // The primary call button only reveals the owner's number when the business
+  // has no public phone, so anonymous visitors must sign in first.
+  const callNeedsLogin = !user && !businessPhone && Boolean(ownerPhone);
   const neshanLink = business?.geo
     ? `https://neshan.org/maps#c${business.geo.lat.toFixed(5)}-${business.geo.lng.toFixed(
         5,
@@ -412,7 +445,7 @@ export function BusinessDetailPage() {
           </section>
 
           <section className="grid grid-cols-2 gap-2.5" aria-label="اقدام‌های کسب‌وکار">
-            {callNumber ? (
+            {callNumber && !callNeedsLogin ? (
               <a
                 href={callNumber}
                 className="flex min-h-16 items-center gap-2.5 rounded-2xl bg-brand-600 px-3.5 text-white shadow-[0_12px_30px_-20px_rgba(11,138,92,0.9)] transition hover:bg-brand-700"
@@ -429,6 +462,22 @@ export function BusinessDetailPage() {
                   </span>
                 </span>
               </a>
+            ) : callNeedsLogin ? (
+              <button
+                type="button"
+                onClick={() => setLoginPrompt("phone")}
+                className="flex min-h-16 items-center gap-2.5 rounded-2xl bg-brand-600 px-3.5 text-right text-white shadow-[0_12px_30px_-20px_rgba(11,138,92,0.9)] transition hover:bg-brand-700"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/15">
+                  <PhoneIcon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 leading-tight">
+                  <span className="block text-[13px] font-bold">تماس با مالک</span>
+                  <span dir="ltr" className="mt-1 block text-[10px] text-white/70">
+                    {formatPhone(displayPhone ?? "")}
+                  </span>
+                </span>
+              </button>
             ) : (
               <span className="flex min-h-16 items-center justify-center rounded-2xl bg-slate-100 px-3 text-center text-[11px] text-slate-400">
                 شماره تماس ثبت نشده
@@ -490,14 +539,26 @@ export function BusinessDetailPage() {
                 )}
               </div>
               {ownerPhone && (
-                <a
-                  href={telHref(ownerPhone) ?? undefined}
-                  aria-label={`تماس با ${ownerVerified ? ownerName : "مالک کسب‌وکار"}`}
-                  className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
-                >
-                  <PhoneIcon className="h-3.5 w-3.5" />
-                  <span dir="ltr">{formatPhone(ownerPhone)}</span>
-                </a>
+                user ? (
+                  <a
+                    href={telHref(ownerPhone) ?? undefined}
+                    aria-label={`تماس با ${ownerVerified ? ownerName : "مالک کسب‌وکار"}`}
+                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    <PhoneIcon className="h-3.5 w-3.5" />
+                    <span dir="ltr">{formatPhone(ownerPhone)}</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setLoginPrompt("phone")}
+                    aria-label="برای مشاهده شماره مالک وارد شوید"
+                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    <PhoneIcon className="h-3.5 w-3.5" />
+                    <span dir="ltr">{formatPhone(visibleOwnerPhone ?? "")}</span>
+                  </button>
+                )
               )}
             </section>
           )}
@@ -506,15 +567,26 @@ export function BusinessDetailPage() {
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-sm font-bold text-slate-900">درباره کسب‌وکار</h2>
               {instagramHandle && (
-                <a
-                  href={`https://instagram.com/${instagramHandle}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:text-brand-700"
-                >
-                  <InstagramIcon className="h-3.5 w-3.5" />
-                  اینستاگرام
-                </a>
+                user ? (
+                  <a
+                    href={`https://instagram.com/${instagramHandle}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:text-brand-700"
+                  >
+                    <InstagramIcon className="h-3.5 w-3.5" />
+                    اینستاگرام
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setLoginPrompt("instagram")}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:text-brand-700"
+                  >
+                    <InstagramIcon className="h-3.5 w-3.5" />
+                    اینستاگرام
+                  </button>
+                )
               )}
             </div>
             {business.description && (
@@ -643,13 +715,9 @@ export function BusinessDetailPage() {
           />
           <LoginRequiredSheet
             open={loginPrompt !== null}
-            title={loginPrompt === "save" ? "ورود برای ذخیره کسب‌وکار" : "ورود برای ثبت نظر"}
-            description={
-              loginPrompt === "save"
-                ? "برای ذخیره کسب‌وکار در حساب خود، ابتدا وارد شوید یا ثبت‌نام کنید."
-                : "برای ثبت امتیاز و نظر برای این کسب‌وکار، ابتدا وارد شوید یا ثبت‌نام کنید."
-            }
-            next={loginPrompt === "save" ? currentPath : reviewNext}
+            title={loginPrompt ? LOGIN_PROMPTS[loginPrompt].title : ""}
+            description={loginPrompt ? LOGIN_PROMPTS[loginPrompt].description : ""}
+            next={loginPrompt === "review" ? reviewNext : currentPath}
             onClose={() => setLoginPrompt(null)}
           />
         </>

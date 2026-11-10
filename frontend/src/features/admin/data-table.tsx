@@ -69,44 +69,67 @@ export function DataTable<T>({
       )}
 
       {!loading && !error && rows.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className={cn("w-full text-right text-sm", minWidthClassName)}>
-            <thead className="bg-slate-50 text-[11px] uppercase text-slate-400">
-              <tr>
+        <>
+          {/* Mobile: one card per row so nothing needs horizontal scrolling. */}
+          <div className="divide-y divide-slate-100 md:hidden">
+            {rows.map((row) => (
+              <div key={rowKey(row)} className="space-y-1.5 px-3 py-3">
                 {columns.map((column) => (
-                  <th key={column.key} className={cn("px-3 py-2.5 font-medium", column.className)}>
-                    {onSort && column.sortable ? (
-                      <button
-                        type="button"
-                        onClick={() => onSort(column.key)}
-                        aria-label={`مرتب‌سازی بر اساس ${column.header}`}
-                        className="inline-flex items-center gap-1 transition-colors hover:text-slate-700"
-                      >
-                        {column.header}
-                        <span aria-hidden>
-                          {sortKey === column.key ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                        </span>
-                      </button>
-                    ) : (
-                      column.header
-                    )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((row) => (
-                <tr key={rowKey(row)} className="group align-top hover:bg-slate-50/70">
-                  {columns.map((column) => (
-                    <td key={column.key} className={cn("px-3 py-2.5", column.className)}>
+                  <div
+                    key={column.key}
+                    className="flex items-start justify-between gap-3 text-sm"
+                  >
+                    <span className="shrink-0 text-[11px] text-slate-400">
+                      {column.header}
+                    </span>
+                    <span className="min-w-0 text-left text-slate-700">
                       {column.cell(row)}
-                    </td>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className={cn("w-full text-right text-sm", minWidthClassName)}>
+              <thead className="bg-slate-50 text-[11px] uppercase text-slate-400">
+                <tr>
+                  {columns.map((column) => (
+                    <th key={column.key} className={cn("px-3 py-2.5 font-medium", column.className)}>
+                      {onSort && column.sortable ? (
+                        <button
+                          type="button"
+                          onClick={() => onSort(column.key)}
+                          aria-label={`مرتب‌سازی بر اساس ${column.header}`}
+                          className="inline-flex items-center gap-1 transition-colors hover:text-slate-700"
+                        >
+                          {column.header}
+                          <span aria-hidden>
+                            {sortKey === column.key ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                          </span>
+                        </button>
+                      ) : (
+                        column.header
+                      )}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rows.map((row) => (
+                  <tr key={rowKey(row)} className="group align-top hover:bg-slate-50/70">
+                    {columns.map((column) => (
+                      <td key={column.key} className={cn("px-3 py-2.5", column.className)}>
+                        {column.cell(row)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {meta && meta.total > 0 && onPageChange && (

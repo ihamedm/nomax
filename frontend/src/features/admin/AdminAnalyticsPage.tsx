@@ -101,14 +101,14 @@ export default function AdminAnalyticsPage() {
         </span>
       </div>
 
-      <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1">
+      <div className="flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1">
         {TABS.map((item) => (
           <button
             key={item.value}
             type="button"
             onClick={() => setTab(item.value)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs transition-colors",
+              "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs transition-colors",
               tab === item.value
                 ? "bg-brand-50 font-bold text-brand-700"
                 : "text-slate-500 hover:bg-slate-50",

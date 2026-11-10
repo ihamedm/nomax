@@ -398,15 +398,15 @@ export function AdminUsersPage() {
 
   return (
     <section className="space-y-4">
-      <header className="flex items-center justify-between gap-3">
-        <div>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-lg font-black text-slate-900">کاربران</h1>
           <p className="mt-1 text-xs text-slate-500">
             کاربران همه نقش‌ها را بسازید و نام نمایشی، اطلاعات هویتی، نقش، دسترسی و
             وضعیت تأیید را مدیریت کنید. هر تغییر در گزارش رویدادها ثبت می‌شود.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Button size="sm" onClick={openCreate}>
             کاربر جدید
           </Button>

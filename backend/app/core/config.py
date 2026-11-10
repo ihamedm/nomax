@@ -36,6 +36,23 @@ class Settings(BaseSettings):
     OTP_RATE_LIMIT_PER_HOUR: int = 3
     OTP_MAX_ATTEMPTS: int = 5
 
+    # Shahkar (api.ir): mobile ↔ national-ID ownership match. An empty key
+    # only occurs in development, where the check passes locally.
+    SHAHKAR_API_URL: str = "https://s.api.ir/api/sw1/Shahkar"
+    SHAHKAR_API_KEY: str = ""
+    SHAHKAR_TIMEOUT_SECONDS: float = 10.0
+
+    # Brute-force and SMS-cost protection.
+    PASSWORD_MIN_LENGTH: int = 8
+    # After this many failed logins the phone is blocked for PASSWORD_BLOCK_SECONDS.
+    PASSWORD_MAX_ATTEMPTS: int = 5
+    PASSWORD_BLOCK_SECONDS: int = 900
+    # Per-IP budgets: password logins are a cheap DB check (bots), register
+    # spends a metered Shahkar inquiry, so it gets the tighter cap.
+    LOGIN_RATE_LIMIT_PER_HOUR: int = 30
+    REGISTER_RATE_LIMIT_PER_HOUR: int = 5
+    CHECK_RATE_LIMIT_PER_HOUR: int = 60
+
     SMS_PROVIDER: str = "console"
     # Mellipayamak shared-service (pattern) endpoint. The message body is a
     # pre-approved template identified by SMS_OTP_BODY_ID.

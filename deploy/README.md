@@ -10,6 +10,7 @@ Iranian VPS, Docker Compose, Caddy automatic HTTPS.
 ```bash
 cp .env.prod.example .env.prod
 # edit DOMAIN, POSTGRES_PASSWORD, JWT_SECRET
+sudo ./deploy/setup-mirrors.sh .env.prod   # local apt + Docker pull mirrors
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 docker compose --env-file .env.prod -f docker-compose.prod.yml exec api \
   python -m app.cli create-superadmin --phone 09123456789 --name "Super Admin"

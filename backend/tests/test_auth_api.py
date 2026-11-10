@@ -110,6 +110,196 @@ def _national_id(base9: str) -> str:
 
 
 @pytest.mark.asyncio
+async def test_password_register_login_reset_flow(client):
+    nid = _national_id("541111111")
+
+    # Unregistered phone → register branch.
+    response = await client.post("/api/v1/auth/check", json={"phone": "09124001122"})
+    assert response.status_code == 200
+    assert response.json()["data"]["registered"] is False
+
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "09124001122",
+            "full_name": "علی رضایی",
+            "national_id": nid,
+            "password": "secret-password-1",
+        },
+    )
+    assert response.status_code == 200
+    tokens = response.json()["data"]
+    assert tokens["user"]["full_name"] == "علی رضایی"
+    assert tokens["user"]["is_national_id_verified"] is True
+
+    # Now the phone is registered → password branch.
+    response = await client.post("/api/v1/auth/check", json={"phone": "09124001122"})
+    assert response.json()["data"]["registered"] is True
+
+    # Correct password works; wrong password gives a distinct error.
+    response = await client.post(
+        "/api/v1/auth/login", json={"phone": "09124001122", "password": "secret-password-1"}
+    )
+    assert response.status_code == 200
+    response = await client.post(
+        "/api/v1/auth/login", json={"phone": "09124001122", "password": "nope"}
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_credentials"
+
+    # Duplicate phone / shared national id are rejected.
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "09124001122",
+            "full_name": "علی رضایی",
+            "national_id": nid,
+            "password": "secret-password-1",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "phone_already_registered"
+
+    # Forgot password: OTP issue + reset, then the new password logs in.
+    response = await client.post("/api/v1/auth/forgot-password", json={"phone": "09124001122"})
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "issued"
+    reset_code = response.json()["data"]["dev_otp"]
+
+    response = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"phone": "09124001122", "code": reset_code, "password": "brand-new-password"},
+    )
+    assert response.status_code == 200
+
+    response = await client.post(
+        "/api/v1/auth/login", json={"phone": "09124001122", "password": "brand-new-password"}
+    )
+    assert response.status_code == 200
+    response = await client.post(
+        "/api/v1/auth/login", json={"phone": "09124001122", "password": "secret-password-1"}
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_bad_national_id(client):
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "09124001133",
+            "full_name": "مریم کریمی",
+            "national_id": "1234567890",
+            "password": "secret-password-1",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_national_id"
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_short_password(client):
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "09124001144",
+            "full_name": "مریم کریمی",
+            "national_id": _national_id("111111111"),
+            "password": "short",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "password_too_short"
+
+
+@pytest.mark.asyncio
+async def test_register_validation_errors_do_not_consume_rate_limit(client, fake_redis):
+    from app.core.config import settings
+
+    before = dict(fake_redis.data)
+    for _ in range(settings.REGISTER_RATE_LIMIT_PER_HOUR + 1):
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "phone": "09124001166",
+                "full_name": "تست اعتبارسنجی",
+                "national_id": "1234567890",
+                "password": "secret-password-1",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "invalid_national_id"
+
+    # Local validation must not spend the metered Shahkar budget.
+    added = {k: v for k, v in fake_redis.data.items() if k not in before}
+    assert not any(k.startswith("auth:regrl:ip:") for k in added)
+
+
+@pytest.mark.asyncio
+async def test_password_login_locks_phone_after_failed_attempts(client):
+    from app.core.config import settings
+
+    nid = _national_id("222222222")
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "09124001155",
+            "full_name": "تست مسدود",
+            "national_id": nid,
+            "password": "secret-password-1",
+        },
+    )
+    assert response.status_code == 200
+
+    for _ in range(settings.PASSWORD_MAX_ATTEMPTS):
+        response = await client.post(
+            "/api/v1/auth/login", json={"phone": "09124001155", "password": "wrong"}
+        )
+        assert response.status_code == 401
+
+    # Even the correct password is refused while locked.
+    response = await client.post(
+        "/api/v1/auth/login", json={"phone": "09124001155", "password": "secret-password-1"}
+    )
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "auth_blocked"
+    assert response.json()["error"]["details"]["retry_after_seconds"] > 0
+
+
+@pytest.mark.asyncio
+async def test_login_without_password_points_to_reset(client, create_user):
+    await create_user("9124009900")
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"phone": "09124009900", "password": "whatever"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "password_not_set"
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_is_silent_for_unknown_phone(client):
+    response = await client.post("/api/v1/auth/forgot-password", json={"phone": "09124999999"})
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "sent"
+    assert "dev_otp" not in response.json()["data"]
+
+
+@pytest.mark.asyncio
+async def test_reset_password_rejects_bad_code(client, create_user):
+    await create_user("9124009911")
+    response = await client.post("/api/v1/auth/forgot-password", json={"phone": "09124009911"})
+    assert response.json()["data"]["status"] == "issued" # dev code present but wrong below
+
+    response = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"phone": "09124009911", "code": "000000", "password": "..."},
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "otp_invalid"
+
+
+@pytest.mark.asyncio
 async def test_national_id_cannot_be_shared_or_overwritten(client):
     first_nid = _national_id("123456789")
     second_nid = _national_id("987654321")

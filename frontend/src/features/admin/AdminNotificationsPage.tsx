@@ -147,7 +147,7 @@ export default function AdminNotificationsPage() {
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
           <p className="text-[11px] text-slate-400">
             گیرنده هر پیام با شناسه کاربر (user_id) ذخیره می‌شود.
           </p>

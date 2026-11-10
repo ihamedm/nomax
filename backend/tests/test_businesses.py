@@ -115,7 +115,7 @@ async def test_only_approved_businesses_are_searchable(client, db_session, creat
     assert body["geo"] == {"lat": BEHBAHAN["lat"], "lng": BEHBAHAN["lng"]}
     assert body["owner"] == {
         "name": "حسین رضایی",
-        "phone": "9130000001",
+        "phone": "913000****",
         "is_verified": False,
     }
     assert body["updated_at"] is not None
@@ -126,6 +126,17 @@ async def test_only_approved_businesses_are_searchable(client, db_session, creat
     second_body = second_view.json()["data"]
     assert second_body["updated_at"] == body["updated_at"]
     assert second_body["view_count"] == body["view_count"] + 1
+
+    # Signed-in users still get the full number.
+    from app.core.security import create_access_token
+
+    viewer = await create_user("9130000009")
+    authed = await client.get(
+        f"/api/v1/businesses/{approved.slug}",
+        headers={"Authorization": f"Bearer {create_access_token(viewer.id, viewer.role.value)}"},
+    )
+    assert authed.status_code == 200
+    assert authed.json()["data"]["owner"]["phone"] == "9130000001"
 
     pending = await client.get("/api/v1/businesses/pending-shop")
     assert pending.status_code == 404

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        :root{
+  --ac-teal:#00bfa5; --ac-teal-dark:#00a38c; --ac-teal-soft:#e6faf6;
+  --ac-yellow:#ffd36e; --ac-purple:#7c1bdb; --ac-ink:#1b4b5f;
+  --ac-gray:#ececf1; --ac-line:#e8e8ee;
+  --ac-hero-h:236px;
+
+  --primary-50:#e6faf6; --primary-100:#c9f3ea; --primary-200:#99e8d8;
+  --primary-400:#33d1b9; --primary-500:#00bfa5; --primary-600:#00bfa5;
+  --primary-700:#00a38c; --primary-800:#00806f;
+  --accent-50:#fff8e5; --accent-100:#ffefc2; --accent-400:#ffd36e;
+  --accent-500:#ffc34d; --accent-600:#f5a900; --accent-700:#b97d00;
+  --radius:14px; --radius-sm:10px; --radius-xs:8px;
+  --shadow-sm:0 1px 3px rgba(20,20,40,.05);
+  --shadow:0 4px 14px rgba(20,20,40,.07);
+  --shadow-lg:0 10px 30px rgba(20,20,40,.12);
+  --shadow-primary:0 6px 18px rgba(0,191,165,.28);
+  --nx7-brand:#00bfa5; --nx7-brand-dark:#00a38c; --nx7-soft:#e6faf6; --nx7-line:#e8e8ee;
+}
+:root:not([data-theme="dark"]){
+  --bg:#ffffff; --surface:#ffffff; --border:#e8e8ee; --muted:#f3f3f6;
+  --text:#1c1c21; --text-2:#55555f; --text-3:#9a9aa6;
+}
+html:not([data-theme="dark"]){ background:#fff; }
+html:not([data-theme="dark"]) #nxSplash{ color:var(--ac-teal); }
+body{ -webkit-font-smoothing:antialiased; }
+:root:not([data-theme="dark"]) body{ background:#fff; }
+#nxSplash{
+    position:fixed; inset:0; z-index:2147483600;
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    gap:0; overflow:hidden; isolation:isolate;
+    background:radial-gradient(ellipse at 50% 42%,#f0fdfa 0%,#ffffff 58%,#f8fafc 100%);
+    color:#0f766e; font-family:'Vazirmatn Variable','Vazirmatn',Tahoma,sans-serif;
+    opacity:1; transition:opacity .42s ease, visibility .42s ease;
+  }
+  #nxSplash::before,#nxSplash::after{content:"";position:absolute;z-index:-1;border-radius:50%;pointer-events:none}
+  #nxSplash::before{width:min(76vw,520px);aspect-ratio:1;border:1px solid rgba(13,148,136,.08);box-shadow:0 0 0 34px rgba(13,148,136,.025),0 0 0 78px rgba(13,148,136,.018);animation:nxSplashHalo 4s ease-in-out infinite}
+  #nxSplash::after{width:360px;height:360px;background:radial-gradient(circle,rgba(45,212,191,.14),transparent 68%);filter:blur(8px)}
+  .nx-splash-logo{position:relative;width:100px;height:100px;display:grid;place-items:center;margin-bottom:22px;border-radius:30px;background:linear-gradient(145deg,#14b8a6,#0f766e);box-shadow:0 18px 42px rgba(13,148,136,.25),inset 0 1px 0 rgba(255,255,255,.45);animation:nxSplashFloat 2.8s ease-in-out infinite}
+  .nx-splash-logo svg{width:58px;height:58px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.1))}
+  .nx-splash-orbit{position:absolute;inset:-13px;border:1px solid rgba(13,148,136,.2);border-radius:36px;animation:nxSplashOrbit 8s linear infinite}
+  .nx-splash-orbit::before,.nx-splash-orbit::after{content:"";position:absolute;width:8px;height:8px;border-radius:50%;background:#f59e0b;box-shadow:0 0 0 5px rgba(245,158,11,.12)}
+  .nx-splash-orbit::before{top:10px;left:14px}.nx-splash-orbit::after{right:5px;bottom:18px;width:6px;height:6px;background:#2dd4bf;box-shadow:0 0 0 5px rgba(45,212,191,.12)}
+  .nx-splash-wordmark{font-size:clamp(32px,8vw,42px);font-weight:900;letter-spacing:-1.2px;line-height:1.25;color:#115e59}
+  .nx-splash-tagline{margin-top:8px;font-size:13px;font-weight:500;color:#64748b;letter-spacing:0}
+  .nx-splash-services{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:25px;direction:rtl}
+  .nx-splash-service{display:flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid rgba(13,148,136,.12);border-radius:999px;background:rgba(255,255,255,.72);color:#475569;font-size:11px;font-weight:700;box-shadow:0 4px 14px rgba(15,23,42,.035);animation:nxSplashChip 3s ease-in-out infinite}
+  .nx-splash-service:nth-child(2){animation-delay:.25s}.nx-splash-service:nth-child(3){animation-delay:.5s}
+  .nx-splash-service i{font-style:normal;font-size:14px}
+  .nx-splash-loading{width:132px;height:3px;margin-top:29px;overflow:hidden;border-radius:99px;background:#d9f3ee}
+  .nx-splash-loading span{display:block;width:42%;height:100%;border-radius:99px;background:linear-gradient(90deg,#0d9488,#2dd4bf);animation:nxSplashProgress 1.35s ease-in-out infinite}
+  #nxSplash small{margin-top:11px;font:500 11px/1.7 'Vazirmatn Variable','Vazirmatn',Tahoma,sans-serif;color:#94a3b8}
+  html.nx-ready #nxSplash{opacity: 1;visibility: visible;pointer-events:none}
+  @keyframes nxSplashFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-7px) rotate(2deg)}}
+  @keyframes nxSplashOrbit{to{transform:rotate(360deg)}}
+  @keyframes nxSplashHalo{0%,100%{transform:scale(.96);opacity:.65}50%{transform:scale(1.04);opacity:1}}
+  @keyframes nxSplashChip{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  @keyframes nxSplashProgress{0%{transform:translateX(220%)}100%{transform:translateX(-260%)}}
+  @media(max-width:420px){.nx-splash-logo{width:86px;height:86px;border-radius:26px}.nx-splash-logo svg{width:51px;height:51px}.nx-splash-services{gap:6px}.nx-splash-service{padding:6px 9px;font-size:10px}}
+  @media(prefers-reduced-motion:reduce){#nxSplash *,#nxSplash::before{animation:none!important;transition:none!important}.nx-splash-loading span{width:100%}}
+
+    </style>
+</head>
+<body>
+    <div id="nxSplash" role="status" aria-label="در حال آماده‌سازی نومکس">
+  <div class="nx-splash-logo" aria-hidden="true">
+    <span class="nx-splash-orbit"></span>
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M32 5C20.8 5 12 13.7 12 24.4c0 14.2 16.8 29.2 19 31.1a1.5 1.5 0 0 0 2 0c2.2-1.9 19-16.9 19-31.1C52 13.7 43.2 5 32 5Z" fill="#fff"></path>
+      <circle cx="32" cy="24" r="10.2" fill="#14b8a6"></circle>
+      <path d="m26.8 24.2 3.6 3.7 7.1-7.5" stroke="#fff" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg>
+  </div>
+  <div class="nx-splash-wordmark" dir="rtl" data-rtldp-fixed="rtl" style="direction: rtl; text-align: right;">نومکس</div>
+  <div class="nx-splash-tagline" dir="rtl" data-rtldp-fixed="rtl" style="direction: rtl; text-align: right;">خدمات مطمئن، نزدیک‌تر از همیشه</div>
+  <div class="nx-splash-services" aria-hidden="true">
+    <div class="nx-splash-service" dir="rtl" data-rtldp-fixed="rtl" style="direction: rtl; text-align: right;"><i>⌕</i> جست‌وجوی خدمات</div>
+    <div class="nx-splash-service" dir="rtl" data-rtldp-fixed="rtl" style="direction: rtl; text-align: right;"><i>✦</i> متخصصان محلی</div>
+    <div class="nx-splash-service" dir="rtl" data-rtldp-fixed="rtl" style="direction: rtl; text-align: right;"><i>✓</i> انتخاب مطمئن</div>
+  </div>
+  <div class="nx-splash-loading" aria-hidden="true"><span></span></div>
+  <small>در حال آماده‌سازی تجربه‌ای بهتر…</small>
+</div>
+</body>
+</html>

@@ -1,7 +1,7 @@
 """NOMAX operator CLI.
 
 Usage:
-    python3 -m app.cli create-superadmin --phone 09123456789 --name "Ali Rezaei"
+    python3 -m app.cli create-superadmin --phone 09123456789 --name "Ali Rezaei" --password "secret123"
 """
 
 import argparse
@@ -11,15 +11,16 @@ import sys
 from sqlalchemy import select
 
 from app.core.errors import AppError
-from app.core.security import normalize_phone
+from app.core.security import hash_password, normalize_phone
 from app.db.demo import seed_demo_businesses
 from app.db.seed import seed_categories
 from app.db.session import AsyncSessionLocal
 from app.models.user import User, UserRole
 
 
-async def _create_superadmin(phone: str, full_name: str | None) -> None:
+async def _create_superadmin(phone: str, full_name: str | None, password: str | None) -> None:
     normalized = normalize_phone(phone)
+    hashed_password = hash_password(password) if password else None
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User).where(User.phone == normalized))
         user = result.scalar_one_or_none()
@@ -31,6 +32,7 @@ async def _create_superadmin(phone: str, full_name: str | None) -> None:
                     role=UserRole.SUPERADMIN,
                     permissions=[],
                     is_phone_verified=True,
+                    hashed_password=hashed_password,
                 )
             )
             action = "created"
@@ -40,6 +42,8 @@ async def _create_superadmin(phone: str, full_name: str | None) -> None:
             user.deleted_at = None
             if full_name:
                 user.full_name = full_name
+            if hashed_password:
+                user.hashed_password = hashed_password
             action = "promoted"
         await session.commit()
     print(f"{action} superadmin: {normalized}")
@@ -83,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     create = subparsers.add_parser("create-superadmin", help="create or promote a superadmin account")
     create.add_argument("--phone", required=True, help="Iranian mobile number (09..., 98..., or 10 digits)")
     create.add_argument("--name", default=None, help="optional display name")
+    create.add_argument("--password", default=None, help="optional password for phone+password login")
 
     subparsers.add_parser("seed-categories", help="idempotently seed the 18-category catalog")
 
@@ -95,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "create-superadmin":
         try:
-            asyncio.run(_create_superadmin(args.phone, args.name))
+            asyncio.run(_create_superadmin(args.phone, args.name, args.password))
         except AppError as exc:
             print(f"error: {exc.message}", file=sys.stderr)
             return 1

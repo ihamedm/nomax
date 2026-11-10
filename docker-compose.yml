@@ -37,6 +37,8 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-http://linux-mirror.liara.ir/repository/debian}
+        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-http://linux-mirror.liara.ir/repository/debian-security}
     container_name: nomax-api
     depends_on:
       db:
@@ -112,6 +114,8 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-http://linux-mirror.liara.ir/repository/debian}
+        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-http://linux-mirror.liara.ir/repository/debian-security}
     container_name: nomax-worker
     command: ["python", "-m", "app.worker"]
     depends_on:

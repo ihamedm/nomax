@@ -27,6 +27,8 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-http://linux-mirror.liara.ir/repository/debian}
+        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-http://linux-mirror.liara.ir/repository/debian-security}
     restart: unless-stopped
     depends_on:
       db:
@@ -73,6 +75,17 @@ services:
       SMS_MAX_ATTEMPTS: ${SMS_MAX_ATTEMPTS:-2}
       OTP_RATE_LIMIT_PER_HOUR: ${OTP_RATE_LIMIT_PER_HOUR:-3}
       DEV_OTP_ENABLED: ${DEV_OTP_ENABLED:-false}
+      # Shahkar (api.ir). Empty in production silently skips the ownership
+      # check, so operators MUST fill the token before enabling registration.
+      SHAHKAR_API_URL: ${SHAHKAR_API_URL:-https://s.api.ir/api/sw1/Shahkar}
+      SHAHKAR_API_KEY: ${SHAHKAR_API_KEY:-}
+      SHAHKAR_TIMEOUT_SECONDS: ${SHAHKAR_TIMEOUT_SECONDS:-10}
+      # Brute-force / SMS-abuse protection.
+      PASSWORD_MAX_ATTEMPTS: ${PASSWORD_MAX_ATTEMPTS:-5}
+      PASSWORD_BLOCK_SECONDS: ${PASSWORD_BLOCK_SECONDS:-900}
+      LOGIN_RATE_LIMIT_PER_HOUR: ${LOGIN_RATE_LIMIT_PER_HOUR:-30}
+      REGISTER_RATE_LIMIT_PER_HOUR: ${REGISTER_RATE_LIMIT_PER_HOUR:-5}
+      CHECK_RATE_LIMIT_PER_HOUR: ${CHECK_RATE_LIMIT_PER_HOUR:-60}
       GEOCODER_URL: ${GEOCODER_URL:-https://nominatim.openstreetmap.org}
       GEOCODER_USER_AGENT: "${GEOCODER_USER_AGENT:-NOMAX/1.0 (+https://nomax.ir)}"
       GEOCODER_TIMEOUT_SECONDS: ${GEOCODER_TIMEOUT_SECONDS:-8}
@@ -110,6 +123,8 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-http://linux-mirror.liara.ir/repository/debian}
+        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-http://linux-mirror.liara.ir/repository/debian-security}
     restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     depends_on:

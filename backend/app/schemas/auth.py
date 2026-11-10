@@ -18,6 +18,31 @@ class RefreshRequest(BaseModel):
     refresh: str = Field(..., min_length=20)
 
 
+class PasswordLogin(BaseModel):
+    phone: str = Field(..., min_length=8, max_length=13)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    phone: str = Field(..., min_length=8, max_length=13)
+    full_name: str = Field(..., min_length=3, max_length=120)
+    national_id: str = Field(..., min_length=10, max_length=10)
+    # Length is enforced in the service so a too-short password returns the
+    # specific `password_too_short` code instead of a generic validation error.
+    password: str = Field(..., max_length=128)
+
+
+class ForgotPasswordRequest(BaseModel):
+    phone: str = Field(..., min_length=8, max_length=13)
+
+
+class ResetPasswordRequest(BaseModel):
+    phone: str = Field(..., min_length=8, max_length=13)
+    code: str = Field(..., min_length=6, max_length=6)
+    # The OTP is checked before password length, so keep length in the service.
+    password: str = Field(..., max_length=128)
+
+
 class UserResponse(BaseModel):
     id: str
     phone: str
