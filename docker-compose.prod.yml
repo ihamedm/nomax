@@ -26,9 +26,11 @@ services:
     build:
       context: ./backend
       args:
+        # Official repos first; mirrors only when the official host fails.
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-http://linux-mirror.liara.ir/repository/debian}
-        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-http://linux-mirror.liara.ir/repository/debian-security}
+        PIP_FALLBACK_INDEX_URLS: ${PIP_FALLBACK_INDEX_URLS:-}
+        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-}
+        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-}
     restart: unless-stopped
     depends_on:
       db:
@@ -122,9 +124,11 @@ services:
     build:
       context: ./backend
       args:
+        # Official repos first; mirrors only when the official host fails.
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-http://linux-mirror.liara.ir/repository/debian}
-        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-http://linux-mirror.liara.ir/repository/debian-security}
+        PIP_FALLBACK_INDEX_URLS: ${PIP_FALLBACK_INDEX_URLS:-}
+        DEBIAN_MIRROR_URL: ${DEBIAN_MIRROR_URL:-}
+        DEBIAN_MIRROR_SECURITY_URL: ${DEBIAN_MIRROR_SECURITY_URL:-}
     restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     depends_on:
@@ -192,6 +196,7 @@ services:
       # degrades to the manual location picker.
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        NPM_FALLBACK_REGISTRY: ${NPM_FALLBACK_REGISTRY:-}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
         VITE_APP_ENV: ${VITE_APP_ENV:-production}
         VITE_NESHAN_MAP_KEY: ${VITE_NESHAN_MAP_KEY:-}

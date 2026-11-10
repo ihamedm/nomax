@@ -17,6 +17,40 @@ def _now() -> datetime:
 
 _PW_ATTEMPTS_PREFIX = "auth:pwatt:{phone}"
 _PW_BLOCK_PREFIX = "auth:pwblock:{phone}"
+_USER_REVOKED_PREFIX = "auth:userrev:{user_id}"
+_BLOCK_PHONE_PREFIX = "auth:block:phone:{phone}"
+_BLOCK_IP_PREFIX = "auth:block:ip:{ip}"
+
+
+async def ensure_not_blocked(redis: Redis, *, phone: str | None = None, ip: str | None = None) -> None:
+    """Reject a manually blocked phone/IP. Admin writes these keys."""
+    if phone and await redis.get(_BLOCK_PHONE_PREFIX.format(phone=phone)):
+        raise AppError("access_blocked", "phone_blocked", 403, {"scope": "phone"})
+    if ip and await redis.get(_BLOCK_IP_PREFIX.format(ip=ip)):
+        raise AppError("access_blocked", "ip_blocked", 403, {"scope": "ip"})
+
+
+async def is_token_revoked(redis: Redis, user_id: str, issued_at) -> bool:
+    """True when the token predates an admin force-logout for this user."""
+    revoked_at = await redis.get(_USER_REVOKED_PREFIX.format(user_id=user_id))
+    if revoked_at is None:
+        return False
+    if issued_at is None:
+        # Tokens minted before revocation tracking cannot be trusted.
+        return True
+    try:
+        return int(issued_at) <= int(revoked_at)
+    except (TypeError, ValueError):
+        return True
+
+
+async def force_logout(redis: Redis, user_id) -> None:
+    """Invalidate every existing access/refresh token for the user."""
+    await redis.set(
+        _USER_REVOKED_PREFIX.format(user_id=user_id),
+        int(_now().timestamp()),
+        ex=int(timedelta(days=settings.JWT_REFRESH_TTL_DAYS).total_seconds()),
+    )
 
 
 async def rate_limit(redis: Redis, key: str, limit: int, window_seconds: int = 3600) -> int:
@@ -61,7 +95,8 @@ async def _password_failure(redis: Redis, phone: str) -> None:
         await redis.set(_PW_BLOCK_PREFIX.format(phone=phone), "1", ex=settings.PASSWORD_BLOCK_SECONDS)
 
 
-async def login_with_password(session, redis: Redis, phone: str, password: str) -> User:
+async def login_with_password(session, redis: Redis, phone: str, password: str, ip: str | None = None) -> User:
+    await ensure_not_blocked(redis, phone=phone, ip=ip)
     await _password_lockout_check(redis, phone)
     result = await session.execute(select(User).where(User.phone == phone))
     user = result.scalar_one_or_none()
@@ -89,6 +124,7 @@ async def register_user(
     national_id: str,
     password: str,
 ) -> User:
+    await ensure_not_blocked(redis, phone=phone, ip=ip)
     if len(password) < settings.PASSWORD_MIN_LENGTH:
         raise AppError("password_too_short", "password_too_short", 422, {"min_length": settings.PASSWORD_MIN_LENGTH})
     if not security.validate_iranian_national_id(national_id):
@@ -136,13 +172,23 @@ async def register_user(
 
 async def forgot_password(session, otp_service: OtpService, phone: str, ip: str) -> str | None:
     """Issue a password-reset OTP; silent about whether the phone is registered."""
+    await ensure_not_blocked(otp_service.redis, phone=phone, ip=ip)
     result = await session.execute(select(User.id).where(User.phone == phone, User.deleted_at.is_(None)))
     if result.scalar_one_or_none() is None:
         return None
     return await otp_service.issue(phone, ip=ip, session=session, purpose="password_reset")
 
 
-async def reset_password(session, otp_service: OtpService, redis: Redis, phone: str, code: str, password: str) -> User:
+async def reset_password(
+    session,
+    otp_service: OtpService,
+    redis: Redis,
+    phone: str,
+    code: str,
+    password: str,
+    ip: str | None = None,
+) -> User:
+    await ensure_not_blocked(redis, phone=phone, ip=ip)
     if not await otp_service.verify(phone, code):
         raise AppError("otp_invalid", "invalid_or_expired_otp_code", 401)
     if len(password) < settings.PASSWORD_MIN_LENGTH:
@@ -176,6 +222,7 @@ async def authenticate_user(
     national_id: str | None = None,
     existing: User | None = None,
 ) -> User:
+    await ensure_not_blocked(otp_service.redis, phone=phone)
     if not await otp_service.verify(phone, code):
         raise AppError("otp_invalid", "invalid_or_expired_otp_code", 401)
 
@@ -219,6 +266,8 @@ async def refresh_session(redis, refresh_token: str) -> tuple[str, str]:
 
     family_key = f"auth:fam:{fam}"
     refresh_ttl_seconds = int(timedelta(days=settings.JWT_REFRESH_TTL_DAYS).total_seconds())
+    if await is_token_revoked(redis, str(user_id), payload.get("iat")):
+        raise AppError("token_revoked", "refresh_token_revoked", 401)
     if await redis.get(f"auth:famrev:{fam}"):
         raise AppError("token_revoked", "refresh_token_revoked", 401)
 

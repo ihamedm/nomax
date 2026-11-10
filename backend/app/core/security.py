@@ -99,6 +99,8 @@ def create_refresh_token(user_id, role: str, family_id: str | None = None) -> tu
         "fam": family_id,
         "jti": jti,
         "typ": "refresh",
+        # Needed to revoke sessions issued before an admin force-logout.
+        "iat": int(now.timestamp()),
     }
     token = jwt.encode(claims, settings.JWT_SECRET, algorithm="HS256")
     return token, jti, family_id

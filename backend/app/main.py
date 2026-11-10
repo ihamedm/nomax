@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.v1.admin import admin_router, dev_router
 from app.api.v1.admin_cache import router as admin_cache_router
 from app.api.v1.admin_quotes import router as admin_quotes_router
+from app.api.v1.admin_security import router as admin_security_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.businesses import me_router, router as businesses_router, uploads_router
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     application.include_router(admin_router, prefix="/api/v1")
     application.include_router(admin_cache_router, prefix="/api/v1")
     application.include_router(admin_quotes_router, prefix="/api/v1")
+    application.include_router(admin_security_router, prefix="/api/v1")
     application.include_router(analytics_router, prefix="/api/v1")
     if settings.APP_ENV != "production" and settings.DEV_OTP_ENABLED:
         application.include_router(dev_router, prefix="/api/v1")

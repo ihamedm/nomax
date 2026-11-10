@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
 from app.core.config import settings
-from app.core.deps import get_current_user, get_otp_service
+from app.core.deps import client_ip, get_current_user, get_otp_service
 from app.core.errors import AppError
 from app.core.redis import get_redis
 from app.db.session import get_db
@@ -23,6 +23,7 @@ from app.schemas.auth import (
 )
 from app.services.auth_service import (
     authenticate_user,
+    ensure_not_blocked,
     forgot_password,
     issue_tokens,
     login_with_password,
@@ -37,13 +38,6 @@ from app.services.otp_service import OtpService
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 logger = logging.getLogger(__name__)
-
-
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 def _user_response(user: User) -> UserResponse:
@@ -87,8 +81,9 @@ async def otp_request(
     otp_service: OtpService = Depends(get_otp_service),
 ) -> dict:
     phone = security.normalize_phone(payload.phone)
-    client_ip = _client_ip(request)
-    code = await otp_service.issue(phone, ip=client_ip, session=session)
+    ip = client_ip(request)
+    await ensure_not_blocked(otp_service.redis, phone=phone, ip=ip)
+    code = await otp_service.issue(phone, ip=ip, session=session)
     if code is None:
         return {"data": {"status": "sent"}}
     if settings.APP_ENV == "production":
@@ -123,9 +118,10 @@ async def check_phone(
     redis = Depends(get_redis),
 ) -> dict:
     phone = security.normalize_phone(payload.phone)
+    await ensure_not_blocked(redis, phone=phone, ip=client_ip(request))
     # A cheap DB lookup, but the answer separates users from strangers, so keep
     # a per-IP cap against enumeration.
-    await rate_limit(redis, f"auth:chkrl:ip:{_client_ip(request)}", settings.CHECK_RATE_LIMIT_PER_HOUR)
+    await rate_limit(redis, f"auth:chkrl:ip:{client_ip(request)}", settings.CHECK_RATE_LIMIT_PER_HOUR)
     result = await session.execute(select(User.id).where(User.phone == phone, User.deleted_at.is_(None)))
     return {"data": {"registered": result.scalar_one_or_none() is not None}}
 
@@ -138,8 +134,8 @@ async def password_login(
     redis = Depends(get_redis),
 ) -> dict:
     phone = security.normalize_phone(payload.phone)
-    await rate_limit(redis, f"auth:loginrl:ip:{_client_ip(request)}", settings.LOGIN_RATE_LIMIT_PER_HOUR)
-    user = await login_with_password(session, redis, phone, payload.password)
+    await rate_limit(redis, f"auth:loginrl:ip:{client_ip(request)}", settings.LOGIN_RATE_LIMIT_PER_HOUR)
+    user = await login_with_password(session, redis, phone, payload.password, client_ip(request))
     return {"data": await _login_payload(user)}
 
 
@@ -155,7 +151,7 @@ async def register(
         session,
         redis,
         phone,
-        _client_ip(request),
+        client_ip(request),
         payload.full_name.strip(),
         payload.national_id.strip(),
         payload.password,
@@ -171,7 +167,7 @@ async def forgot(
     otp_service: OtpService = Depends(get_otp_service),
 ) -> dict:
     phone = security.normalize_phone(payload.phone)
-    code = await forgot_password(session, otp_service, phone, _client_ip(request))
+    code = await forgot_password(session, otp_service, phone, client_ip(request))
     if code is None or settings.APP_ENV == "production":
         if code is not None:
             logger.warning(
@@ -185,12 +181,15 @@ async def forgot(
 @router.post("/reset-password")
 async def reset(
     payload: ResetPasswordRequest,
+    request: Request,
     session: AsyncSession = Depends(get_db),
     otp_service: OtpService = Depends(get_otp_service),
     redis = Depends(get_redis),
 ) -> dict:
     phone = security.normalize_phone(payload.phone)
-    user = await reset_password(session, otp_service, redis, phone, payload.code, payload.password)
+    user = await reset_password(
+        session, otp_service, redis, phone, payload.code, payload.password, client_ip(request)
+    )
     return {"data": await _login_payload(user)}
 
 

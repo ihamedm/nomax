@@ -26,6 +26,7 @@ const NAV = [
   { to: "/admin/backups", label: "پشتیبان‌گیری", icon: "▤", end: false, superadminOnly: true, permission: null },
   { to: "/admin/cache", label: "کش‌ها", icon: "⚡", end: false, superadminOnly: false, permission: "admin.settings.manage" },
   { to: "/admin/users", label: "کاربران و دسترسی‌ها", icon: "☷", end: false, superadminOnly: true, permission: null },
+  { to: "/admin/security", label: "امنیت و محدودیت‌ها", icon: "⛨", end: false, superadminOnly: true, permission: null },
 ];
 
 export function AdminLayout() {

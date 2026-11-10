@@ -35,6 +35,7 @@ import AdminSettingsPage from "@/features/admin/AdminSettingsPage";
 import AdminDataPage from "@/features/admin/AdminDataPage";
 import AdminBackupsPage from "@/features/admin/AdminBackupsPage";
 import AdminCachePage from "@/features/admin/AdminCachePage";
+import AdminSecurityPage from "@/features/admin/AdminSecurityPage";
 import AdminFilesPage from "@/features/admin/AdminFilesPage";
 import AdminNotificationsPage from "@/features/admin/AdminNotificationsPage";
 import AdminQuotesPage from "@/features/admin/AdminQuotesPage";
@@ -169,6 +170,7 @@ export function App() {
           <Route path="data" element={<AdminDataPage />} />
           <Route path="backups" element={<AdminBackupsPage />} />
           <Route path="cache" element={<AdminCachePage />} />
+          <Route path="security" element={<AdminSecurityPage />} />
           <Route path="files" element={<AdminFilesPage />} />
           <Route path="users" element={<AdminUsersPage />} />
         </Route>

@@ -3,13 +3,19 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 
-# npm registry for the install step. Override on networks where
-# registry.npmjs.org is blocked, e.g. NPM_REGISTRY=https://registry.npmmirror.com
-# (replace-registry-host rewrites the lockfile's npmjs URLs to the mirror).
+# Official npm registry first; the fallback registry is only used when the
+# official one fails (blocked network or rate limit).
 ARG NPM_REGISTRY=https://registry.npmjs.org
-RUN npm config set registry "$NPM_REGISTRY" \
-    && npm config set replace-registry-host always \
-    && (npm ci || npm install)
+ARG NPM_FALLBACK_REGISTRY=
+RUN npm config set replace-registry-host always \
+    && npm config set fetch-retries 1 \
+    && npm config set fetch-timeout 30000 \
+    && npm config set registry "$NPM_REGISTRY" \
+    && (npm ci --no-audit --no-fund \
+        || { [ -n "$NPM_FALLBACK_REGISTRY" ] \
+             && echo "retrying npm install with $NPM_FALLBACK_REGISTRY" \
+             && npm config set registry "$NPM_FALLBACK_REGISTRY" \
+             && npm ci --no-audit --no-fund; })
 COPY . .
 
 # Vite inlines these values into the bundle at build time, so they must be
