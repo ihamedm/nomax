@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage, type ApiError } from "@/lib/api";
@@ -12,6 +13,7 @@ import { formatJalali } from "@/lib/jalali";
 import { useApi, useApiWithMeta } from "@/lib/query";
 import { useAuth } from "@/stores/auth";
 import { AdminModal } from "@/features/admin/AdminModal";
+import { AdminBusinessWizard, type AdminBusinessDetail } from "@/features/admin/AdminBusinessWizard";
 import { DataTable, type DataColumn } from "@/features/admin/data-table";
 
 type BusinessStatus = "pending" | "approved" | "rejected";
@@ -51,6 +53,7 @@ interface BusinessRow {
   owner: Owner | null;
   created_at?: string | null;
   updated_at?: string | null;
+  deleted_at?: string | null;
 }
 
 interface Meta {
@@ -65,6 +68,7 @@ const FILTERS: Array<{ label: string; value: string }> = [
   { label: "در انتظار تأیید", value: "pending" },
   { label: "تأییدشده", value: "approved" },
   { label: "ردشده", value: "rejected" },
+  { label: "سبد حذف‌شده‌ها", value: "trash" },
 ];
 
 const STATUS_META: Record<BusinessStatus, { label: string; className: string }> = {
@@ -72,21 +76,6 @@ const STATUS_META: Record<BusinessStatus, { label: string; className: string }> 
   approved: { label: "تأییدشده", className: "bg-emerald-50 text-emerald-700" },
   rejected: { label: "ردشده", className: "bg-rose-50 text-rose-700" },
 };
-
-const EMPTY_FORM = {
-  name: "",
-  category_id: "",
-  address: "",
-  owner_phone: "",
-  short_description: "",
-  description: "",
-  phone_business: "",
-  is_24h: false,
-  is_verified: false,
-  status: "pending" as BusinessStatus,
-};
-
-type BusinessForm = typeof EMPTY_FORM;
 
 function StatusPill({ status }: { status: BusinessStatus }) {
   const meta = STATUS_META[status] ?? STATUS_META.pending;
@@ -180,6 +169,7 @@ export default function AdminBusinessesPage() {
   const [params, setParams] = useSearchParams();
 
   const status = params.get("status") ?? "";
+  const trash = status === "trash";
   const qParam = params.get("q") ?? "";
   const categoryParam = params.get("category_id") ?? "";
   const ownerId = params.get("owner_id") ?? "";
@@ -190,7 +180,8 @@ export default function AdminBusinessesPage() {
   useEffect(() => setSearch(qParam), [qParam]);
 
   const query = new URLSearchParams({ page: String(page), per_page: "15" });
-  if (status) query.set("status", status);
+  if (trash) query.set("trash", "true");
+  else if (status) query.set("status", status);
   if (qParam) query.set("q", qParam);
   if (categoryParam) query.set("category_id", categoryParam);
   if (ownerId) query.set("owner_id", ownerId);
@@ -207,8 +198,8 @@ export default function AdminBusinessesPage() {
 
   const [detail, setDetail] = useState<BusinessRow | null>(null);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<BusinessForm>(EMPTY_FORM);
+  const [editingBusiness, setEditingBusiness] = useState<AdminBusinessDetail | null>(null);
+  const [confirmPermanent, setConfirmPermanent] = useState<BusinessRow | null>(null);
 
   function can(code: string): boolean {
     return user?.role === "superadmin" || Boolean(user?.permissions.includes(code));
@@ -263,10 +254,36 @@ export default function AdminBusinessesPage() {
   const remove = useMutation({
     mutationFn: (id: string) => api(`/admin/businesses/${id}`, { method: "DELETE" }),
     onSuccess: async () => {
-      toast("کسب‌وکار حذف شد.");
+      toast("کسب‌وکار به سبد حذف‌شده‌ها منتقل شد.");
       await invalidate();
     },
     onError: (error: ApiError) => toast(errorMessage(error)),
+  });
+
+  const restore = useMutation({
+    mutationFn: (id: string) => api(`/admin/businesses/${id}/restore`, { method: "POST" }),
+    onSuccess: async () => {
+      toast("کسب‌وکار بازیابی شد.");
+      await invalidate();
+    },
+    onError: (error: ApiError) => toast(errorMessage(error)),
+  });
+
+  const purge = useMutation({
+    mutationFn: (id: string) => api(`/admin/businesses/${id}/permanent`, { method: "DELETE" }),
+    onSuccess: async () => {
+      toast("کسب‌وکار به‌طور دائمی حذف شد.");
+      setConfirmPermanent(null);
+      await invalidate();
+    },
+    onError: (error: ApiError) => {
+      setConfirmPermanent(null);
+      if (error.code === "business_has_relations") {
+        window.alert(`${error.message}\n\nپس از حذف این موارد، دوباره تلاش کنید.`);
+      } else {
+        toast(errorMessage(error));
+      }
+    },
   });
 
   const save = useMutation({
@@ -274,7 +291,7 @@ export default function AdminBusinessesPage() {
       if (formMode === "create") {
         return api("/admin/businesses", { method: "POST", body: JSON.stringify(payload) });
       }
-      return api(`/admin/businesses/${editingId}`, {
+      return api(`/admin/businesses/${editingBusiness?.id}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
@@ -282,50 +299,25 @@ export default function AdminBusinessesPage() {
     onSuccess: async () => {
       toast(formMode === "create" ? "کسب‌وکار ساخته شد." : "تغییرات ذخیره شد.");
       setFormMode(null);
-      setEditingId(null);
+      setEditingBusiness(null);
       await invalidate();
     },
     onError: (error: ApiError) => toast(errorMessage(error)),
   });
 
   function openCreate() {
-    setForm(EMPTY_FORM);
-    setEditingId(null);
+    setEditingBusiness(null);
     setFormMode("create");
   }
 
-  function openEdit(business: BusinessRow) {
-    setForm({
-      name: business.name,
-      category_id: business.category ? String(business.category.id) : "",
-      address: business.address,
-      owner_phone: business.owner?.phone ?? "",
-      short_description: business.short_description ?? "",
-      description: business.description ?? "",
-      phone_business: business.phone_business ?? "",
-      is_24h: business.is_24h,
-      is_verified: business.is_verified,
-      status: business.status,
-    });
-    setEditingId(business.id);
-    setFormMode("edit");
-  }
-
-  function submitForm(event: FormEvent) {
-    event.preventDefault();
-    const payload: Record<string, unknown> = {
-      name: form.name.trim(),
-      category_id: Number(form.category_id),
-      address: form.address.trim(),
-      short_description: form.short_description.trim(),
-      description: form.description.trim() || null,
-      phone_business: form.phone_business.trim() || null,
-      is_24h: form.is_24h,
-      is_verified: form.is_verified,
-      status: form.status,
-    };
-    if (formMode === "create") payload.owner_phone = form.owner_phone.trim();
-    save.mutate(payload);
+  async function openEdit(business: BusinessRow) {
+    try {
+      const data = await api<AdminBusinessDetail>(`/admin/businesses/${business.id}`);
+      setEditingBusiness(data);
+      setFormMode("edit");
+    } catch (error) {
+      toast(errorMessage(error));
+    }
   }
 
   function confirmReject(business: BusinessRow) {
@@ -340,7 +332,7 @@ export default function AdminBusinessesPage() {
   }
 
   function confirmDelete(business: BusinessRow) {
-    if (!window.confirm(`کسب‌وکار «${business.name}» حذف شود؟`)) return;
+    if (!window.confirm(`کسب‌وکار «${business.name}» به سبد حذف‌شده‌ها منتقل شود؟`)) return;
     remove.mutate(business.id);
   }
 
@@ -350,7 +342,7 @@ export default function AdminBusinessesPage() {
       header: "کسب‌وکار",
       cell: (business) => (
         <div className="flex items-start gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-xl">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-xl md:h-12 md:w-12">
             {business.profile_image_url ? (
               <img
                 src={business.profile_image_url}
@@ -370,10 +362,12 @@ export default function AdminBusinessesPage() {
             >
               {business.name}
             </button>
-            <p className="mt-0.5 text-[11px] text-slate-400" dir="ltr">
+            <p className="mt-0.5 hidden text-[11px] text-slate-400 md:block" dir="ltr">
               {business.slug}
             </p>
-            <p className="mt-1 max-w-64 truncate text-xs text-slate-500">{business.address}</p>
+            <p className="mt-1 hidden max-w-64 truncate text-xs text-slate-500 md:block">
+              {business.address}
+            </p>
           </div>
         </div>
       ),
@@ -381,6 +375,7 @@ export default function AdminBusinessesPage() {
     {
       key: "category",
       header: "دسته",
+      mobileHidden: true,
       cell: (business) => (
         <div className="text-xs text-slate-600">
           <p>{business.category?.name ?? "—"}</p>
@@ -393,6 +388,7 @@ export default function AdminBusinessesPage() {
     {
       key: "owner",
       header: "مالک",
+      mobileHidden: true,
       cell: (business) => (
         <div className="text-xs text-slate-600">
           <p>{business.owner?.full_name || "بدون نام"}</p>
@@ -428,6 +424,7 @@ export default function AdminBusinessesPage() {
     {
       key: "rating",
       header: "امتیاز",
+      mobileHidden: true,
       cell: (business) => (
         <span className="text-xs text-slate-600">
           {formatRating(business.rating_avg)}
@@ -437,62 +434,79 @@ export default function AdminBusinessesPage() {
     },
     {
       key: "created",
-      header: "تاریخ ثبت",
-      cell: (business) => (
-        <span className="text-xs text-slate-500">
-          {business.created_at ? formatJalali(business.created_at) : "—"}
-        </span>
-      ),
+      header: trash ? "حذف‌شده در" : "تاریخ ثبت",
+      mobileHidden: true,
+      cell: (business) => {
+        const date = trash ? business.deleted_at : business.created_at;
+        return (
+          <span className="text-xs text-slate-500">{date ? formatJalali(date) : "—"}</span>
+        );
+      },
     },
     {
       key: "actions",
       header: "عملیات",
       className: "text-left",
-      cell: (business) => (
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {business.status === "pending" && can("business.approve") && (
-            <>
-              <ActionButton
-                tone="green"
-                disabled={approve.isPending}
-                onClick={() => approve.mutate(business.id)}
-              >
-                تأیید
-              </ActionButton>
-              <ActionButton
-                tone="rose"
-                disabled={reject.isPending}
-                onClick={() => confirmReject(business)}
-              >
-                رد
-              </ActionButton>
-            </>
-          )}
-          <HoverActions>
-            <RowLink onClick={() => setDetail(business)}>جزئیات</RowLink>
-            {can("business.update") && (
-              <RowLink onClick={() => openEdit(business)}>ویرایش</RowLink>
+      cell: (business) =>
+        trash ? (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <ActionButton
+              disabled={restore.isPending}
+              onClick={() => restore.mutate(business.id)}
+            >
+              بازیابی
+            </ActionButton>
+            <ActionButton tone="rose" onClick={() => setConfirmPermanent(business)}>
+              حذف دائمی
+            </ActionButton>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {business.status === "pending" && can("business.approve") && (
+              <>
+                <ActionButton
+                  tone="green"
+                  disabled={approve.isPending}
+                  onClick={() => approve.mutate(business.id)}
+                >
+                  تأیید
+                </ActionButton>
+                <ActionButton
+                  tone="rose"
+                  disabled={reject.isPending}
+                  onClick={() => confirmReject(business)}
+                >
+                  رد
+                </ActionButton>
+              </>
             )}
-            {can("business.delete") && (
-              <RowLink
-                tone="rose"
-                disabled={remove.isPending}
-                onClick={() => confirmDelete(business)}
-              >
-                حذف
-              </RowLink>
-            )}
-          </HoverActions>
-          <Link
-            to={`/admin/reviews?business_id=${business.id}&business_name=${encodeURIComponent(
-              business.name,
-            )}`}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
-          >
-            نمایش نظرات
-          </Link>
-        </div>
-      ),
+            <HoverActions>
+              <RowLink onClick={() => setDetail(business)}>جزئیات</RowLink>
+              {can("business.update") && (
+                <span className="hidden md:inline">
+                  <RowLink onClick={() => openEdit(business)}>ویرایش</RowLink>
+                </span>
+              )}
+              {can("business.delete") && (
+                <RowLink
+                  tone="rose"
+                  disabled={remove.isPending}
+                  onClick={() => confirmDelete(business)}
+                >
+                  حذف
+                </RowLink>
+              )}
+            </HoverActions>
+            <Link
+              to={`/admin/reviews?business_id=${business.id}&business_name=${encodeURIComponent(
+                business.name,
+              )}`}
+              className="hidden rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700 md:inline-flex"
+            >
+              نمایش نظرات
+            </Link>
+          </div>
+        ),
     },
   ];
 
@@ -556,7 +570,7 @@ export default function AdminBusinessesPage() {
         rowKey={(business) => business.id}
         loading={loading}
         error={businesses.error ? errorMessage(businesses.error) : null}
-        empty="کسب‌وکاری با این فیلتر پیدا نشد."
+        empty={trash ? "سبد حذف‌شده‌ها خالی است." : "کسب‌وکاری با این فیلتر پیدا نشد."}
         minWidthClassName="min-w-[980px]"
         meta={
           meta
@@ -622,14 +636,16 @@ export default function AdminBusinessesPage() {
                 {detail.slug}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                <Link
-                  to={`/businesses/${detail.slug}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-brand-600 hover:underline"
-                >
-                  مشاهده صفحه عمومی
-                </Link>
+                {!trash && (
+                  <Link
+                    to={`/businesses/${detail.slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-brand-600 hover:underline"
+                  >
+                    مشاهده صفحه عمومی
+                  </Link>
+                )}
                 <Link
                   to={`/admin/reviews?business_id=${detail.id}&business_name=${encodeURIComponent(
                     detail.name,
@@ -638,7 +654,7 @@ export default function AdminBusinessesPage() {
                 >
                   نمایش نظرات
                 </Link>
-                {can("business.update") && (
+                {!trash && can("business.update") && (
                   <button
                     type="button"
                     onClick={() => {
@@ -688,133 +704,34 @@ export default function AdminBusinessesPage() {
       )}
 
       {formMode && (
-        <AdminModal
-          title={formMode === "create" ? "افزودن کسب‌وکار" : "ویرایش کسب‌وکار"}
+        <AdminBusinessWizard
+          business={formMode === "edit" ? editingBusiness : null}
+          saving={save.isPending}
           onClose={() => {
             setFormMode(null);
-            setEditingId(null);
+            setEditingBusiness(null);
           }}
-        >
-          <form onSubmit={submitForm} className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1 text-xs text-slate-500">
-                نام
-                <Input
-                  required
-                  value={form.name}
-                  onChange={(event) => setForm({ ...form, name: event.target.value })}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-500">
-                دسته‌بندی
-                <select
-                  required
-                  value={form.category_id}
-                  onChange={(event) => setForm({ ...form, category_id: event.target.value })}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800"
-                >
-                  <option value="">انتخاب دسته…</option>
-                  {categories.data?.items.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {formMode === "create" && (
-                <label className="space-y-1 text-xs text-slate-500">
-                  موبایل مالک
-                  <Input
-                    required
-                    dir="ltr"
-                    placeholder="0912 345 6789"
-                    value={form.owner_phone}
-                    onChange={(event) => setForm({ ...form, owner_phone: event.target.value })}
-                  />
-                </label>
-              )}
-              <label className="space-y-1 text-xs text-slate-500">
-                وضعیت
-                <select
-                  value={form.status}
-                  onChange={(event) =>
-                    setForm({ ...form, status: event.target.value as BusinessStatus })
-                  }
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800"
-                >
-                  <option value="pending">در انتظار</option>
-                  <option value="approved">تأییدشده</option>
-                  <option value="rejected">ردشده</option>
-                </select>
-              </label>
-              <label className="space-y-1 text-xs text-slate-500 sm:col-span-2">
-                آدرس
-                <Input
-                  required
-                  value={form.address}
-                  onChange={(event) => setForm({ ...form, address: event.target.value })}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-500">
-                تلفن کسب‌وکار
-                <Input
-                  dir="ltr"
-                  value={form.phone_business}
-                  onChange={(event) => setForm({ ...form, phone_business: event.target.value })}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-500">
-                توضیح کوتاه
-                <Input
-                  value={form.short_description}
-                  onChange={(event) => setForm({ ...form, short_description: event.target.value })}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-500 sm:col-span-2">
-                توضیحات
-                <textarea
-                  value={form.description}
-                  onChange={(event) => setForm({ ...form, description: event.target.value })}
-                  className="min-h-24 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                />
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-4 text-sm text-slate-700">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.is_24h}
-                  onChange={(event) => setForm({ ...form, is_24h: event.target.checked })}
-                />
-                ۲۴ ساعته
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.is_verified}
-                  onChange={(event) => setForm({ ...form, is_verified: event.target.checked })}
-                />
-                مجوز تأییدشده
-              </label>
-            </div>
-            <div className="flex gap-2">
-              <Button type="submit" loading={save.isPending}>
-                {formMode === "create" ? "ساخت کسب‌وکار" : "ذخیره تغییرات"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setFormMode(null);
-                  setEditingId(null);
-                }}
-              >
-                انصراف
-              </Button>
-            </div>
-          </form>
-        </AdminModal>
+          onSubmit={(payload) => save.mutate(payload)}
+        />
       )}
+
+      <ConfirmSheet
+        open={confirmPermanent !== null}
+        title="حذف دائمی کسب‌وکار"
+        description={
+          <>
+            کسب‌وکار{" "}
+            <span className="font-bold text-slate-800">{confirmPermanent?.name}</span> به‌طور
+            کامل از پایگاه داده حذف شود؟ اگر این کسب‌وکار نظر، پیشنهاد قیمت یا مجوز
+            داشته باشد، ابتدا باید آن‌ها را حذف کنید. این عملیات بازگشت‌ناپذیر است.
+          </>
+        }
+        confirmLabel="حذف دائمی"
+        tone="rose"
+        loading={purge.isPending}
+        onClose={() => setConfirmPermanent(null)}
+        onConfirm={() => confirmPermanent && purge.mutate(confirmPermanent.id)}
+      />
     </div>
   );
 }

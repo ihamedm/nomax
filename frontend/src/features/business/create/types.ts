@@ -20,6 +20,8 @@ export interface WizardData {
   shopPhone: string;
   instagram: string;
   licenseEnabled: boolean;
+  licenseNumber: string;
+  licenseImage: string;
   standardTags: string[];
   customTags: string[];
 }
@@ -47,6 +49,19 @@ export const BEHBAHAN_CENTER: Coordinates = { lat: 30.5959, lng: 50.2417 };
 
 export const IRAN_PHONE = /^0\d{10}$/;
 
+/** Keeps only the Instagram id, accepting a bare id, an @handle or a profile URL. */
+export function instagramId(value: string): string {
+  return value
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^(www\.)?instagram\.com/i, "")
+    .replace(/^\/+/, "")
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "")
+    .replace(/^@/, "")
+    .replace(/[^A-Za-z0-9._]/g, "");
+}
+
 export function categoryPath(
   category: Category | null,
   subcategory: Subcategory | null,
@@ -69,6 +84,12 @@ export function validateStep(step: number, data: WizardData, acceptedRules: bool
     if (data.intro.length > MAX_INTRO) return `معرفی کوتاه حداکثر ${MAX_INTRO} نویسه است.`;
     if (data.shopPhone.trim() && !IRAN_PHONE.test(data.shopPhone.trim())) {
       return "شماره تماس فروشگاه باید ۱۱ رقم و با ۰ شروع شود.";
+    }
+    if (data.licenseEnabled && !data.licenseNumber.trim()) {
+      return "شماره یا شناسه پروانه کسب را وارد کنید.";
+    }
+    if (data.licenseEnabled && !data.licenseImage) {
+      return "تصویر پروانه کسب را بارگذاری کنید.";
     }
   }
   if (step === 4 && !acceptedRules) {

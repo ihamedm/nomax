@@ -57,26 +57,30 @@ function markerIcon(
   offsetY = 0,
   variant: "dot" | "pushpin" = "dot",
 ) {
-  // The picker and pushpin markers have a circular head plus a tail, so they
-  // need a larger canvas and their anchor sits at the tip of the tail.
-  const tail = picker || variant === "pushpin";
-  const styles = [
-    color ? `background:${color}` : "",
-    offsetX || offsetY ? `position:relative;left:${offsetX}px;top:${offsetY}px` : "",
-  ]
-    .filter(Boolean)
-    .join(";");
+  const offsetStyle =
+    offsetX || offsetY ? `position:relative;left:${offsetX}px;top:${offsetY}px` : "";
+  const offsetAttr = offsetStyle ? ` style="${offsetStyle}"` : "";
+  const styles = [color ? `background:${color}` : "", offsetStyle].filter(Boolean).join(";");
   const colorStyle = styles ? ` style="${styles}"` : "";
-  const modifier = picker
-    ? " nomax-map-pin--picker"
-    : variant === "pushpin"
-      ? " nomax-map-pin--pushpin"
-      : "";
+  // The picker is a real pin SVG so the tip sits exactly on the chosen point.
+  if (picker) {
+    return L.divIcon({
+      className: "",
+      html: `<svg class="nomax-map-pin--picker" viewBox="0 0 24 24" aria-hidden="true"${offsetAttr}><path fill="#12b886" stroke="#ffffff" stroke-width="1.1" d="M12 1.7c-4.3 0-7.6 3.3-7.6 7.5 0 5.6 7.6 13.6 7.6 13.6s7.6-8 7.6-13.6c0-4.2-3.3-7.5-7.6-7.5Z"/><circle cx="12" cy="9.1" r="2.85" fill="#ffffff"/></svg>`,
+      iconSize: [40, 40],
+      iconAnchor: [20, 38],
+      popupAnchor: [0, -14],
+    });
+  }
+
+  // Pushpin and dot markers are CSS shapes; their anchor sits on the shape.
+  const tail = variant === "pushpin";
+  const modifier = tail ? " nomax-map-pin--pushpin" : "";
   return L.divIcon({
     className: "",
     html: `<span class="nomax-map-pin${modifier}"${colorStyle}></span>`,
-    iconSize: picker ? [46, 58] : tail ? [36, 46] : [24, 24],
-    iconAnchor: picker ? [23, 56] : tail ? [16, 42] : [12, 12],
+    iconSize: tail ? [36, 46] : [24, 24],
+    iconAnchor: tail ? [16, 42] : [12, 12],
     popupAnchor: [0, -14],
   });
 }

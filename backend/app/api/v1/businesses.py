@@ -5,12 +5,20 @@ from datetime import datetime, timezone
 from typing import Literal
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from app.core import security
 from app.core.config import settings
-from app.core.deps import get_current_user, get_optional_user, require_permissions
+from app.core.deps import (
+    client_ip,
+    get_current_user,
+    get_optional_user,
+    get_otp_service,
+    get_redis,
+    require_permissions,
+)
 from app.core.errors import AppError
 from app.core.permissions import has_permission
 from app.db.session import get_db
@@ -20,6 +28,9 @@ from app.models.category import Category, Subcategory
 from app.models.admin import AuditLog
 from app.models.review import Review
 from app.models.user import User, UserRole
+from app.services.auth_service import ensure_not_blocked, issue_tokens, rate_limit
+from app.services.otp_service import OtpService
+from app.services.shahkar_service import verify_mobile_owner
 from app.services.business_search import (
     BusinessHit,
     BusinessSearchParams,
@@ -1060,6 +1071,157 @@ async def upsert_license(
     business.is_verified = False
     await session.commit()
     return {"data": {"id": str(license_row.id), "verified": False}}
+
+
+_CLAIM_VERIFIED_PREFIX = "business:claim:{business_id}:{user_id}"
+_CLAIM_VERIFIED_TTL_SECONDS = 900
+
+
+async def _load_claim_target(
+    session: AsyncSession, business_id: str
+) -> tuple[Business, User]:
+    """Business plus its owner, rejecting claims that cannot happen."""
+    try:
+        bid = uuid.UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    business = await session.get(Business, bid)
+    if business is None or business.deleted_at is not None:
+        raise AppError("not_found", "business_not_found", 404)
+    owner = await session.get(User, business.owner_id)
+    if owner is None or owner.deleted_at is not None:
+        raise AppError("not_found", "owner_not_found", 404)
+    if owner.is_verified:
+        raise AppError("owner_already_verified", "owner_already_verified", 409)
+    return business, owner
+
+
+@router.post("/{business_id}/claim/otp")
+async def request_owner_claim_otp(
+    business_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    otp_service: OtpService = Depends(get_otp_service),
+) -> dict:
+    """Send an OTP to the owner's phone to prove the caller holds that SIM."""
+    _, owner = await _load_claim_target(session, business_id)
+    ip = client_ip(request)
+    await ensure_not_blocked(otp_service.redis, phone=owner.phone, ip=ip)
+    code = await otp_service.issue(owner.phone, ip=ip, session=session, purpose="owner_claim")
+    if code is None or settings.APP_ENV == "production":
+        return {"data": {"status": "sent", "expires_in": settings.OTP_TTL_SECONDS}}
+    return {
+        "data": {"status": "issued", "dev_otp": code, "expires_in": settings.OTP_TTL_SECONDS}
+    }
+
+
+@router.post("/{business_id}/claim/otp/verify")
+async def verify_owner_claim_otp(
+    business_id: str,
+    payload: dict,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    otp_service: OtpService = Depends(get_otp_service),
+    redis=Depends(get_redis),
+) -> dict:
+    """Check the OTP and remember the caller may complete the owner profile."""
+    business, owner = await _load_claim_target(session, business_id)
+    await ensure_not_blocked(redis, phone=owner.phone, ip=client_ip(request))
+    if not await otp_service.verify(owner.phone, str(payload.get("code") or "").strip()):
+        raise AppError("otp_invalid", "invalid_or_expired_otp_code", 401)
+    await redis.set(
+        _CLAIM_VERIFIED_PREFIX.format(business_id=business.id, user_id=user.id),
+        "1",
+        ex=_CLAIM_VERIFIED_TTL_SECONDS,
+    )
+    return {"data": {"verified": True, "full_name": owner.full_name}}
+
+
+@router.post("/{business_id}/claim/profile")
+async def complete_owner_claim(
+    business_id: str,
+    payload: dict,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
+) -> dict:
+    """Set the real owner's credentials, then sign them in on the owner account."""
+    business, owner = await _load_claim_target(session, business_id)
+    marker = _CLAIM_VERIFIED_PREFIX.format(business_id=business.id, user_id=user.id)
+    if not await redis.get(marker):
+        raise AppError("owner_claim_not_verified", "owner_claim_not_verified", 403)
+
+    full_name = str(payload.get("full_name") or "").strip()
+    national_id = str(payload.get("national_id") or "").strip()
+    password = str(payload.get("password") or "")
+    if len(full_name) < 3 or len(full_name) > 120:
+        raise AppError("validation_error", "full_name_required", 422)
+    if not security.validate_iranian_national_id(national_id):
+        raise AppError(
+            "invalid_national_id", "invalid_national_id", 422, {"national_id": national_id}
+        )
+    if len(password) < settings.PASSWORD_MIN_LENGTH:
+        raise AppError(
+            "password_too_short",
+            "password_too_short",
+            422,
+            {"min_length": settings.PASSWORD_MIN_LENGTH},
+        )
+    if owner.national_id and owner.national_id != national_id:
+        raise AppError("national_id_already_set", "national_id_already_set", 409)
+    in_use = await session.execute(
+        sa.select(User.id).where(User.national_id == national_id, User.id != owner.id)
+    )
+    if in_use.scalar_one_or_none() is not None:
+        raise AppError("national_id_in_use", "national_id_in_use", 409)
+
+    await rate_limit(
+        redis,
+        f"auth:claimrl:ip:{client_ip(request)}",
+        settings.REGISTER_RATE_LIMIT_PER_HOUR,
+    )
+    # Same metered Shahkar check as registration: the SIM must belong to the owner.
+    await verify_mobile_owner(national_id, owner.phone)
+
+    owner.full_name = full_name
+    owner.national_id = national_id
+    owner.hashed_password = security.hash_password(password)
+    owner.is_verified = True
+    owner.is_phone_verified = True
+    owner.is_national_id_verified = True
+    owner.national_id_verified_at = datetime.now(timezone.utc)
+    owner.last_login_at = owner.national_id_verified_at
+    if owner.role == UserRole.CUSTOMER:
+        owner.role = UserRole.OWNER
+    await redis.delete(marker)
+    await session.commit()
+    await session.refresh(owner)
+
+    access, refresh = await issue_tokens(owner)
+    return {
+        "data": {
+            "access": access,
+            "refresh": refresh,
+            "user": {
+                "id": str(owner.id),
+                "phone": owner.phone,
+                "national_id": owner.national_id,
+                "full_name": owner.full_name,
+                "role": owner.role.value,
+                "permissions": list(owner.permissions or []),
+                "is_verified": owner.is_verified,
+                "is_phone_verified": owner.is_phone_verified,
+                "is_national_id_verified": owner.is_national_id_verified,
+                "last_login_at": (
+                    owner.last_login_at.isoformat() if owner.last_login_at else None
+                ),
+                "created_at": owner.created_at.isoformat() if owner.created_at else None,
+            },
+        }
+    }
 
 
 @router.post("/{business_id}/tags")

@@ -5,11 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button, Spinner } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { api, errorMessage } from "@/lib/api";
+import { api, ApiError, errorMessage } from "@/lib/api";
 import { loginPath, returnPath } from "@/lib/auth-redirect";
 import { cn } from "@/lib/cn";
 import { normalizeDigits, toFa } from "@/lib/digits";
-import { formatPhone } from "@/lib/format";
+import { formatPhone, normalizeAddress } from "@/lib/format";
 import {
   MAX_IMAGE_INPUT_BYTES,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -32,6 +32,7 @@ import {
   STEP_LABELS,
   TOTAL_STEPS,
   categoryPath,
+  instagramId,
   mainPhotoUrl,
   validateStep,
   type WizardData,
@@ -51,6 +52,8 @@ const EMPTY: WizardData = {
   shopPhone: "",
   instagram: "",
   licenseEnabled: false,
+  licenseNumber: "",
+  licenseImage: "",
   standardTags: [],
   customTags: [],
 };
@@ -122,6 +125,20 @@ function ImageIcon({ className }: { className?: string }) {
   );
 }
 
+/** Uploads one image through the shared pipeline and returns its URL. */
+async function uploadImageFile(file: File): Promise<string> {
+  const prepared = await compressImageForUpload(file);
+  if (prepared.size > MAX_IMAGE_UPLOAD_BYTES) {
+    throw new ApiError("image_too_large", "image_too_large", 413);
+  }
+  const form = new FormData();
+  form.append("file", prepared);
+  form.append("crop", "square");
+  form.append("filter", "none");
+  const result = await api<{ url: string }>("/uploads/image", { method: "POST", body: form });
+  return result.url;
+}
+
 function ChevronLeft({ className }: { className?: string }) {
   return (
     <svg
@@ -177,6 +194,7 @@ export default function CreateBusinessPage({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const licenseFileRef = useRef<HTMLInputElement | null>(null);
   const lastAppliedSuggestion = useRef<string | null>(null);
 
   const mine = useApi<{
@@ -310,10 +328,10 @@ export default function CreateBusinessPage({
           subcategory_id: data.subcategory?.id ?? null,
           short_description: data.intro.trim(),
           phone_business: data.shopPhone.trim() || null,
-          address: data.address.trim(),
+          address: normalizeAddress(data.address),
           geo_lat: data.geo?.lat ?? null,
           geo_lng: data.geo?.lng ?? null,
-          instagram: data.instagram.trim() || null,
+          instagram: instagramId(data.instagram) || null,
           is_24h: data.is24h,
           profile_image_url: mainImage,
           images: data.photos.map((photo, index) => ({
@@ -324,6 +342,19 @@ export default function CreateBusinessPage({
           tags,
         }),
       });
+      if (data.licenseEnabled) {
+        try {
+          await api(`/businesses/${saved.id}/license`, {
+            method: "POST",
+            body: JSON.stringify({
+              license_number: data.licenseNumber.trim(),
+              image_url: data.licenseImage,
+            }),
+          });
+        } catch {
+          toast("پروانه کسب ذخیره نشد؛ از صفحه ویرایش دوباره ثبت کنید.");
+        }
+      }
       if (!isEdit) {
         toast("کسب‌وکار ثبت شد و پس از تأیید مدیر نمایش داده می‌شود.");
       } else if (saved.status === "pending") {
@@ -366,24 +397,12 @@ export default function CreateBusinessPage({
           continue;
         }
         try {
-          const prepared = await compressImageForUpload(file);
-          if (prepared.size > MAX_IMAGE_UPLOAD_BYTES) {
-            toast("حجم تصویر پس از بهینه‌سازی هنوز بیش از ۵ مگابایت است.");
-            continue;
-          }
-          const form = new FormData();
-          form.append("file", prepared);
-          form.append("crop", "square");
-          form.append("filter", "none");
-          const result = await api<{ url: string }>("/uploads/image", {
-            method: "POST",
-            body: form,
-          });
+          const url = await uploadImageFile(file);
           setData((current) => {
             if (current.photos.length >= maxPhotos) return current;
-            if (current.photos.some((photo) => photo.url === result.url)) return current;
+            if (current.photos.some((photo) => photo.url === url)) return current;
             const nextPhoto: WizardPhoto = {
-              url: result.url,
+              url,
               isMain: current.photos.length === 0,
             };
             return { ...current, photos: [...current.photos, nextPhoto] };
@@ -400,6 +419,29 @@ export default function CreateBusinessPage({
             : `${toFa(uploaded)} تصویر بهینه‌سازی و بارگذاری شد.`,
         );
       }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function uploadLicenseImage(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast("فقط تصویر مجاز است.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_BYTES) {
+      toast("حجم تصویر باید کمتر از ۱۵ مگابایت باشد.");
+      return;
+    }
+    setUploading(true);
+    try {
+      patch({ licenseImage: await uploadImageFile(file) });
+      toast("تصویر پروانه کسب بارگذاری شد.");
+    } catch (uploadError) {
+      toast(errorMessage(uploadError));
     } finally {
       setUploading(false);
     }
@@ -582,6 +624,7 @@ export default function CreateBusinessPage({
               rows={2}
               value={data.address}
               onChange={(event) => patch({ address: event.target.value })}
+              onBlur={(event) => patch({ address: normalizeAddress(event.target.value) })}
               placeholder="خیابان، کوچه، پلاک..."
               maxLength={255}
               className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
@@ -717,6 +760,12 @@ export default function CreateBusinessPage({
                 <span className="text-slate-700">{user.full_name || "ثبت نشده"}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-400">کد ملی</span>
+                <span className="text-slate-700" dir="ltr">
+                  {user.national_id || "ثبت نشده"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-400">شماره تماس</span>
                 <span className="text-slate-700" dir="ltr">
                   {formatPhone(user.phone)}
@@ -733,7 +782,7 @@ export default function CreateBusinessPage({
               rows={3}
               value={data.intro}
               onChange={(event) => patch({ intro: event.target.value.slice(0, MAX_INTRO) })}
-              placeholder="در یک جمله بگویید چه خدمتی ارائه می‌دهید."
+              placeholder="مثال: تخفیف ویژه شب یلدا…"
               maxLength={MAX_INTRO}
               className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
@@ -752,14 +801,29 @@ export default function CreateBusinessPage({
           </div>
 
           <div>
-            <FieldLabel hint="اختیاری">لینک اینستاگرام</FieldLabel>
-            <Input
-              value={data.instagram}
-              onChange={(event) => patch({ instagram: event.target.value })}
-              placeholder="https://instagram.com/yourpage"
-              dir="ltr"
-              inputMode="url"
-            />
+            <FieldLabel hint="اختیاری">آیدی اینستاگرام</FieldLabel>
+            <div className="relative">
+              <span
+                className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400"
+                dir="ltr"
+              >
+                @
+              </span>
+              <Input
+                value={data.instagram}
+                onChange={(event) => {
+                  const raw = event.target.value;
+                  patch({
+                    instagram: /instagram\.com/i.test(raw) ? instagramId(raw) : raw.replace(/^@/, ""),
+                  });
+                }}
+                onBlur={() => patch({ instagram: instagramId(data.instagram) })}
+                placeholder="nomax.ir"
+                dir="ltr"
+                maxLength={30}
+                className="pl-8"
+              />
+            </div>
           </div>
 
           <div>
@@ -774,19 +838,55 @@ export default function CreateBusinessPage({
             </label>
 
             {data.licenseEnabled && (
-              <div className="mt-2 space-y-3 rounded-xl border border-dashed border-slate-300 bg-white p-3.5 opacity-70">
+              <div className="mt-2 space-y-3 rounded-xl border border-dashed border-slate-300 bg-white p-3.5">
                 <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-700">
-                  این بخش به‌زودی فعال می‌شود؛ فعلاً نیازی به وارد کردن اطلاعات پروانه نیست.
+                  احراز هویت پروانه از طریق شاهکار به‌زودی فعال می‌شود؛ تا آن زمان اطلاعات توسط مدیر
+                  بررسی می‌شود.
                 </p>
                 <div>
-                  <FieldLabel>شماره / شناسه پروانه</FieldLabel>
-                  <Input disabled placeholder="شماره یا شناسه پروانه کسب" />
+                  <FieldLabel hint="الزامی">شماره / شناسه پروانه</FieldLabel>
+                  <Input
+                    value={data.licenseNumber}
+                    onChange={(event) => patch({ licenseNumber: event.target.value })}
+                    placeholder="شماره یا شناسه پروانه کسب"
+                    maxLength={80}
+                  />
                 </div>
                 <div>
-                  <FieldLabel>تصویر پروانه کسب</FieldLabel>
-                  <div className="flex h-20 items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 text-[11px] text-slate-400">
-                    بارگذاری تصویر به‌زودی
-                  </div>
+                  <FieldLabel hint="الزامی">تصویر پروانه کسب</FieldLabel>
+                  {data.licenseImage ? (
+                    <div className="relative overflow-hidden rounded-xl border border-slate-200">
+                      <img
+                        src={data.licenseImage}
+                        alt="تصویر پروانه کسب"
+                        className="h-28 w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        aria-label="حذف تصویر پروانه"
+                        onClick={() => patch({ licenseImage: "" })}
+                        className="absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-slate-900/65 text-sm text-white backdrop-blur hover:bg-rose-600"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={uploading}
+                      onClick={() => licenseFileRef.current?.click()}
+                      className="flex h-20 w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-[11px] text-slate-400 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 disabled:opacity-60"
+                    >
+                      {uploading ? <Spinner /> : "بارگذاری تصویر پروانه"}
+                    </button>
+                  )}
+                  <input
+                    ref={licenseFileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => void uploadLicenseImage(event)}
+                  />
                 </div>
               </div>
             )}
@@ -971,7 +1071,7 @@ export default function CreateBusinessPage({
             <PreviewRow label="اینستاگرام">
               {data.instagram ? (
                 <span className="break-all" dir="ltr">
-                  {data.instagram}
+                  @{instagramId(data.instagram)}
                 </span>
               ) : null}
             </PreviewRow>
@@ -1069,7 +1169,7 @@ export default function CreateBusinessPage({
         value={data.geo}
         onClose={() => setMapOpen(false)}
         onConfirm={(address, geo) => {
-          patch({ address: address || data.address, geo });
+          patch({ address: normalizeAddress(address || data.address), geo });
           setMapOpen(false);
         }}
       />

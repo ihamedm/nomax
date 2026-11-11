@@ -20,6 +20,7 @@ import { NeshanMap, type MapMarker } from "@/features/map/NeshanMap";
 import { ReviewSheet } from "@/features/reviews/ReviewSheet";
 import type { BusinessDetail } from "@/types";
 import { BusinessGallery } from "./detail/BusinessGallery";
+import { OwnerClaimSheet } from "./detail/OwnerClaimSheet";
 
 function PhoneIcon({ className }: { className?: string }) {
   return (
@@ -117,12 +118,17 @@ function maskPhone(phone: string) {
   return phone.length > 4 ? `${phone.slice(0, -4)}****` : "****";
 }
 
-type LoginPrompt = "review" | "save" | "phone" | "instagram";
+type LoginPrompt = "review" | "save" | "phone" | "instagram" | "claim";
 
 const LOGIN_PROMPTS: Record<LoginPrompt, { title: string; description: string }> = {
   save: {
     title: "ورود برای ذخیره کسب‌وکار",
     description: "برای ذخیره کسب‌وکار در حساب خود، ابتدا وارد شوید یا ثبت‌نام کنید.",
+  },
+  claim: {
+    title: "ورود برای ثبت مالکیت",
+    description:
+      "برای مشاهده شماره مالک و ثبت مالکیت این کسب‌وکار، ابتدا وارد شوید یا ثبت‌نام کنید.",
   },
   review: {
     title: "ورود برای ثبت نظر",
@@ -147,6 +153,7 @@ export function BusinessDetailPage() {
   const location = useLocation();
   const user = useAuth((state) => state.user);
   const ready = useAuth((state) => state.ready);
+  const setSession = useAuth((state) => state.setSession);
   const detailQuery = useApi<BusinessDetail>(
     ["business", slug],
     `/businesses/${encodeURIComponent(slug ?? "")}`,
@@ -157,6 +164,7 @@ export function BusinessDetailPage() {
   const error = detailQuery.error ? errorMessage(detailQuery.error) : null;
   const saved = Boolean(business?.is_saved);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [claimOpen, setClaimOpen] = useState(false);
   const [loginPrompt, setLoginPrompt] = useState<LoginPrompt | null>(null);
   const reviewIntentHandled = useRef(false);
 
@@ -230,6 +238,15 @@ export function BusinessDetailPage() {
       return;
     }
     saveMutation.mutate();
+  }
+
+  function requestClaim() {
+    if (!ready) return;
+    if (!user) {
+      setLoginPrompt("claim");
+      return;
+    }
+    setClaimOpen(true);
   }
 
   const mapMarkers = useMemo<MapMarker[]>(() => {
@@ -507,58 +524,70 @@ export function BusinessDetailPage() {
           </section>
 
           {business.owner && (
-            <section className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5">
-              <span
-                className={cn(
-                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base font-black",
-                  ownerVerified
-                    ? "bg-brand-50 text-brand-700"
-                    : "bg-amber-50 text-amber-600",
-                )}
-              >
-                {ownerVerified ? (
-                  Array.from(ownerName)[0] || "ن"
-                ) : (
-                  <WarningIcon className="h-5 w-5" />
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] text-slate-400">مالک کسب‌وکار</p>
-                {ownerVerified ? (
-                  <p className="mt-0.5 truncate text-sm font-bold text-slate-900">
-                    {ownerName}
-                  </p>
-                ) : (
-                  <p
-                    role="status"
-                    className="mt-0.5 flex items-center gap-1 text-sm font-bold text-amber-700"
-                  >
-                    <WarningIcon className="h-4 w-4 shrink-0" />
-                    <span className="truncate">مالک تایید هویت نشده</span>
-                  </p>
+            <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
+              <div className="flex items-center gap-3">
+                <span
+                  className={cn(
+                    "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base font-black",
+                    ownerVerified
+                      ? "bg-brand-50 text-brand-700"
+                      : "bg-amber-50 text-amber-600",
+                  )}
+                >
+                  {ownerVerified ? (
+                    Array.from(ownerName)[0] || "ن"
+                  ) : (
+                    <WarningIcon className="h-5 w-5" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] text-slate-400">مالک کسب‌وکار</p>
+                  {ownerVerified ? (
+                    <p className="mt-0.5 truncate text-sm font-bold text-slate-900">
+                      {ownerName}
+                    </p>
+                  ) : (
+                    <p
+                      role="status"
+                      className="mt-0.5 flex items-center gap-1 text-sm font-bold text-amber-700"
+                    >
+                      <WarningIcon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">مالک تایید هویت نشده</span>
+                    </p>
+                  )}
+                </div>
+                {ownerPhone && (
+                  user ? (
+                    <a
+                      href={telHref(ownerPhone) ?? undefined}
+                      aria-label={`تماس با ${ownerVerified ? ownerName : "مالک کسب‌وکار"}`}
+                      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
+                    >
+                      <PhoneIcon className="h-3.5 w-3.5" />
+                      <span dir="ltr">{formatPhone(ownerPhone)}</span>
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setLoginPrompt("phone")}
+                      aria-label="برای مشاهده شماره مالک وارد شوید"
+                      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
+                    >
+                      <PhoneIcon className="h-3.5 w-3.5" />
+                      <span dir="ltr">{formatPhone(visibleOwnerPhone ?? "")}</span>
+                    </button>
+                  )
                 )}
               </div>
-              {ownerPhone && (
-                user ? (
-                  <a
-                    href={telHref(ownerPhone) ?? undefined}
-                    aria-label={`تماس با ${ownerVerified ? ownerName : "مالک کسب‌وکار"}`}
-                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
-                  >
-                    <PhoneIcon className="h-3.5 w-3.5" />
-                    <span dir="ltr">{formatPhone(ownerPhone)}</span>
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setLoginPrompt("phone")}
-                    aria-label="برای مشاهده شماره مالک وارد شوید"
-                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-slate-50 px-3 text-[11px] font-bold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700"
-                  >
-                    <PhoneIcon className="h-3.5 w-3.5" />
-                    <span dir="ltr">{formatPhone(visibleOwnerPhone ?? "")}</span>
-                  </button>
-                )
+
+              {!ownerVerified && (
+                <button
+                  type="button"
+                  onClick={requestClaim}
+                  className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-bold text-amber-800 transition hover:bg-amber-100"
+                >
+                  من مالک این کسب‌وکار هستم
+                </button>
               )}
             </section>
           )}
@@ -710,6 +739,19 @@ export function BusinessDetailPage() {
             businessSlug={business.slug}
             onClose={() => setReviewOpen(false)}
             onSubmitted={() => {
+              void queryClient.invalidateQueries({ queryKey: ["business", slug] });
+            }}
+          />
+          <OwnerClaimSheet
+            open={claimOpen}
+            businessId={business.id}
+            ownerName={owner?.name}
+            ownerPhone={ownerPhone}
+            onClose={() => setClaimOpen(false)}
+            onClaimed={(result) => {
+              setSession(result.access, result.refresh, result.user);
+              setClaimOpen(false);
+              toast("مالکیت ثبت شد. حالا می‌توانید اطلاعات کسب‌وکار را مدیریت کنید.");
               void queryClient.invalidateQueries({ queryKey: ["business", slug] });
             }}
           />

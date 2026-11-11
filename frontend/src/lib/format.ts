@@ -16,6 +16,23 @@ export const ROLE_LABELS: Record<string, string> = {
   superadmin: "مدیر کل",
 };
 
+/** Cleans address punctuation and spacing so geocoders read it as one phrase. */
+export function normalizeAddress(value: string): string {
+  return value
+    .replace(/[يى]/g, "ی")
+    .replace(/ك/g, "ک")
+    .replace(/[،؛]/g, ",")
+    // A dot between words is a separator; only decimals keep it.
+    .replace(/\./g, (dot, offset: number, text: string) =>
+      /[0-9۰-۹٠-٩]/.test(text[offset - 1] ?? "") && /[0-9۰-۹٠-٩]/.test(text[offset + 1] ?? "")
+        ? dot
+        : ",",
+    )
+    .replace(/(?:\s*,\s*)+/g, ", ")
+    .replace(/\s+/g, " ")
+    .replace(/^[,\s]+|[,\s]+$/g, "");
+}
+
 /** 250 -> «۲۵۰ متر»، 1250 -> «۱٫۳ کیلومتر» */
 export function formatDistance(meters: number | null | undefined): string {
   if (meters === null || meters === undefined) return "";

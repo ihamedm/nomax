@@ -9,6 +9,7 @@ import { api, ApiError, errorMessage } from "@/lib/api";
 import { splitLoginTarget } from "@/lib/auth-redirect";
 import { normalizeDigits } from "@/lib/digits";
 import { fa } from "@/lib/format";
+import { isValidNationalId } from "@/lib/national-id";
 import { isLocal } from "@/lib/platform";
 import { isAdmin, useAuth } from "@/stores/auth";
 import type { LoginResult } from "@/types";
@@ -22,14 +23,6 @@ interface SheetError {
   title: string;
   message: string;
   checks: string[];
-}
-
-function validNationalId(nid: string): boolean {
-  if (!/^\d{10}$/.test(nid)) return false;
-  const digits = nid.split("").map(Number);
-  const sum = digits.slice(0, 9).reduce((acc, d, i) => acc + d * (10 - i), 0);
-  const remainder = sum % 11;
-  return digits[9] === (remainder < 2 ? remainder : 11 - remainder);
 }
 
 export function LoginPage() {
@@ -200,7 +193,7 @@ export function LoginPage() {
       toast("نام و نام خانوادگی را کامل وارد کنید.");
       return;
     }
-    if (!validNationalId(nationalId)) {
+    if (!isValidNationalId(nationalId)) {
       toast("کد ملی واردشده معتبر نیست.");
       return;
     }

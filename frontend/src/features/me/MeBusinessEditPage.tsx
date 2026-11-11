@@ -102,6 +102,8 @@ export default function MeBusinessEditPage() {
     shopPhone: business.phone_business ?? "",
     instagram: business.instagram ?? "",
     licenseEnabled: false,
+    licenseNumber: "",
+    licenseImage: "",
     standardTags: tags.filter((tag) => standard.has(tag)),
     customTags: tags.filter((tag) => !standard.has(tag)),
   };

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { isNumericInput, normalizeDigits, toEn, toFa } from "@/lib/digits";
-import { formatDistance, formatPhone, fa } from "@/lib/format";
+import { formatDistance, formatPhone, fa, normalizeAddress } from "@/lib/format";
 import { formatJalali } from "@/lib/jalali";
+import { isValidNationalId } from "@/lib/national-id";
 
 describe("digits", () => {
   it("converts to Persian and back", () => {
@@ -20,6 +21,22 @@ describe("format", () => {
     expect(fa(7)).toBe("۷");
     expect(formatDistance(250)).toContain("۲۵۰");
     expect(formatDistance(null)).toBe("");
+  });
+
+  it("normalizes address punctuation", () => {
+    expect(normalizeAddress(" بهبهان،خیابان امام.کوچه ۲ ")).toBe("بهبهان, خیابان امام, کوچه ۲");
+    expect(normalizeAddress("بهبهان ، ، خیابان ,, امام")).toBe("بهبهان, خیابان, امام");
+    expect(normalizeAddress("كوي ۱۲.۵")).toBe("کوی ۱۲.۵");
+    expect(normalizeAddress("")).toBe("");
+  });
+});
+
+describe("national id", () => {
+  it("checks the national ID checksum", () => {
+    expect(isValidNationalId("5411111110")).toBe(true);
+    expect(isValidNationalId("5411111111")).toBe(false);
+    expect(isValidNationalId("1234567890")).toBe(false);
+    expect(isValidNationalId("12345")).toBe(false);
   });
 });
 

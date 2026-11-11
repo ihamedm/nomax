@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Spinner } from "@/components/ui/button";
 import { SearchIcon } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { normalizeAddress } from "@/lib/format";
 import { NeshanMap } from "@/features/map/NeshanMap";
 import type { Coordinates } from "@/types";
 
@@ -97,19 +98,25 @@ export function MapPickerSheet({
   const [searching, setSearching] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastSearched = useRef("");
+  const searchSeq = useRef(0);
 
   const search = useCallback(async (term: string) => {
-    const text = term.trim();
+    const text = normalizeAddress(term);
     if (text.length < 3) {
       setError("برای جستجو حداقل ۳ نویسه از آدرس را وارد کنید.");
       return;
     }
+    // Only the newest request may move the map while the owner keeps typing.
+    const request = ++searchSeq.current;
+    lastSearched.current = text;
     setSearching(true);
     setError(null);
     try {
       const data = await api<{ items: GeocodeResult[] }>(
         `/geo/search?q=${encodeURIComponent(text)}`,
       );
+      if (request !== searchSeq.current) return;
       setResults(data.items);
       if (data.items.length === 0) {
         setError("آدرسی با این متن پیدا نشد. عبارت دیگری امتحان کنید.");
@@ -122,25 +129,25 @@ export function MapPickerSheet({
       setResolvedAddress(first.display_name);
       setNearLabel(`نزدیک ${shortAddress(first.display_name)}`);
     } catch (searchError) {
-      setError(errorMessage(searchError));
+      if (request === searchSeq.current) setError(errorMessage(searchError));
     } finally {
-      setSearching(false);
+      if (request === searchSeq.current) setSearching(false);
     }
   }, []);
 
   useEffect(() => {
     if (!open) return;
-    setQuery(address);
+    const initialAddress = normalizeAddress(address);
+    setQuery(initialAddress);
     setMarker(value);
     setCenter(value ?? BEHBAHAN_CENTER);
     setZoom(value ? 16 : 15);
     setResults([]);
     setError(null);
-    setResolvedAddress(address.trim());
-    setNearLabel(
-      address.trim() ? `نزدیک ${shortAddress(address)}` : locationLabel,
-    );
-    if (!value && address.trim().length >= 3) void search(address);
+    setResolvedAddress(initialAddress);
+    setNearLabel(initialAddress ? `نزدیک ${shortAddress(initialAddress)}` : locationLabel);
+    lastSearched.current = initialAddress;
+    if (!value && initialAddress.length >= 3) void search(initialAddress);
     // Only re-initialise when the sheet opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -153,6 +160,17 @@ export function MapPickerSheet({
       document.body.style.overflow = previous;
     };
   }, [open]);
+
+  // Search as the owner types, so the pin follows the address without a tap.
+  useEffect(() => {
+    if (!open) return;
+    const term = normalizeAddress(query);
+    if (term.length < 3 || term === lastSearched.current) return;
+    const timer = window.setTimeout(() => {
+      if (term !== lastSearched.current) void search(term);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [open, query, search]);
 
   // Keep the address line in sync with the pin, like a map application.
   useEffect(() => {
@@ -180,7 +198,8 @@ export function MapPickerSheet({
     setMarker({ lat: result.lat, lng: result.lng });
     setCenter({ lat: result.lat, lng: result.lng });
     setZoom(16);
-    setQuery(result.display_name);
+    setQuery(normalizeAddress(result.display_name));
+    lastSearched.current = normalizeAddress(result.display_name);
     setResolvedAddress(result.display_name);
     setNearLabel(`نزدیک ${shortAddress(result.display_name)}`);
   }
@@ -209,7 +228,9 @@ export function MapPickerSheet({
     }
     setConfirming(true);
     // Preserve what the owner typed; reverse geocoding is only a fallback.
-    const finalAddress = query.trim() || resolvedAddress.trim() || address;
+    const finalAddress = normalizeAddress(
+      query.trim() || resolvedAddress.trim() || address,
+    );
     onConfirm(finalAddress, marker);
     setConfirming(false);
   }
@@ -273,6 +294,7 @@ export function MapPickerSheet({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onBlur={() => setQuery(normalizeAddress(query))}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -289,6 +311,7 @@ export function MapPickerSheet({
                 setQuery("");
                 setResults([]);
                 setError(null);
+                lastSearched.current = "";
               }}
               aria-label="پاک کردن جستجو"
               className="absolute left-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-slate-200 text-sm text-slate-500"

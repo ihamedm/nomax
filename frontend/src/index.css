@@ -128,36 +128,10 @@
 }
 
 .nomax-map-pin--picker {
-  position: relative;
-  width: 44px;
-  height: 44px;
-  background: #12b886;
-  border: 4px solid #ffffff;
-  box-shadow: 0 10px 24px rgb(15 23 42 / 0.28);
-}
-
-.nomax-map-pin--picker::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 9999px;
-  background: #ffffff;
-}
-
-.nomax-map-pin--picker::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: calc(100% - 1px);
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-top: 12px solid #12b886;
+  display: block;
+  width: 40px;
+  height: 40px;
+  filter: drop-shadow(0 4px 8px rgb(15 23 42 / 0.28));
 }
 
 .nomax-picker-map .leaflet-control-zoom {
@@ -424,9 +398,6 @@ html.dark {
 }
 .dark .nomax-map-pin {
   border-color: #e2e8f0;
-}
-.dark .nomax-map-pin--picker {
-  border-color: #ffffff;
 }
 
 /* Component-specific overrides must come after the neutral mappings above. */

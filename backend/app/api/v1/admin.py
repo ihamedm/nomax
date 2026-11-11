@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import Optional
 from uuid import UUID
@@ -140,7 +141,39 @@ def _admin_business_payload(business, owner: User | None = None) -> dict:
         ),
         "created_at": business.created_at.isoformat() if business.created_at else None,
         "updated_at": business.updated_at.isoformat() if business.updated_at else None,
+        "deleted_at": business.deleted_at.isoformat() if business.deleted_at else None,
     }
+
+
+async def _admin_business_detail_payload(session: AsyncSession, business, owner: User | None = None) -> dict:
+    """Business payload plus gallery and tags, used by the add/edit wizard."""
+    from app.api.v1.businesses import _business_images_payload
+    from app.models.tag import BusinessTag, Tag
+
+    data = _admin_business_payload(business, owner)
+    data["images"] = await _business_images_payload(session, business)
+    data["tags"] = list(
+        (
+            await session.execute(
+                select(Tag.name)
+                .join(BusinessTag, BusinessTag.tag_id == Tag.id)
+                .where(BusinessTag.business_id == business.id)
+                .order_by(Tag.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return data
+
+
+def _require_any_permission(*codes: str):
+    async def _require(actor: User = Depends(get_current_user)) -> User:
+        if not any(has_permission(actor, code) for code in codes):
+            raise AppError("forbidden", "permission_denied", 403, {"permissions": list(codes)})
+        return actor
+
+    return _require
 
 
 async def _get_admin_business(session: AsyncSession, business_id: str):
@@ -167,6 +200,7 @@ async def list_admin_businesses(
     q: Optional[str] = None,
     category_id: Optional[int] = None,
     owner_id: Optional[str] = None,
+    trash: bool = False,
     page: int = 1,
     per_page: int = 20,
     actor: User = Depends(require_permissions("business.read")),
@@ -177,7 +211,7 @@ async def list_admin_businesses(
 
     page = max(1, page)
     per_page = min(100, max(1, per_page))
-    conditions = [Business.deleted_at.is_(None)]
+    conditions = [Business.deleted_at.is_not(None) if trash else Business.deleted_at.is_(None)]
     if status:
         conditions.append(Business.status == status)
     if category_id:
@@ -220,24 +254,74 @@ async def create_admin_business(
     actor: User = Depends(require_permissions("business.create")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
+    from app.api.v1.businesses import (
+        _assign_tags,
+        _clean_tags,
+        _replace_business_images,
+        _resolve_business_images,
+    )
     from app.models.business import Business, BusinessStatus
-    from app.models.category import Category
+    from app.models.category import Category, Subcategory
 
     name = (payload.get("name") or "").strip()
     address = (payload.get("address") or "").strip()
     if not name or payload.get("category_id") is None or not address:
         raise AppError("validation_error", "name_address_category_required", 422)
-    if not payload.get("owner_phone"):
-        raise AppError("validation_error", "owner_phone_required", 422)
-    owner_phone = security.normalize_phone(payload["owner_phone"])
-    owner = (
-        await session.execute(select(User).where(User.phone == owner_phone))
-    ).scalars().first()
+
+    if payload.get("owner_id"):
+        try:
+            owner_id = UUID(str(payload["owner_id"]))
+        except ValueError:
+            raise AppError("validation_error", "invalid_owner_id", 422)
+        owner = await session.get(User, owner_id)
+    elif payload.get("owner_phone"):
+        owner_phone = security.normalize_phone(payload["owner_phone"])
+        owner = (
+            await session.execute(select(User).where(User.phone == owner_phone))
+        ).scalars().first()
+    else:
+        raise AppError("validation_error", "owner_required", 422)
     if owner is None or owner.deleted_at is not None:
         raise AppError("not_found", "owner_not_found", 404)
+    if owner.role == UserRole.CUSTOMER:
+        owner.role = UserRole.OWNER
+
     category = await session.get(Category, payload["category_id"])
     if category is None or category.deleted_at is not None:
         raise AppError("not_found", "category_not_found", 404)
+    subcategory_id = payload.get("subcategory_id")
+    subcategory: Subcategory | None = None
+    if subcategory_id is not None:
+        subcategory = await session.get(Subcategory, subcategory_id)
+        if subcategory is None:
+            raise AppError("not_found", "subcategory_not_found", 404)
+        if subcategory.category_id != category.id:
+            raise AppError("validation_error", "subcategory_category_mismatch", 422)
+
+    geo_lat = payload.get("geo_lat")
+    geo_lng = payload.get("geo_lng")
+    if (geo_lat is None) != (geo_lng is None):
+        raise AppError("validation_error", "lat_and_lng_required_together", 422)
+    if geo_lat is not None:
+        try:
+            geo_lat = float(geo_lat)
+            geo_lng = float(geo_lng)
+        except (TypeError, ValueError):
+            raise AppError("validation_error", "invalid_coordinates", 422)
+        if not (-90 <= geo_lat <= 90 and -180 <= geo_lng <= 180):
+            raise AppError("validation_error", "invalid_coordinates", 422)
+
+    phone_business = (payload.get("phone_business") or "").strip() or None
+    if phone_business and not re.fullmatch(r"0\d{10}", phone_business):
+        raise AppError("validation_error", "invalid_phone_business", 422)
+
+    instagram = (payload.get("instagram") or "").strip() or None
+    if instagram and len(instagram) > 100:
+        raise AppError("validation_error", "instagram_too_long", 422)
+
+    images, profile_image_url = _resolve_business_images(payload)
+    tags = _clean_tags(payload.get("tags"))
+
     status_value = payload.get("status") or BusinessStatus.PENDING.value
     if status_value not in [item.value for item in BusinessStatus]:
         raise AppError("validation_error", "invalid_status", 422)
@@ -245,22 +329,35 @@ async def create_admin_business(
     slug_base = "".join(ch if ch.isalnum() else "-" for ch in name.lower()).strip("-") or "business"
     business = Business(
         owner_id=owner.id,
-        category_id=payload["category_id"],
-        subcategory_id=payload.get("subcategory_id"),
+        category_id=category.id,
+        subcategory_id=subcategory_id,
         name=name,
         slug=f"{slug_base}-{uuid.uuid4().hex[:6]}",
         short_description=(payload.get("short_description") or "")[:120],
         description=payload.get("description"),
-        phone_business=payload.get("phone_business"),
+        phone_business=phone_business,
         address=address,
-        geo_lat=payload.get("geo_lat"),
-        geo_lng=payload.get("geo_lng"),
-        instagram=payload.get("instagram"),
+        geo_lat=geo_lat,
+        geo_lng=geo_lng,
+        instagram=instagram,
         is_24h=bool(payload.get("is_24h", False)),
+        is_verified=bool(payload.get("is_verified", False)),
+        profile_image_url=profile_image_url,
+        rejection_reason=(payload.get("rejection_reason") or None) if status_value == "rejected" else None,
         status=BusinessStatus(status_value),
     )
     session.add(business)
     await session.flush()
+
+    if images:
+        await _replace_business_images(session, business.id, images)
+    if tags:
+        await _assign_tags(
+            session,
+            business.id,
+            tags,
+            standard_names=set(subcategory.standard_tags or []) if subcategory else set(),
+        )
     await _write_audit(
         session,
         actor_id=actor.id,
@@ -272,19 +369,107 @@ async def create_admin_business(
     )
     await session.commit()
     await session.refresh(business)
-    return {"data": _admin_business_payload(business, owner)}
+    return {"data": await _admin_business_detail_payload(session, business, owner)}
+
+
+@router.get("/businesses/owners")
+async def search_business_owners(
+    q: Optional[str] = Query(None, max_length=120),
+    limit: int = Query(20, ge=1, le=50),
+    actor: User = Depends(_require_any_permission("business.read", "business.create", "business.update")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Owners/customers an operator can assign as a business owner."""
+    del actor
+    conditions = [
+        User.deleted_at.is_(None),
+        User.role.in_([UserRole.CUSTOMER, UserRole.OWNER]),
+    ]
+    term = (q or "").strip()
+    if term:
+        clauses = [User.full_name.ilike(f"%{term}%")]
+        digits = "".join(ch for ch in term if ch.isdigit())
+        if digits.startswith("98") and len(digits) > 10:
+            digits = digits[2:]
+        digits = digits.lstrip("0")
+        if digits:
+            clauses.append(User.phone.ilike(f"%{digits}%"))
+        conditions.append(or_(*clauses))
+    rows = (
+        await session.execute(
+            select(User).where(*conditions).order_by(User.created_at.desc()).limit(limit)
+        )
+    ).scalars().all()
+    return {
+        "data": {
+            "items": [
+                {
+                    "id": str(user.id),
+                    "phone": user.phone,
+                    "full_name": user.full_name,
+                    "role": user.role.value,
+                    "is_verified": user.is_verified,
+                }
+                for user in rows
+            ]
+        }
+    }
+
+
+@router.post("/businesses/owners")
+async def create_business_owner(
+    payload: dict,
+    request: Request,
+    actor: User = Depends(require_permissions("business.create")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Create an owner inline from the business form."""
+    phone = security.normalize_phone(payload.get("phone") or "")
+    existing = (await session.execute(select(User).where(User.phone == phone))).scalars().first()
+    if existing is not None:
+        raise AppError("conflict", "user_already_exists", 409, {"phone": phone})
+    national_id = await _validate_national_id(session, payload.get("national_id"))
+    full_name = _clean_text(payload.get("full_name"))
+    owner = User(
+        phone=phone,
+        national_id=national_id,
+        full_name=full_name[:120] if full_name else None,
+        role=UserRole.OWNER,
+    )
+    session.add(owner)
+    await session.flush()
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.owner.created",
+        entity_type="user",
+        entity_id=str(owner.id),
+        after={"phone": owner.phone, "full_name": owner.full_name},
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(owner)
+    return {
+        "data": {
+            "id": str(owner.id),
+            "phone": owner.phone,
+            "full_name": owner.full_name,
+            "role": owner.role.value,
+            "is_verified": owner.is_verified,
+        }
+    }
 
 
 @router.get("/businesses/{business_id}")
 async def get_admin_business(
     business_id: str,
-    actor: User = Depends(require_permissions("business.read")),
+    actor: User = Depends(_require_any_permission("business.read", "business.update")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     del actor
     business = await _get_admin_business(session, business_id)
     owner = await session.get(User, business.owner_id)
-    return {"data": _admin_business_payload(business, owner)}
+    return {"data": await _admin_business_detail_payload(session, business, owner)}
 
 
 @router.patch("/businesses/{business_id}")
@@ -295,35 +480,122 @@ async def update_admin_business(
     actor: User = Depends(require_permissions("business.update")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
+    from app.api.v1.businesses import (
+        _assign_tags,
+        _clean_tags,
+        _replace_business_images,
+        _resolve_business_images,
+    )
     from app.models.business import BusinessStatus
+    from app.models.category import Category, Subcategory
 
     business = await _get_admin_business(session, business_id)
+    before = {
+        "status": business.status.value,
+        "name": business.name,
+        "owner_id": str(business.owner_id),
+    }
+    previous_status = business.status
+
+    if "owner_id" in payload:
+        try:
+            owner_id = UUID(str(payload["owner_id"]))
+        except ValueError:
+            raise AppError("validation_error", "invalid_owner_id", 422)
+        new_owner = await session.get(User, owner_id)
+        if new_owner is None or new_owner.deleted_at is not None:
+            raise AppError("not_found", "owner_not_found", 404)
+        if new_owner.role == UserRole.CUSTOMER:
+            new_owner.role = UserRole.OWNER
+        business.owner_id = new_owner.id
+
+    new_category_id = payload.get("category_id", business.category_id)
+    category = await session.get(Category, new_category_id)
+    if category is None or category.deleted_at is not None:
+        raise AppError("not_found", "category_not_found", 404)
+    if "subcategory_id" in payload:
+        new_subcategory_id = payload["subcategory_id"]
+    elif "category_id" in payload:
+        new_subcategory_id = None
+    else:
+        new_subcategory_id = business.subcategory_id
+    subcategory: Subcategory | None = None
+    if new_subcategory_id is not None:
+        subcategory = await session.get(Subcategory, new_subcategory_id)
+        if subcategory is None:
+            raise AppError("not_found", "subcategory_not_found", 404)
+        if subcategory.category_id != category.id:
+            raise AppError("validation_error", "subcategory_category_mismatch", 422)
+    business.category_id = category.id
+    business.subcategory_id = new_subcategory_id
+
     editable = (
         "name",
         "short_description",
         "description",
         "phone_business",
         "address",
-        "geo_lat",
-        "geo_lng",
         "instagram",
         "is_24h",
         "is_verified",
-        "category_id",
-        "subcategory_id",
-        "rejection_reason",
     )
-    before = {"status": business.status.value, "name": business.name}
-    previous_status = business.status
     for field in editable:
         if field in payload:
             setattr(business, field, payload[field])
+
+    geo_lat = payload.get("geo_lat", business.geo_lat)
+    geo_lng = payload.get("geo_lng", business.geo_lng)
+    if (geo_lat is None) != (geo_lng is None):
+        raise AppError("validation_error", "lat_and_lng_required_together", 422)
+    if geo_lat is not None:
+        try:
+            geo_lat = float(geo_lat)
+            geo_lng = float(geo_lng)
+        except (TypeError, ValueError):
+            raise AppError("validation_error", "invalid_coordinates", 422)
+        if not (-90 <= geo_lat <= 90 and -180 <= geo_lng <= 180):
+            raise AppError("validation_error", "invalid_coordinates", 422)
+    business.geo_lat = geo_lat
+    business.geo_lng = geo_lng
+
+    if "phone_business" in payload:
+        phone_business = (payload.get("phone_business") or "").strip() or None
+        if phone_business and not re.fullmatch(r"0\d{10}", phone_business):
+            raise AppError("validation_error", "invalid_phone_business", 422)
+        business.phone_business = phone_business
+
+    if "instagram" in payload:
+        instagram = (payload.get("instagram") or "").strip() or None
+        if instagram and len(instagram) > 100:
+            raise AppError("validation_error", "instagram_too_long", 422)
+        business.instagram = instagram
+
+    images, profile_image_url = _resolve_business_images(payload)
+    images_changed = "images" in payload or "profile_image_url" in payload
+    if not images_changed:
+        profile_image_url = business.profile_image_url
+    business.profile_image_url = profile_image_url
+    tags = _clean_tags(payload.get("tags")) if "tags" in payload else None
+
+    if "rejection_reason" in payload:
+        business.rejection_reason = (payload.get("rejection_reason") or "").strip() or None
     if "status" in payload:
         if payload["status"] not in [item.value for item in BusinessStatus]:
             raise AppError("validation_error", "invalid_status", 422)
         business.status = BusinessStatus(payload["status"])
         if business.status != BusinessStatus.REJECTED and "rejection_reason" not in payload:
             business.rejection_reason = None
+
+    if images_changed:
+        await _replace_business_images(session, business.id, images)
+    if tags is not None:
+        await _assign_tags(
+            session,
+            business.id,
+            tags,
+            standard_names=set(subcategory.standard_tags or []) if subcategory else set(),
+        )
+
     if business.status != previous_status:
         if business.status == BusinessStatus.REJECTED:
             await notify_business_rejected(
@@ -356,7 +628,7 @@ async def update_admin_business(
     await session.commit()
     await session.refresh(business)
     owner = await session.get(User, business.owner_id)
-    return {"data": _admin_business_payload(business, owner)}
+    return {"data": await _admin_business_detail_payload(session, business, owner)}
 
 
 @router.delete("/businesses/{business_id}")
@@ -366,6 +638,7 @@ async def delete_admin_business(
     actor: User = Depends(require_permissions("business.delete")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
+    """Soft-delete a business (move to trash)."""
     from datetime import datetime, timezone
 
     business = await _get_admin_business(session, business_id)
@@ -381,6 +654,128 @@ async def delete_admin_business(
     )
     await session.commit()
     return {"data": {"id": str(business.id), "deleted": True}}
+
+
+@router.post("/businesses/{business_id}/restore")
+async def restore_admin_business(
+    business_id: str,
+    request: Request,
+    actor: User = Depends(require_permissions("business.delete")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Restore a soft-deleted business from trash."""
+    try:
+        bid = UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    from app.models.business import Business
+
+    business = await session.get(Business, bid)
+    if business is None or business.deleted_at is None:
+        raise AppError("not_found", "business_not_found", 404)
+
+    business.deleted_at = None
+    await map_cache.enqueue_refresh(session)
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.business.restored",
+        entity_type="business",
+        entity_id=str(business_id),
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(business)
+    owner = await session.get(User, business.owner_id)
+    return {"data": await _admin_business_detail_payload(session, business, owner)}
+
+
+@router.delete("/businesses/{business_id}/permanent")
+async def delete_admin_business_permanently(
+    business_id: str,
+    request: Request,
+    actor: User = Depends(require_permissions("business.delete")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Hard-delete a trashed business from the database.
+
+    Checks for related data (reviews, offers, licenses) and blocks deletion
+    until those are removed first, so data is not orphaned.
+    """
+    try:
+        bid = UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    from app.models.business import Business, BusinessImage
+    from app.models.review import Review
+    from app.models.license import License
+    from app.models.quote import Offer
+    from app.models.tag import BusinessTag
+    from app.models.bookmark import Bookmark
+    from app.models.analytics import QuoteDelivery
+
+    business = await session.get(Business, bid)
+    if business is None or business.deleted_at is None:
+        raise AppError("not_found", "business_not_found", 404)
+
+    related: list[tuple[str, str, int]] = []
+
+    reviews = await session.scalar(
+        select(func.count()).select_from(Review).where(
+            Review.business_id == bid, Review.deleted_at.is_(None)
+        )
+    )
+    if reviews:
+        related.append(("reviews", "نظر", reviews))
+
+    offers = await session.scalar(
+        select(func.count()).select_from(Offer).where(
+            Offer.business_id == bid, Offer.deleted_at.is_(None)
+        )
+    )
+    if offers:
+        related.append(("offers", "پیشنهاد قیمت", offers))
+
+    license_row = await session.scalar(
+        select(func.count()).select_from(License).where(
+            License.business_id == bid, License.deleted_at.is_(None)
+        )
+    )
+    if license_row:
+        related.append(("licenses", "مجوز", license_row))
+
+    if related:
+        summary = "، ".join(f"{label} ({count})" for _, label, count in related)
+        raise AppError(
+            "business_has_relations",
+            f"این کسب‌وکار {summary} دارد. ابتدا آن‌ها را حذف کنید.",
+            409,
+            {"related": [{"type": t, "count": c} for t, _, c in related]},
+        )
+
+    # Child rows follow ON DELETE CASCADE, but the test database does not
+    # enforce foreign keys; delete them explicitly so no rows are orphaned.
+    await session.execute(delete(BusinessImage).where(BusinessImage.business_id == bid))
+    await session.execute(delete(BusinessTag).where(BusinessTag.business_id == bid))
+    await session.execute(delete(Bookmark).where(Bookmark.business_id == bid))
+    await session.execute(delete(QuoteDelivery).where(QuoteDelivery.business_id == bid))
+    await session.execute(delete(License).where(License.business_id == bid))
+    await session.execute(delete(Review).where(Review.business_id == bid))
+    await session.execute(delete(Offer).where(Offer.business_id == bid))
+
+    await map_cache.enqueue_refresh(session)
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.business.permanently_deleted",
+        entity_type="business",
+        entity_id=str(business_id),
+        before={"name": business.name, "slug": business.slug},
+        ip=request.client.host if request.client else None,
+    )
+    await session.delete(business)
+    await session.commit()
+    return {"data": {"id": str(business_id), "deleted": True, "permanent": True}}
 
 
 @router.patch("/businesses/{business_id}/verify-license")
@@ -656,6 +1051,47 @@ async def dashboard(
             can_review=is_super or has_permission(actor, "review.read"),
             can_quote=is_super or has_permission(actor, "quote.read"),
         )
+    }
+
+
+@router.get("/attention")
+async def attention_counts(
+    actor: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Pending work the viewer can action, for the admin header badge."""
+    from app.models.business import Business
+    from app.models.review import Review
+
+    is_super = actor.role == UserRole.SUPERADMIN
+    businesses = 0
+    reviews = 0
+    if is_super or has_permission(actor, "business.read"):
+        businesses = int(
+            (
+                await session.execute(
+                    select(func.count(Business.id)).where(
+                        Business.deleted_at.is_(None), Business.status == "pending"
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+    if is_super or has_permission(actor, "review.read"):
+        reviews = int(
+            (
+                await session.execute(
+                    select(func.count(Review.id)).where(
+                        Review.deleted_at.is_(None),
+                        Review.is_private.is_(False),
+                        Review.status == "pending",
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+    return {
+        "data": {"businesses": businesses, "reviews": reviews, "total": businesses + reviews}
     }
 
 

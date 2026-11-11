@@ -6,7 +6,8 @@ import { RoleBadge } from "@/components/ui/badge";
 import { Icon, MoonIcon, SunIcon } from "@/components/ui/icons";
 import { loginPath, returnPath } from "@/lib/auth-redirect";
 import { cn } from "@/lib/cn";
-import { formatPhone, ROLE_LABELS } from "@/lib/format";
+import { fa, formatPhone, ROLE_LABELS } from "@/lib/format";
+import { useApi } from "@/lib/query";
 import { isAdmin, useAuth } from "@/stores/auth";
 import { useTheme } from "@/stores/theme";
 
@@ -38,6 +39,16 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const attention = useApi<{ businesses: number; reviews: number; total: number }>(
+    ["admin", "attention"],
+    "/admin/attention",
+    {
+      enabled: ready && Boolean(user) && isAdmin(user),
+      refetchInterval: 60_000,
+      staleTime: 30_000,
+    },
+  );
+  const attentionCount = attention.data?.total ?? 0;
 
   useEffect(() => {
     setNavOpen(false);
@@ -176,6 +187,30 @@ export function AdminLayout() {
               خروج
             </Button>
             <span className="mx-1 hidden h-6 w-px bg-slate-200 lg:block" aria-hidden />
+            <Link
+              to="/admin"
+              title={
+                attentionCount > 0
+                  ? `${fa(attentionCount)} کار در انتظار بررسی`
+                  : "کارهای در انتظار بررسی"
+              }
+              aria-label={
+                attentionCount > 0
+                  ? `${fa(attentionCount)} کار در انتظار بررسی`
+                  : "کارهای در انتظار بررسی"
+              }
+              className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+            >
+              <Icon className="h-4 w-4">
+                <circle cx="12" cy="8" r="3.5" />
+                <path d="M5 20a7 7 0 0 1 14 0" />
+              </Icon>
+              {attentionCount > 0 && (
+                <span className="absolute -left-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-bold leading-none text-white">
+                  {attentionCount > 99 ? "۹۹+" : fa(attentionCount)}
+                </span>
+              )}
+            </Link>
             <div className="hidden text-xs font-bold text-slate-800 lg:block">
               <p className="max-w-40 truncate">{user.full_name || formatPhone(user.phone)}</p>
             </div>

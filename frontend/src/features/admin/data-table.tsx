@@ -10,6 +10,8 @@ export interface DataColumn<T> {
   header: string;
   className?: string;
   sortable?: boolean;
+  /** Omit from the mobile card; the row's detail sheet shows the full record. */
+  mobileHidden?: boolean;
   cell: (row: T) => ReactNode;
 }
 
@@ -74,7 +76,7 @@ export function DataTable<T>({
           <div className="divide-y divide-slate-100 md:hidden">
             {rows.map((row) => (
               <div key={rowKey(row)} className="space-y-1.5 px-3 py-3">
-                {columns.map((column) => (
+                {columns.filter((column) => !column.mobileHidden).map((column) => (
                   <div
                     key={column.key}
                     className="flex items-start justify-between gap-3 text-sm"
