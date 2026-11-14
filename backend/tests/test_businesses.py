@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.db.seed import seed_categories
 from app.models.business import Business, BusinessStatus
 from app.models.category import Category, Subcategory
+from app.models.tag import BusinessTag, Tag
 
 BEHBAHAN = {"lat": 30.6380, "lng": 50.8380}
 
@@ -362,3 +363,34 @@ async def test_search_validation(client):
 
     response = await client.get("/api/v1/businesses", params={"sort": "bogus"})
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_search_matches_title_description_tags_and_owner(
+    client, db_session, create_user, catalog
+):
+    owner = await create_user("09129998877", full_name="مریم احمدی")
+    automotive = catalog["categories"]["automotive"]
+    business = await make_business(
+        db_session, owner.id, automotive, slug="search-shop", name="تعمیرگاه آفتاب"
+    )
+    business.description = "تخصص در گاز مایع"
+    business.phone_business = "06133445566"
+    tag = Tag(name="خدمات نایاب")
+    db_session.add(tag)
+    await db_session.flush()
+    db_session.add(BusinessTag(business_id=business.id, tag_id=tag.id))
+    await db_session.commit()
+
+    async def found(term: str) -> list[str]:
+        response = await client.get("/api/v1/businesses", params={"q": term})
+        assert response.status_code == 200
+        return [item["slug"] for item in _items(response)]
+
+    assert await found("آفتاب") == ["search-shop"]  # title
+    assert await found("گاز مایع") == ["search-shop"]  # description
+    assert await found("نایاب") == ["search-shop"]  # tag
+    assert await found("مریم") == ["search-shop"]  # owner name
+    assert await found("98877") == ["search-shop"]  # owner phone
+    assert await found("33445566") == ["search-shop"]  # business phone
+    assert await found("ناموجود") == []

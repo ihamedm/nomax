@@ -19,10 +19,16 @@ function statusMeta(review: OwnerReview) {
   if (review.is_private) {
     return { label: "خصوصی — فقط شما", tone: "sky" as const };
   }
-  if (review.status === "approved") {
-    return { label: "تأییدشده و منتشرشده", tone: "brand" as const };
+  if (review.status === "awaiting_owner") {
+    return { label: "منتظر تصمیم شما", tone: "amber" as const };
   }
-  return { label: "در انتظار تأیید", tone: "amber" as const };
+  if (review.status === "approved") {
+    return { label: "منتشرشده", tone: "brand" as const };
+  }
+  if (review.status === "declined") {
+    return { label: "ردشده توسط شما", tone: "rose" as const };
+  }
+  return { label: "در انتظار بررسی", tone: "amber" as const };
 }
 
 function OwnerReviewCard({ review }: { review: OwnerReview }) {
@@ -45,8 +51,7 @@ function OwnerReviewCard({ review }: { review: OwnerReview }) {
     onSuccess: async (_data, next) => {
       toast(next === "approved" ? "نظر تأیید و منتشر شد." : "نظر رد شد.");
       await invalidate();
-    },
-    onError: (error) => toast(errorMessage(error)),
+    },    onError: (error) => toast(errorMessage(error)),
   });
 
   const submitReply = useMutation({
@@ -93,9 +98,9 @@ function OwnerReviewCard({ review }: { review: OwnerReview }) {
         <p className="mt-3 rounded-xl bg-sky-50 px-3 py-2 text-[11px] leading-5 text-sky-700">
           این نظر خصوصی است، در صفحه عمومی نمایش داده نمی‌شود و نیازی به تأیید مدیر ندارد.
         </p>
-      ) : review.status === "pending" ? (
+      ) : review.status === "awaiting_owner" ? (
         <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-800">
-          این نظر پس از تأیید شما یا مدیر در صفحه عمومی کسب‌وکار نمایش داده می‌شود.
+          مدیر این نظر را تأیید کرده است. با تأیید شما در صفحه عمومی کسب‌وکار نمایش داده می‌شود.
         </p>
       ) : null}
 
@@ -137,24 +142,24 @@ function OwnerReviewCard({ review }: { review: OwnerReview }) {
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
         <div className="flex gap-2">
-          {!review.is_private && review.status !== "approved" && (
-            <Button
-              size="sm"
-              loading={moderate.isPending}
-              onClick={() => moderate.mutate("approved")}
-            >
-              تأیید نظر
-            </Button>
-          )}
-          {!review.is_private && review.status !== "rejected" && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={moderate.isPending}
-              onClick={() => moderate.mutate("rejected")}
-            >
-              رد نظر
-            </Button>
+          {review.status === "awaiting_owner" && (
+            <>
+              <Button
+                size="sm"
+                loading={moderate.isPending}
+                onClick={() => moderate.mutate("approved")}
+              >
+                تأیید و انتشار
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={moderate.isPending}
+                onClick={() => moderate.mutate("declined")}
+              >
+                رد نظر
+              </Button>
+            </>
           )}
         </div>
         {!replyOpen && (
@@ -195,9 +200,9 @@ export default function MeReviewsPage() {
       <header>
         <h1 className="text-lg font-black text-slate-900">نظرات کسب‌وکار</h1>
         <p className="mt-1 text-xs leading-6 text-slate-500">
-          نظرات در انتظار تأیید و نظرات خصوصی مشتریان را اینجا می‌بینید. می‌توانید نظرات
-          عمومی را تأیید یا رد کنید و به آن‌ها پاسخ دهید. نظرات خصوصی در صفحه عمومی نمایش داده
-          نمی‌شوند.
+          نظرات عمومی پس از تأیید مدیر به اینجا می‌آیند تا شما آن‌ها را تأیید یا رد کنید. نظرات
+          خصوصی مستقیم و بدون تأیید مدیر در همین صفحه نمایش داده می‌شوند و در صفحه عمومی
+          دیده نمی‌شوند.
         </p>
       </header>
 

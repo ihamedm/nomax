@@ -28,6 +28,17 @@ async def _catalog(db_session):
     return category, subcategory
 
 
+async def _subcategories(db_session, category, count: int):
+    return (
+        await db_session.execute(
+            sa.select(Subcategory)
+            .where(Subcategory.category_id == category.id)
+            .order_by(Subcategory.id)
+            .limit(count)
+        )
+    ).scalars().all()
+
+
 async def test_create_business_accepts_wizard_fields(client, db_session, create_user):
     owner = await create_user("09160000001", UserRole.OWNER)
     category, subcategory = await _catalog(db_session)
@@ -48,6 +59,7 @@ async def test_create_business_accepts_wizard_fields(client, db_session, create_
             "instagram": "https://instagram.com/test",
             "is_24h": True,
             "profile_image_url": "https://cdn.example.com/photo.jpg",
+            "avatar_url": "https://cdn.example.com/avatar.jpg",
             "tags": [standard_tag, "کافه", "کافه"],
         },
         headers=auth(owner),
@@ -55,6 +67,8 @@ async def test_create_business_accepts_wizard_fields(client, db_session, create_
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["profile_image_url"] == "https://cdn.example.com/photo.jpg"
+    assert data["avatar_url"] == "https://cdn.example.com/avatar.jpg"
+    assert data["is_license_verified"] is False
     assert data["is_24h"] is True
     assert data["geo"] == {"lat": 30.5959, "lng": 50.2417}
 
@@ -446,3 +460,92 @@ async def test_picker_catalog_lists_every_subcategory(client, db_session):
     assert items
     assert all(item["category"]["name"] for item in items)
     assert all(item["category_id"] == item["category"]["id"] for item in items)
+
+
+async def test_create_business_stores_multiple_subcategories(client, db_session, create_user):
+    owner = await create_user("09160000010", UserRole.OWNER)
+    category, _ = await _catalog(db_session)
+    first, second = await _subcategories(db_session, category, 2)
+
+    response = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "چند مهارتی",
+            "category_id": category.id,
+            "subcategory_ids": [first.id, second.id],
+            "address": "بهبهان",
+        },
+        headers=auth(owner),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert {item["id"] for item in data["subcategories"]} == {first.id, second.id}
+    assert data["subcategory"]["id"] == first.id
+
+    detail = await client.get(f"/api/v1/me/businesses/{data['id']}", headers=auth(owner))
+    assert {item["id"] for item in detail.json()["data"]["subcategories"]} == {
+        first.id,
+        second.id,
+    }
+
+
+async def test_multiple_subcategories_must_share_the_business_category(
+    client, db_session, create_user
+):
+    owner = await create_user("09160000011", UserRole.OWNER)
+    await seed_categories(db_session)
+    await db_session.commit()
+    first, second = (
+        await db_session.execute(sa.select(Category).order_by(Category.id).limit(2))
+    ).scalars().all()
+    own_sub = (await _subcategories(db_session, first, 1))[0]
+    foreign_sub = (await _subcategories(db_session, second, 1))[0]
+
+    response = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "مخلوط",
+            "category_id": first.id,
+            "subcategory_ids": [own_sub.id, foreign_sub.id],
+            "address": "بهبهان",
+        },
+        headers=auth(owner),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["message"] == "subcategory_category_mismatch"
+
+
+async def test_edit_business_replaces_subcategory_set(client, db_session, create_user):
+    owner = await create_user("09160000012", UserRole.OWNER)
+    category, _ = await _catalog(db_session)
+    first, second, third = await _subcategories(db_session, category, 3)
+
+    created = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "مغازه",
+            "category_id": category.id,
+            "subcategory_ids": [first.id, second.id],
+            "address": "بهبهان",
+        },
+        headers=auth(owner),
+    )
+    business_id = created.json()["data"]["id"]
+
+    replaced = await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={"subcategory_ids": [third.id]},
+        headers=auth(owner),
+    )
+    assert replaced.status_code == 200
+    data = replaced.json()["data"]
+    assert [item["id"] for item in data["subcategories"]] == [third.id]
+    assert data["subcategory"]["id"] == third.id
+
+    # A payload without subcategory keys keeps the current selection.
+    untouched = await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={"short_description": "معرفی"},
+        headers=auth(owner),
+    )
+    assert [item["id"] for item in untouched.json()["data"]["subcategories"]] == [third.id]

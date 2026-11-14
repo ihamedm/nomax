@@ -57,16 +57,28 @@ async def test_rejected_review_is_hidden_and_not_rated(client, db_session, creat
     assert business.rating_count == 0
 
 
-async def test_rating_updates_on_approval(client, db_session, create_user):
+async def test_rating_updates_after_owner_accepts(
+    client, db_session, create_user
+):
     owner, customer, business = await _setup(db_session, create_user)
     created = await client.post(f"/api/v1/businesses/{business.slug}/reviews",
                                 json={"rating": 4}, headers=auth(customer))
     review_id = created.json()["data"]["id"]
 
     admin = await create_user("09130000003", UserRole.ADMIN, permissions=["review.moderate"])
-    approved = await client.patch(f"/api/v1/businesses/reviews/{review_id}/status",
-                                  json={"status": "approved"}, headers=auth(admin))
-    assert approved.status_code == 200
+    accepted = await client.patch(f"/api/v1/businesses/reviews/{review_id}/status",
+                                  json={"status": "awaiting_owner"}, headers=auth(admin))
+    assert accepted.status_code == 200
+    assert accepted.json()["data"]["status"] == "awaiting_owner"
+    await db_session.refresh(business)
+    assert business.rating_count == 0
+
+    owner_accepted = await client.patch(
+        f"/api/v1/businesses/reviews/{review_id}/status",
+        json={"status": "approved"},
+        headers=auth(owner),
+    )
+    assert owner_accepted.status_code == 200
     await db_session.refresh(business)
     assert business.rating_count == 1
     assert business.rating_avg == 4
@@ -128,7 +140,7 @@ async def test_private_review_is_owner_only_and_not_moderated(client, db_session
     assert again.json()["data"]["items"][0]["id"] == review_id
 
 
-async def test_pending_review_notifies_owner_and_public_after_approval(
+async def test_pending_review_waits_for_admin_then_owner(
     client, db_session, create_user
 ):
     owner, customer, business = await _setup(db_session, create_user)
@@ -139,8 +151,12 @@ async def test_pending_review_notifies_owner_and_public_after_approval(
     )
     review_id = created.json()["data"]["id"]
 
+    # The owner does not see or get notified about a review before an admin
+    # accepts it.
     count = await client.get("/api/v1/me/reviews/unread-count", headers=auth(owner))
-    assert count.json()["data"]["count"] == 1
+    assert count.json()["data"]["count"] == 0
+    owner_inbox = await client.get("/api/v1/me/reviews", headers=auth(owner))
+    assert owner_inbox.json()["data"]["items"] == []
 
     detail = await client.get(
         f"/api/v1/businesses/{business.slug}", headers=auth(customer)
@@ -155,12 +171,31 @@ async def test_pending_review_notifies_owner_and_public_after_approval(
     admin = await create_user(
         "09130000006", UserRole.ADMIN, permissions=["review.read", "review.moderate"]
     )
-    approved = await client.patch(
+    accepted = await client.patch(
         f"/api/v1/businesses/reviews/{review_id}/status",
-        json={"status": "approved"},
+        json={"status": "awaiting_owner"},
         headers=auth(admin),
     )
-    assert approved.status_code == 200
+    assert accepted.status_code == 200
+    assert accepted.json()["data"]["status"] == "awaiting_owner"
+
+    # Still hidden from the public and not rated until the owner accepts.
+    public = await client.get(f"/api/v1/businesses/{business.slug}")
+    assert public.json()["data"]["reviews"] == []
+    await db_session.refresh(business)
+    assert business.rating_count == 0
+
+    count = await client.get("/api/v1/me/reviews/unread-count", headers=auth(owner))
+    assert count.json()["data"]["count"] == 1
+    owner_inbox = await client.get("/api/v1/me/reviews", headers=auth(owner))
+    assert owner_inbox.json()["data"]["items"][0]["id"] == review_id
+
+    owner_accepted = await client.patch(
+        f"/api/v1/businesses/reviews/{review_id}/status",
+        json={"status": "approved"},
+        headers=auth(owner),
+    )
+    assert owner_accepted.status_code == 200
 
     public = await client.get(f"/api/v1/businesses/{business.slug}")
     reviews = public.json()["data"]["reviews"]
@@ -208,7 +243,7 @@ async def test_review_cannot_be_duplicated_or_self_reviewed(client, db_session, 
     assert duplicate.json()["error"]["code"] == "review_already_exists"
 
 
-async def test_owner_can_approve_or_reject_public_reviews(client, db_session, create_user):
+async def test_owner_decision_requires_admin_approval(client, db_session, create_user):
     owner, customer, business = await _setup(db_session, create_user)
     created = await client.post(
         f"/api/v1/businesses/{business.slug}/reviews",
@@ -217,22 +252,28 @@ async def test_owner_can_approve_or_reject_public_reviews(client, db_session, cr
     )
     review_id = created.json()["data"]["id"]
 
-    approved = await client.patch(
+    too_early = await client.patch(
         f"/api/v1/businesses/reviews/{review_id}/status",
         json={"status": "approved"},
         headers=auth(owner),
     )
-    assert approved.status_code == 200
-    await db_session.refresh(business)
-    assert business.rating_count == 1
-    assert business.rating_avg == 4
+    assert too_early.status_code == 409
+    assert too_early.json()["error"]["code"] == "review_not_ready"
 
-    rejected = await client.patch(
+    admin = await create_user("09130000010", UserRole.ADMIN, permissions=["review.moderate"])
+    await client.patch(
         f"/api/v1/businesses/reviews/{review_id}/status",
-        json={"status": "rejected"},
+        json={"status": "awaiting_owner"},
+        headers=auth(admin),
+    )
+
+    declined = await client.patch(
+        f"/api/v1/businesses/reviews/{review_id}/status",
+        json={"status": "declined"},
         headers=auth(owner),
     )
-    assert rejected.status_code == 200
+    assert declined.status_code == 200
+    assert declined.json()["data"]["status"] == "declined"
     await db_session.refresh(business)
     assert business.rating_count == 0
 
@@ -294,7 +335,7 @@ async def test_admin_review_list_filters_and_paginates(client, db_session, creat
     )
     await client.patch(
         f"/api/v1/businesses/reviews/{first.json()['data']['id']}/status",
-        json={"status": "approved"},
+        json={"status": "awaiting_owner"},
         headers=auth(admin),
     )
 
@@ -308,13 +349,19 @@ async def test_admin_review_list_filters_and_paginates(client, db_session, creat
     assert body["meta"]["pages"] == 2
     assert len(body["data"]["items"]) == 1
 
+    awaiting = await client.get(
+        "/api/v1/admin/reviews?status=awaiting_owner", headers=auth(admin)
+    )
+    assert awaiting.status_code == 200
+    assert [item["id"] for item in awaiting.json()["data"]["items"]] == [
+        first.json()["data"]["id"]
+    ]
+
     approved = await client.get(
         "/api/v1/admin/reviews?status=approved", headers=auth(admin)
     )
     assert approved.status_code == 200
-    assert [item["id"] for item in approved.json()["data"]["items"]] == [
-        first.json()["data"]["id"]
-    ]
+    assert approved.json()["data"]["items"] == []
 
     unapproved = await client.get(
         "/api/v1/admin/reviews?status=unapproved", headers=auth(admin)

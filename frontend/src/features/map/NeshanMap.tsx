@@ -18,11 +18,6 @@ export interface MapMarker {
   offsetY?: number;
   /** When set, the pin renders as a numbered cluster bubble. */
   count?: number;
-  /**
-   * Marker shape. `dot` (default) is the small round pin used in feeds;
-   * `pushpin` is the taller teardrop marker used to highlight one place.
-   */
-  variant?: "dot" | "pushpin";
 }
 
 export interface MapViewport {
@@ -51,36 +46,20 @@ type Leaflet = Record<string, any>;
 
 function markerIcon(
   L: Leaflet,
-  picker = false,
-  color?: string,
+  color: string,
   offsetX = 0,
   offsetY = 0,
-  variant: "dot" | "pushpin" = "dot",
 ) {
   const offsetStyle =
     offsetX || offsetY ? `position:relative;left:${offsetX}px;top:${offsetY}px` : "";
   const offsetAttr = offsetStyle ? ` style="${offsetStyle}"` : "";
-  const styles = [color ? `background:${color}` : "", offsetStyle].filter(Boolean).join(";");
-  const colorStyle = styles ? ` style="${styles}"` : "";
-  // The picker is a real pin SVG so the tip sits exactly on the chosen point.
-  if (picker) {
-    return L.divIcon({
-      className: "",
-      html: `<svg class="nomax-map-pin--picker" viewBox="0 0 24 24" aria-hidden="true"${offsetAttr}><path fill="#12b886" stroke="#ffffff" stroke-width="1.1" d="M12 1.7c-4.3 0-7.6 3.3-7.6 7.5 0 5.6 7.6 13.6 7.6 13.6s7.6-8 7.6-13.6c0-4.2-3.3-7.5-7.6-7.5Z"/><circle cx="12" cy="9.1" r="2.85" fill="#ffffff"/></svg>`,
-      iconSize: [40, 40],
-      iconAnchor: [20, 38],
-      popupAnchor: [0, -14],
-    });
-  }
-
-  // Pushpin and dot markers are CSS shapes; their anchor sits on the shape.
-  const tail = variant === "pushpin";
-  const modifier = tail ? " nomax-map-pin--pushpin" : "";
+  // Every map uses the same teardrop location pin so the tip sits exactly on
+  // the point. Picker and feed markers differ only by color.
   return L.divIcon({
     className: "",
-    html: `<span class="nomax-map-pin${modifier}"${colorStyle}></span>`,
-    iconSize: tail ? [36, 46] : [24, 24],
-    iconAnchor: tail ? [16, 42] : [12, 12],
+    html: `<svg class="nomax-map-pin" viewBox="0 0 24 24" aria-hidden="true"${offsetAttr}><path fill="${color}" stroke="#ffffff" stroke-width="1.1" d="M12 1.7c-4.3 0-7.6 3.3-7.6 7.5 0 5.6 7.6 13.6 7.6 13.6s7.6-8 7.6-13.6c0-4.2-3.3-7.5-7.6-7.5Z"/><circle cx="12" cy="9.1" r="2.85" fill="#ffffff"/></svg>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 38],
     popupAnchor: [0, -14],
   });
 }
@@ -260,11 +239,9 @@ export function NeshanMap({
             ? clusterIcon(L, marker.count)
             : markerIcon(
                 L,
-                false,
-                marker.color,
+                marker.color ?? "#12b886",
                 marker.offsetX,
                 marker.offsetY,
-                marker.variant,
               ),
         title: marker.title ?? "",
         zIndexOffset: marker.count !== undefined ? 500 : marker.zIndexOffset ?? 0,
@@ -307,7 +284,7 @@ export function NeshanMap({
     }
 
     const instance = L.marker([pickerMarker.lat, pickerMarker.lng], {
-      icon: markerIcon(L, true),
+      icon: markerIcon(L, "#12b886"),
       draggable: true,
       autoPan: true,
     });

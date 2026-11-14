@@ -13,6 +13,7 @@ import { toFa } from "@/lib/digits";
 import { formatRating } from "@/lib/format";
 import { formatJalali } from "@/lib/jalali";
 import { useApi } from "@/lib/query";
+import { NeshanMap } from "@/features/map/NeshanMap";
 import type { Quote, QuoteOffer } from "./types";
 import { DispatchProgress } from "./DispatchProgress";
 import {
@@ -213,7 +214,6 @@ export default function QuoteDetailPage() {
           {quote.category && (
             <span className="text-[11px] text-slate-400">
               {quote.category.icon} {quote.category.name}
-              {quote.subcategory ? ` › ${quote.subcategory.name}` : ""}
             </span>
           )}
           {quote.is_urgent && <Badge tone="amber">فوری</Badge>}
@@ -246,6 +246,24 @@ export default function QuoteDetailPage() {
             {quote.neighborhood ? ` · ${quote.neighborhood}` : ""}
           </span>
         </div>
+
+        {quote.geo && (
+          <NeshanMap
+            center={quote.geo}
+            zoom={16}
+            interactive={false}
+            markers={[
+              {
+                id: "quote-location",
+                lat: quote.geo.lat,
+                lng: quote.geo.lng,
+                title: quote.title,
+                subtitle: quote.address,
+              },
+            ]}
+            className="mt-2 h-40"
+          />
+        )}
       </section>
 
       <DispatchProgress dispatch={quote.dispatch} />

@@ -93,16 +93,22 @@ export interface BusinessListItem {
   phone_business?: string | null;
   category: BusinessCategory | null;
   subcategory: BusinessCategory | null;
+  subcategories?: BusinessCategory[];
   geo: BusinessGeo | null;
   distance_m: number | null;
   rating_avg: number;
   rating_count: number;
+  like_count: number;
   view_count?: number;
   is_24h: boolean;
   is_verified: boolean;
+  is_license_verified: boolean;
   status?: BusinessStatus;
   rejection_reason?: string | null;
   profile_image_url?: string | null;
+  avatar_url?: string | null;
+  /** Only present on `/me/bookmarks` and the saved business's own detail. */
+  bookmark_note?: string | null;
   created_at?: string | null;
 }
 
@@ -141,6 +147,7 @@ export interface BusinessDetail extends BusinessListItem {
   updated_at?: string | null;
   owner?: BusinessOwner | null;
   is_saved?: boolean;
+  is_liked?: boolean;
   is_owner?: boolean;
   images?: BusinessImage[];
   reviews: BusinessReview[];

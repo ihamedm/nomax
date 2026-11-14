@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Link, Navigate, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { Button, Spinner } from "@/components/ui/button";
 import { AppLayout } from "@/app/AppLayout";
@@ -46,6 +46,16 @@ const AdminAnalyticsPage = lazy(
   () => import("@/features/admin/AdminAnalyticsPage"),
 );
 
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
+
 function SessionBootstrap() {
   const ready = useAuth((state) => state.ready);
   const hydrate = useAuth((state) => state.hydrate);
@@ -81,6 +91,7 @@ function NotFoundPage() {
 export function App() {
   return (
     <>
+      <ScrollToTop />
       <SessionBootstrap />
       <Routes>
         <Route element={<AppLayout />}>

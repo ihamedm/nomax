@@ -14,6 +14,7 @@ import { formatJalali } from "@/lib/jalali";
 import { useApi, useApiWithMeta } from "@/lib/query";
 import { useAuth } from "@/stores/auth";
 import { AdminModal } from "@/features/admin/AdminModal";
+import { NeshanMap } from "@/features/map/NeshanMap";
 import { DataTable, FilterLinks, type DataColumn, type PageMeta } from "@/features/admin/data-table";
 import type {
   Quote,
@@ -509,6 +510,24 @@ export default function AdminQuotesPage() {
                   <p className="mt-1 leading-6 text-slate-700">{detail.data.address}</p>
                 </div>
               </div>
+
+              {detail.data.geo && (
+                <NeshanMap
+                  center={detail.data.geo}
+                  zoom={16}
+                  interactive={false}
+                  markers={[
+                    {
+                      id: "quote-location",
+                      lat: detail.data.geo.lat,
+                      lng: detail.data.geo.lng,
+                      title: detail.data.title,
+                      subtitle: detail.data.address,
+                    },
+                  ]}
+                  className="h-48"
+                />
+              )}
 
               <div className="flex flex-wrap gap-4 text-[11px] text-slate-500">
                 <span>ثبت: {formatJalali(detail.data.created_at ?? "")}</span>

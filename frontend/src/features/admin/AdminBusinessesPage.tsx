@@ -37,6 +37,7 @@ interface BusinessRow {
   slug: string;
   status: BusinessStatus;
   is_verified: boolean;
+  is_license_verified: boolean;
   is_24h: boolean;
   short_description: string;
   description?: string | null;
@@ -49,6 +50,7 @@ interface BusinessRow {
   rating_avg: number;
   rating_count: number;
   profile_image_url?: string | null;
+  avatar_url?: string | null;
   rejection_reason?: string | null;
   owner: Owner | null;
   created_at?: string | null;
@@ -76,6 +78,22 @@ const STATUS_META: Record<BusinessStatus, { label: string; className: string }> 
   approved: { label: "تأییدشده", className: "bg-emerald-50 text-emerald-700" },
   rejected: { label: "ردشده", className: "bg-rose-50 text-rose-700" },
 };
+
+function BlueTick() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5 shrink-0 text-sky-500"
+      role="img"
+      aria-label="مجوز تأیید شده"
+    >
+      <path
+        fill="currentColor"
+        d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.1 14.3-3.6-3.6 1.4-1.4 2.2 2.2 4.8-4.8 1.4 1.4-6.2 6.2Z"
+      />
+    </svg>
+  );
+}
 
 function StatusPill({ status }: { status: BusinessStatus }) {
   const meta = STATUS_META[status] ?? STATUS_META.pending;
@@ -343,9 +361,9 @@ export default function AdminBusinessesPage() {
       cell: (business) => (
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-xl md:h-12 md:w-12">
-            {business.profile_image_url ? (
+            {business.avatar_url || business.profile_image_url ? (
               <img
-                src={business.profile_image_url}
+                src={(business.avatar_url || business.profile_image_url) as string}
                 alt=""
                 className="h-full w-full object-cover"
                 loading="lazy"
@@ -358,9 +376,10 @@ export default function AdminBusinessesPage() {
             <button
               type="button"
               onClick={() => setDetail(business)}
-              className="block max-w-64 truncate text-right font-bold text-slate-900 transition-colors hover:text-brand-600"
+              className="flex max-w-64 items-center gap-1 text-right font-bold text-slate-900 transition-colors hover:text-brand-600"
             >
-              {business.name}
+              <span className="truncate">{business.name}</span>
+              {business.is_license_verified && <BlueTick />}
             </button>
             <p className="mt-0.5 hidden text-[11px] text-slate-400 md:block" dir="ltr">
               {business.slug}
@@ -413,7 +432,12 @@ export default function AdminBusinessesPage() {
               </span>
             )}
             {business.is_verified && (
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+              <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] text-brand-700">
+                هویت تأییدشده
+              </span>
+            )}
+            {business.is_license_verified && (
+              <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-700">
                 مجوز تأییدشده
               </span>
             )}
@@ -620,9 +644,9 @@ export default function AdminBusinessesPage() {
         <AdminModal title={`جزئیات ${detail.name}`} onClose={() => setDetail(null)}>
           <div className="mb-4 flex items-start gap-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
             <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-3xl">
-              {detail.profile_image_url ? (
+              {detail.avatar_url || detail.profile_image_url ? (
                 <img
-                  src={detail.profile_image_url}
+                  src={(detail.avatar_url || detail.profile_image_url) as string}
                   alt=""
                   className="h-full w-full object-cover"
                 />
@@ -631,7 +655,10 @@ export default function AdminBusinessesPage() {
               )}
             </div>
             <div className="min-w-0">
-              <p className="font-bold text-slate-900">{detail.name}</p>
+              <p className="flex items-center gap-1 font-bold text-slate-900">
+                <span>{detail.name}</span>
+                {detail.is_license_verified && <BlueTick />}
+              </p>
               <p className="mt-0.5 text-[11px] text-slate-400" dir="ltr">
                 {detail.slug}
               </p>
@@ -694,7 +721,10 @@ export default function AdminBusinessesPage() {
               {formatRating(detail.rating_avg)} ({fa(detail.rating_count)} نظر)
             </DetailRow>
             <DetailRow label="۲۴ ساعته">{detail.is_24h ? "بله" : "خیر"}</DetailRow>
-            <DetailRow label="مجوز">{detail.is_verified ? "تأییدشده" : "تأییدنشده"}</DetailRow>
+            <DetailRow label="هویت">{detail.is_verified ? "تأییدشده" : "تأییدنشده"}</DetailRow>
+            <DetailRow label="مجوز">
+              {detail.is_license_verified ? "تأییدشده" : "تأییدنشده"}
+            </DetailRow>
             <DetailRow label="دلیل رد">{detail.rejection_reason || "—"}</DetailRow>
             <DetailRow label="ثبت">
               {detail.created_at ? formatJalali(detail.created_at) : "—"}

@@ -27,11 +27,13 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.business import Business, BusinessStatus
-from app.models.category import Category, Subcategory
+from app.models.category import Category
+from app.models.tag import BusinessTag, Tag
+from app.models.user import User
 
 logger = logging.getLogger("nomax.map_cache")
 
-CACHE_VERSION = 1
+CACHE_VERSION = 3
 MANIFEST_KEY = f"map:v{CACHE_VERSION}:manifest"
 POINTS_KEY = f"map:v{CACHE_VERSION}:points"
 CLUSTERS_KEY = f"map:v{CACHE_VERSION}:clusters:{{zoom}}"
@@ -73,9 +75,9 @@ def _category_ref(category: Category | None) -> dict | None:
 async def _load_points(session: AsyncSession) -> list[dict]:
     rows = (
         await session.execute(
-            sa.select(Business, Category, Subcategory)
+            sa.select(Business, Category, User)
             .join(Category, Business.category_id == Category.id)
-            .outerjoin(Subcategory, Business.subcategory_id == Subcategory.id)
+            .join(User, Business.owner_id == User.id)
             .where(
                 Business.status == BusinessStatus.APPROVED,
                 Business.deleted_at.is_(None),
@@ -88,8 +90,36 @@ async def _load_points(session: AsyncSession) -> list[dict]:
         )
     ).all()
 
+    business_ids = [business.id for business, _, _ in rows]
+    tags_by_business: dict = {}
+    if business_ids:
+        tag_rows = (
+            await session.execute(
+                sa.select(BusinessTag.business_id, Tag.name)
+                .join(Tag, Tag.id == BusinessTag.tag_id)
+                .where(
+                    BusinessTag.business_id.in_(business_ids),
+                    Tag.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        for business_id, tag_name in tag_rows:
+            tags_by_business.setdefault(business_id, []).append(tag_name)
+
     points: list[dict] = []
-    for business, category, subcategory in rows:
+    for business, category, owner in rows:
+        subcategories = [
+            _category_ref(subcategory)
+            for subcategory in business.subcategories
+            if subcategory.deleted_at is None
+        ]
+        primary = (
+            _category_ref(business.subcategory)
+            if business.subcategory is not None and business.subcategory.deleted_at is None
+            else (subcategories[0] if subcategories else None)
+        )
+        if not subcategories and primary is not None:
+            subcategories = [primary]
         points.append(
             {
                 "id": str(business.id),
@@ -101,15 +131,15 @@ async def _load_points(session: AsyncSession) -> list[dict]:
                 "short_description": business.short_description,
                 "rating_avg": round(business.rating_avg or 0, 2),
                 "rating_count": business.rating_count or 0,
+                "like_count": business.like_count or 0,
                 "is_24h": business.is_24h,
                 "is_verified": business.is_verified,
+                "is_license_verified": business.is_license_verified,
                 "profile_image_url": business.profile_image_url,
+                "avatar_url": business.avatar_url,
                 "category": _category_ref(category),
-                "subcategory": (
-                    _category_ref(subcategory)
-                    if subcategory is not None and subcategory.deleted_at is None
-                    else None
-                ),
+                "subcategory": primary,
+                "subcategories": subcategories,
                 # Lower-cased haystack so a filtered map view can reuse the cache
                 # instead of re-querying the database per keystroke.
                 "search_text": " ".join(
@@ -118,7 +148,11 @@ async def _load_points(session: AsyncSession) -> list[dict]:
                         [
                             business.name or "",
                             business.short_description or "",
+                            business.description or "",
                             business.address or "",
+                            " ".join(tags_by_business.get(business.id, [])),
+                            owner.full_name or "",
+                            owner.phone or "",
                         ],
                     )
                 ).lower(),
@@ -236,8 +270,8 @@ def _matches(
         if category is None or category["slug"] != category_slug:
             return False
     if subcategory_slug:
-        subcategory = point.get("subcategory")
-        if subcategory is None or subcategory["slug"] != subcategory_slug:
+        matches = point.get("subcategories") or []
+        if not any(item["slug"] == subcategory_slug for item in matches):
             return False
     if q:
         if q.strip().lower() not in point.get("search_text", ""):
@@ -293,6 +327,9 @@ async def get_map_view(
         total = len(rows)
         truncated = total > MAX_POINTS_IN_RESPONSE
         rows = rows[:MAX_POINTS_IN_RESPONSE]
+        # The haystack is server-side only; it can contain the owner phone.
+        for point in rows:
+            point.pop("search_text", None)
         return {
             "data": {
                 "mode": "points",

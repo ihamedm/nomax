@@ -6,6 +6,8 @@ import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { normalizeAddress } from "@/lib/format";
+import { geolocationNeedsPrompt } from "@/lib/geolocation";
+import { useUi } from "@/stores/ui";
 import { NeshanMap } from "@/features/map/NeshanMap";
 import type { Coordinates } from "@/types";
 
@@ -100,6 +102,24 @@ export function MapPickerSheet({
   const [error, setError] = useState<string | null>(null);
   const lastSearched = useRef("");
   const searchSeq = useRef(0);
+  // A pin moved inside the map should replace the address text with the
+  // reverse-geocoded one; address text typed for search must not be replaced.
+  const pickedRef = useRef(false);
+  const gpsLocation = useUi((state) => state.location);
+  const locationSource = useUi((state) => state.locationSource);
+  const openLocationPrompt = useUi((state) => state.openLocationPrompt);
+  const initialGps = useRef(gpsLocation);
+
+  // The permission sheet stores the granted position globally; mirror it here
+  // so "my location" inside the picker moves the marker.
+  useEffect(() => {
+    if (locationSource !== "gps" || gpsLocation === initialGps.current) return;
+    initialGps.current = gpsLocation;
+    pickedRef.current = true;
+    setMarker(gpsLocation);
+    setCenter(gpsLocation);
+    setZoom(16);
+  }, [gpsLocation, locationSource]);
 
   const search = useCallback(async (term: string) => {
     const text = normalizeAddress(term);
@@ -182,7 +202,13 @@ export function MapPickerSheet({
           `/geo/reverse?lat=${marker.lat}&lng=${marker.lng}`,
         );
         if (cancelled) return;
-        setResolvedAddress(resolved.display_name);
+        const text = normalizeAddress(resolved.display_name);
+        setResolvedAddress(text);
+        if (pickedRef.current) {
+          pickedRef.current = false;
+          setQuery(text);
+          lastSearched.current = text;
+        }
         setNearLabel(`نزدیک ${shortAddress(resolved.display_name)}`);
       } catch {
         if (!cancelled) setNearLabel("موقعیت انتخاب‌شده");
@@ -204,11 +230,16 @@ export function MapPickerSheet({
     setNearLabel(`نزدیک ${shortAddress(result.display_name)}`);
   }
 
-  function useMyLocation() {
+  async function useMyLocation() {
     if (!navigator.geolocation) {
       toast("مرورگر شما از موقعیت مکانی پشتیبانی نمی‌کند.");
       return;
     }
+    if (locationSource !== "gps" && (await geolocationNeedsPrompt())) {
+      openLocationPrompt();
+      return;
+    }
+    pickedRef.current = true;
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const next = { lat: position.coords.latitude, lng: position.coords.longitude };
@@ -245,8 +276,14 @@ export function MapPickerSheet({
           zoom={zoom}
           className="nomax-picker-map h-full w-full rounded-none"
           pickerMarker={marker}
-          onPickerMove={(coords) => setMarker(coords)}
-          onMapClick={(coords) => setMarker(coords)}
+          onPickerMove={(coords) => {
+            pickedRef.current = true;
+            setMarker(coords);
+          }}
+          onMapClick={(coords) => {
+            pickedRef.current = true;
+            setMarker(coords);
+          }}
         />
       </div>
 

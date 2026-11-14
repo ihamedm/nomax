@@ -41,11 +41,38 @@ async def test_bookmark_roundtrip_and_detail_flag(client, db_session, create_use
     listing = await client.get("/api/v1/me/bookmarks", headers=auth(user))
     assert listing.status_code == 200
     assert [item["id"] for item in listing.json()["data"]["items"]] == [str(business.id)]
+    assert listing.json()["data"]["items"][0]["bookmark_note"] is None
 
     detail = await client.get(
         f"/api/v1/businesses/{business.slug}", headers=auth(user)
     )
     assert detail.json()["data"]["is_saved"] is True
+    assert detail.json()["data"]["bookmark_note"] is None
+
+    noted = await client.post(
+        f"/api/v1/me/bookmarks/{business.id}",
+        json={"note": "  برای تعمیر یخچال  "},
+        headers=auth(user),
+    )
+    assert noted.status_code == 200
+    assert noted.json()["data"]["note"] == "برای تعمیر یخچال"
+    assert (
+        (await client.get("/api/v1/me/bookmarks", headers=auth(user)))
+        .json()["data"]["items"][0]["bookmark_note"]
+        == "برای تعمیر یخچال"
+    )
+    assert (
+        (await client.get(f"/api/v1/businesses/{business.slug}", headers=auth(user)))
+        .json()["data"]["bookmark_note"]
+        == "برای تعمیر یخچال"
+    )
+
+    too_long = await client.post(
+        f"/api/v1/me/bookmarks/{business.id}",
+        json={"note": "x" * 301},
+        headers=auth(user),
+    )
+    assert too_long.status_code == 422
 
     public_detail = await client.get(f"/api/v1/businesses/{business.slug}")
     assert public_detail.json()["data"]["is_saved"] is False

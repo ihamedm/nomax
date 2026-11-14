@@ -300,6 +300,36 @@ async def test_reset_password_rejects_bad_code(client, create_user):
 
 
 @pytest.mark.asyncio
+async def test_verify_reset_code_then_reset_without_reusing_otp(client, create_user):
+    await create_user("9124009922")
+    response = await client.post("/api/v1/auth/forgot-password", json={"phone": "09124009922"})
+    code = response.json()["data"]["dev_otp"]
+
+    response = await client.post(
+        "/api/v1/auth/verify-reset-code", json={"phone": "09124009922", "code": "000000"}
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "otp_invalid"
+
+    response = await client.post(
+        "/api/v1/auth/verify-reset-code", json={"phone": "09124009922", "code": code}
+    )
+    assert response.status_code == 200
+
+    # The OTP is consumed by the verify step; the reset step relies on the marker.
+    response = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"phone": "09124009922", "code": code, "password": "brand-new-password"},
+    )
+    assert response.status_code == 200
+
+    response = await client.post(
+        "/api/v1/auth/login", json={"phone": "09124009922", "password": "brand-new-password"}
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_national_id_cannot_be_shared_or_overwritten(client):
     first_nid = _national_id("123456789")
     second_nid = _national_id("987654321")

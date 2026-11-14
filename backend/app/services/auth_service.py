@@ -17,6 +17,8 @@ def _now() -> datetime:
 
 _PW_ATTEMPTS_PREFIX = "auth:pwatt:{phone}"
 _PW_BLOCK_PREFIX = "auth:pwblock:{phone}"
+_RESET_VERIFIED_PREFIX = "auth:pwreset:{phone}"
+_RESET_VERIFIED_TTL = 600
 _USER_REVOKED_PREFIX = "auth:userrev:{user_id}"
 _BLOCK_PHONE_PREFIX = "auth:block:phone:{phone}"
 _BLOCK_IP_PREFIX = "auth:block:ip:{ip}"
@@ -179,6 +181,13 @@ async def forgot_password(session, otp_service: OtpService, phone: str, ip: str)
     return await otp_service.issue(phone, ip=ip, session=session, purpose="password_reset")
 
 
+async def verify_reset_code(otp_service: OtpService, redis: Redis, phone: str, code: str) -> None:
+    """Check the reset OTP and remember the phone so the password step can follow."""
+    if not await otp_service.verify(phone, code):
+        raise AppError("otp_invalid", "invalid_or_expired_otp_code", 401)
+    await redis.set(_RESET_VERIFIED_PREFIX.format(phone=phone), "1", ex=_RESET_VERIFIED_TTL)
+
+
 async def reset_password(
     session,
     otp_service: OtpService,
@@ -189,7 +198,10 @@ async def reset_password(
     ip: str | None = None,
 ) -> User:
     await ensure_not_blocked(redis, phone=phone, ip=ip)
-    if not await otp_service.verify(phone, code):
+    # The client verifies the code in its own step first, which consumes the OTP.
+    marker = _RESET_VERIFIED_PREFIX.format(phone=phone)
+    verified = bool(await redis.get(marker))
+    if not verified and not await otp_service.verify(phone, code):
         raise AppError("otp_invalid", "invalid_or_expired_otp_code", 401)
     if len(password) < settings.PASSWORD_MIN_LENGTH:
         raise AppError("validation_error", "password_too_short", 422, {"min_length": settings.PASSWORD_MIN_LENGTH})
@@ -205,6 +217,7 @@ async def reset_password(
     user.last_login_at = _now()
     await redis.delete(_PW_BLOCK_PREFIX.format(phone=phone))
     await redis.delete(_PW_ATTEMPTS_PREFIX.format(phone=phone))
+    await redis.delete(marker)
     return user
 
 

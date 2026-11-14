@@ -70,6 +70,9 @@ class Business(Base):
     instagram: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_24h: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa.false())
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa.false())
+    is_license_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
     status: Mapped[BusinessStatus] = mapped_column(
         sa.Enum(
             BusinessStatus,
@@ -85,7 +88,10 @@ class Business(Base):
     rating_avg: Mapped[float] = mapped_column(Float, nullable=False, default=0, server_default=sa.text("0"))
     rating_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa.text("0"))
     view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa.text("0"))
+    like_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa.text("0"))
     profile_image_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Optional square avatar. When absent clients fall back to the main image.
+    avatar_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )
@@ -95,7 +101,34 @@ class Business(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     category: Mapped["Category"] = relationship(lazy="joined")
+    # The primary subcategory mirrors ``subcategory_id`` for older queries; the
+    # join table carries every subcategory the owner picked.
     subcategory: Mapped["Subcategory | None"] = relationship(lazy="joined")
+    subcategories: Mapped[list["Subcategory"]] = relationship(
+        secondary="business_subcategories",
+        lazy="selectin",
+        order_by="Subcategory.sort_order",
+    )
+
+    @property
+    def subcategory_ids(self) -> list[int]:
+        ids = [subcategory.id for subcategory in self.subcategories]
+        if self.subcategory_id is not None and self.subcategory_id not in ids:
+            ids.append(self.subcategory_id)
+        return ids
+
+
+class BusinessSubcategory(Base):
+    """Join row for the subcategories a business serves (same category only)."""
+
+    __tablename__ = "business_subcategories"
+
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
+    subcategory_id: Mapped[int] = mapped_column(
+        ForeignKey("subcategories.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class BusinessImage(Base):

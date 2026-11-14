@@ -8,6 +8,7 @@ from app.db.seed import seed_categories
 from app.models.business import Business, BusinessStatus
 from app.models.category import Category, Subcategory
 from app.models.job import ScheduledJob
+from app.models.tag import BusinessTag, Tag
 from app.models.user import UserRole
 from app.services import map_cache
 from app.worker import _sweep_scheduled_jobs
@@ -323,3 +324,32 @@ async def test_map_filters_reuse_cached_points(client, db_session, create_user, 
 
     search = await client.get("/api/v1/map/businesses", params={"zoom": 15, "q": "سوپر"})
     assert [item["slug"] for item in search.json()["data"]["items"]] == ["filter-shop"]
+
+
+@pytest.mark.asyncio
+async def test_map_search_matches_description_tags_and_owner(
+    client, db_session, create_user
+):
+    owner = await create_user("09123334455", full_name="نگار کریمی")
+    category, subcategory = await _catalog(db_session)
+    business = await _business(
+        db_session, owner, category, subcategory,
+        slug="deep-search", name="فروشگاه نمونه",
+        lat=BEHBAHAN["lat"], lng=BEHBAHAN["lng"],
+    )
+    business.description = "ابزار دقیق آزمایشگاهی"
+    tag = Tag(name="خدمات ویژه")
+    db_session.add(tag)
+    await db_session.flush()
+    db_session.add(BusinessTag(business_id=business.id, tag_id=tag.id))
+    await db_session.commit()
+
+    for term in ("آزمایشگاهی", "ویژه", "نگار", "34455"):
+        response = await client.get(
+            "/api/v1/map/businesses", params={"zoom": 15, "q": term}
+        )
+        assert response.status_code == 200
+        items = response.json()["data"]["items"]
+        assert [item["slug"] for item in items] == ["deep-search"]
+        # The haystack (which holds the owner phone) must not reach clients.
+        assert "search_text" not in items[0]

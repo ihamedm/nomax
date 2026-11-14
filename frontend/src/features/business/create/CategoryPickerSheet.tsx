@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { BottomSheet } from "@/components/ui/bottom-sheet";
-import { Spinner } from "@/components/ui/button";
+import { Button, Spinner } from "@/components/ui/button";
 import { SearchIcon } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
@@ -15,6 +15,12 @@ interface CategoryPickerSheetProps {
   selected: Category | null;
   selectedSubcategory?: Subcategory | null;
   onSelect: (category: Category, subcategory: Subcategory | null) => void;
+  /** Multi-select: tapping subcategories toggles them, then one confirm. */
+  multiple?: boolean;
+  selectedSubcategories?: Subcategory[];
+  onSelectMany?: (category: Category, subcategories: Subcategory[]) => void;
+  /** Customers pick a parent category only; the subcategory panel is skipped. */
+  categoriesOnly?: boolean;
 }
 
 interface SubcategorySearchItem extends Subcategory {
@@ -55,22 +61,52 @@ function Chevron() {
   );
 }
 
+function PickedMark({ picked }: { picked: boolean }) {
+  return (
+    <span
+      className={cn(
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[11px] font-bold",
+        picked ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300 text-transparent",
+      )}
+      aria-hidden
+    >
+      ✓
+    </span>
+  );
+}
+
 export function CategoryPickerSheet({
   open,
   onClose,
   selected,
   selectedSubcategory,
   onSelect,
+  multiple = false,
+  selectedSubcategories,
+  onSelectMany,
+  categoriesOnly = false,
 }: CategoryPickerSheetProps) {
   const [active, setActive] = useState<Category | null>(null);
   const [query, setQuery] = useState("");
+  const [draft, setDraft] = useState<Subcategory[]>([]);
+  const [draftCategory, setDraftCategory] = useState<Category | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
       setActive(null);
       setQuery("");
+      setHint(null);
+      return;
     }
-  }, [open]);
+    if (multiple) {
+      setDraft(selectedSubcategories ?? []);
+      setDraftCategory((selectedSubcategories ?? []).length > 0 ? selected : null);
+      setHint(null);
+    }
+    // Existing selection is only read when the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, multiple]);
 
   const categories = useApi<{ items: Category[] }>(["categories"], "/categories", {
     enabled: open,
@@ -121,7 +157,43 @@ export function CategoryPickerSheet({
     : activeSubcategories;
 
   function choose(category: Category, subcategory: Subcategory | null) {
+    if (multiple) {
+      if (subcategory === null) {
+        setDraft([]);
+        setDraftCategory(category);
+        setHint(null);
+      } else {
+        toggle(category, subcategory);
+      }
+      return;
+    }
     onSelect(category, subcategory);
+    onClose();
+  }
+
+  function toggle(category: Category, subcategory: Subcategory) {
+    if (draftCategory && draftCategory.id !== category.id) {
+      setHint("همه زیردسته‌ها باید از یک دسته‌بندی باشند؛ ابتدا انتخاب‌های قبلی را بردارید.");
+      return;
+    }
+    const picked = draft.some((item) => item.id === subcategory.id);
+    const next = picked
+      ? draft.filter((item) => item.id !== subcategory.id)
+      : [...draft, subcategory];
+    setDraft(next);
+    setDraftCategory(next.length > 0 ? category : null);
+    setHint(null);
+  }
+
+  function isPicked(subcategory: Subcategory): boolean {
+    return multiple
+      ? draft.some((item) => item.id === subcategory.id)
+      : selectedSubcategory?.id === subcategory.id;
+  }
+
+  function confirmMultiple() {
+    if (!draftCategory) return;
+    onSelectMany?.(draftCategory, draft);
     onClose();
   }
 
@@ -137,6 +209,10 @@ export function CategoryPickerSheet({
 
   function openCategory(category: Category) {
     setQuery("");
+    if (categoriesOnly) {
+      choose(category, null);
+      return;
+    }
     setActive(category);
   }
 
@@ -147,6 +223,10 @@ export function CategoryPickerSheet({
 
   const loading = categories.isLoading || allSubcategories.isLoading;
   const loadError = categories.error ?? allSubcategories.error;
+  const searchHitCount = categoriesOnly
+    ? matchingCategories.length
+    : matchingCategories.length + matchingSubcategories.length;
+  const searchHitLabel = categoriesOnly ? "نتیجه‌ها در دسته‌ها" : "نتیجه‌ها در دسته‌ها و زیردسته‌ها";
 
   return (
     <BottomSheet open={open} onClose={onClose} title="انتخاب دسته‌بندی">
@@ -156,7 +236,7 @@ export function CategoryPickerSheet({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={active ? `جستجو در ${active.name}…` : "جستجوی دسته یا زیردسته…"}
+            placeholder={active ? `جستجو در ${active.name}…` : "جستجوی دسته‌بندی…"}
             aria-label="جستجوی دسته‌بندی"
             className="h-11 pr-9 pl-9 text-sm"
             enterKeyHint="search"
@@ -174,9 +254,7 @@ export function CategoryPickerSheet({
         </div>
         {normalizedQuery && !active && (
           <p className="mt-1.5 text-[10px] text-slate-400">
-            {matchingCategories.length + matchingSubcategories.length > 0
-              ? "نتیجه‌ها در دسته‌ها و زیردسته‌ها"
-              : "نتیجه‌ای پیدا نشد."}
+            {searchHitCount > 0 ? searchHitLabel : "نتیجه‌ای پیدا نشد."}
           </p>
         )}
       </div>
@@ -230,7 +308,7 @@ export function CategoryPickerSheet({
                 </div>
               )}
 
-              {matchingSubcategories.length > 0 && (
+              {!categoriesOnly && matchingSubcategories.length > 0 && (
                 <div>
                   <p className="px-1 pb-1 pt-2 text-[10px] font-bold text-slate-400">
                     زیردسته‌ها
@@ -242,7 +320,7 @@ export function CategoryPickerSheet({
                       onClick={() => choose(categoryFor(subcategory), subcategory)}
                       className={cn(
                         "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-right transition-colors",
-                        selectedSubcategory?.id === subcategory.id
+                        isPicked(subcategory)
                           ? "border-brand-200 bg-brand-50"
                           : "border-transparent hover:bg-slate-50",
                       )}
@@ -261,18 +339,24 @@ export function CategoryPickerSheet({
                             : ""}
                         </span>
                       </span>
-                      <Chevron />
+                      {multiple ? (
+                        <PickedMark picked={isPicked(subcategory)} />
+                      ) : (
+                        <Chevron />
+                      )}
                     </button>
                   ))}
                 </div>
               )}
 
-              {matchingCategories.length === 0 && matchingSubcategories.length === 0 && (
+              {searchHitCount === 0 && (
                 <div className="py-16 text-center">
                   <p className="text-2xl">🔍</p>
                   <p className="mt-2 text-sm font-bold text-slate-800">دسته‌ای پیدا نشد</p>
                   <p className="mt-1 text-[11px] text-slate-400">
-                    نام دسته یا یکی از خدمات را جستجو کنید.
+                    {categoriesOnly
+                      ? "نام دسته‌بندی را جستجو کنید."
+                      : "نام دسته یا یکی از خدمات را جستجو کنید."}
                   </p>
                 </div>
               )}
@@ -288,7 +372,7 @@ export function CategoryPickerSheet({
                   onClick={() => openCategory(category)}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-right transition-colors",
-                    selected?.id === category.id
+                    selected?.id === category.id || (multiple && draftCategory?.id === category.id)
                       ? "border-brand-200 bg-brand-50"
                       : "border-transparent hover:bg-slate-50",
                   )}
@@ -374,7 +458,7 @@ export function CategoryPickerSheet({
                 onClick={() => active && choose(active, subcategory)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-right transition-colors",
-                  selectedSubcategory?.id === subcategory.id
+                  isPicked(subcategory)
                     ? "border-brand-200 bg-brand-50"
                     : "border-transparent hover:bg-slate-50",
                 )}
@@ -392,12 +476,39 @@ export function CategoryPickerSheet({
                     </span>
                   )}
                 </span>
-                <Chevron />
+                {multiple ? (
+                  <PickedMark picked={isPicked(subcategory)} />
+                ) : (
+                  <Chevron />
+                )}
               </button>
             ))}
           </div>
         </div>
       </div>
+
+      {multiple && (
+        <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+          {hint && <p className="text-[11px] leading-5 text-rose-600">{hint}</p>}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-slate-500">
+              {draftCategory
+                ? draft.length > 0
+                  ? `${draft.length} زیردسته انتخاب شد`
+                  : "فقط همین دسته"
+                : "زیردسته‌های کسب‌وکار را انتخاب کنید"}
+            </span>
+            <Button
+              type="button"
+              onClick={confirmMultiple}
+              disabled={!draftCategory}
+              className="min-w-24"
+            >
+              تأیید انتخاب
+            </Button>
+          </div>
+        </div>
+      )}
     </BottomSheet>
   );
 }

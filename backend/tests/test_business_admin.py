@@ -74,7 +74,7 @@ async def test_is_verified_requires_admin_verified_license(client, db_session, c
     verified = await client.patch(f"/api/v1/admin/businesses/{business.id}/verify-license", headers=auth(admin))
     assert verified.status_code == 200
     await db_session.refresh(business)
-    assert business.is_verified is True
+    assert business.is_license_verified is True
 
 
 async def test_tag_list_accepts_four_and_caps_total(client, db_session, create_user):
@@ -244,8 +244,10 @@ async def test_admin_business_wizard_owner_images_and_tags(client, db_session, c
             "geo_lng": 50.24,
             "is_24h": True,
             "is_verified": True,
+            "is_license_verified": True,
             "status": "approved",
             "profile_image_url": "/uploads/businesses/demo/main.webp",
+            "avatar_url": "/uploads/businesses/demo/avatar.webp",
             "images": [
                 {"url": "/uploads/businesses/demo/main.webp", "is_main": True, "sort_order": 0},
                 {"url": "/uploads/businesses/demo/second.webp", "is_main": False, "sort_order": 1},
@@ -259,9 +261,11 @@ async def test_admin_business_wizard_owner_images_and_tags(client, db_session, c
     business_id = data["id"]
     assert data["owner"]["id"] == new_owner["id"]
     assert data["is_verified"] is True
+    assert data["is_license_verified"] is True
     assert data["status"] == "approved"
     assert data["geo"] == {"lat": 30.59, "lng": 50.24}
     assert data["profile_image_url"] == "/uploads/businesses/demo/main.webp"
+    assert data["avatar_url"] == "/uploads/businesses/demo/avatar.webp"
     assert [image["url"] for image in data["images"]] == [
         "/uploads/businesses/demo/main.webp",
         "/uploads/businesses/demo/second.webp",
@@ -337,3 +341,40 @@ async def test_permanent_business_delete_blocked_by_relations(client, db_session
     await db_session.commit()
     purged = await client.delete(f"{url}/permanent", headers=auth(admin))
     assert purged.status_code == 200
+
+
+async def test_admin_can_edit_business_owner(client, db_session, create_user):
+    owner, _ = await _setup(db_session, create_user)
+    admin = await create_user(
+        "09140000022", UserRole.ADMIN, permissions=["business.create", "business.update"]
+    )
+
+    updated = await client.patch(
+        f"/api/v1/admin/businesses/owners/{owner.id}",
+        json={"full_name": "نام تازه"},
+        headers=auth(admin),
+    )
+    assert updated.status_code == 200
+    data = updated.json()["data"]
+    assert data["full_name"] == "نام تازه"
+    assert data["phone"] == owner.phone
+    refreshed = await db_session.get(type(owner), owner.id)
+    assert refreshed.full_name == "نام تازه"
+    assert refreshed.phone == owner.phone
+
+    # The phone is the login identity, so it is not editable from the business form.
+    phone_edit = await client.patch(
+        f"/api/v1/admin/businesses/owners/{owner.id}",
+        json={"phone": "09140000023"},
+        headers=auth(admin),
+    )
+    assert phone_edit.status_code == 422
+    assert phone_edit.json()["error"]["message"] == "phone_not_editable"
+
+    privileged = await create_user("09140000024", UserRole.ADMIN, permissions=["business.read"])
+    forbidden = await client.patch(
+        f"/api/v1/admin/businesses/owners/{privileged.id}",
+        json={"full_name": "x"},
+        headers=auth(admin),
+    )
+    assert forbidden.status_code == 403

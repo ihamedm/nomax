@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { SearchIcon, SunIcon, MoonIcon } from "@/components/ui/icons";
 import { UnreadBadge } from "@/features/notifications/UnreadBadge";
 import { useUnreadNotificationCount } from "@/features/notifications/useUnreadNotifications";
+import { LocationPermissionSheet } from "@/features/location/LocationPermissionSheet";
 import { useOwnerReviewBadge } from "@/features/reviews/useOwnerReviewBadge";
 import { cn } from "@/lib/cn";
 import { formatPhone, ROLE_LABELS } from "@/lib/format";
@@ -118,6 +120,7 @@ export function AppLayout() {
   const theme = useTheme((state) => state.theme);
   const toggleTheme = useTheme((state) => state.toggleTheme);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const unreadCount = useUnreadNotificationCount();
   const reviewBadgeCount = useOwnerReviewBadge();
@@ -138,6 +141,12 @@ export function AppLayout() {
     // history, which could put the user back inside a half-filled wizard.
     const destination = isQuoteWizard ? "/quote/mine" : "/me/businesses";
     navigate(destination, { replace: true });
+  }
+
+  async function handleLogout() {
+    setLogoutOpen(false);
+    await logout();
+    navigate("/", { replace: true });
   }
 
   useEffect(() => {
@@ -333,7 +342,11 @@ export function AppLayout() {
             {user ? (
               <>
                 <p className="text-sm font-bold text-slate-900">
-                  {user.full_name || formatPhone(user.phone)}
+                  {user.full_name || (
+                    <span dir="ltr" className="inline-block">
+                      {formatPhone(user.phone)}
+                    </span>
+                  )}
                 </p>
                 <p className="mt-0.5 text-[11px] text-slate-400">{ROLE_LABELS[user.role]}</p>
               </>
@@ -407,10 +420,9 @@ export function AppLayout() {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={async () => {
+                onClick={() => {
                   setDrawerOpen(false);
-                  await logout();
-                  navigate("/", { replace: true });
+                  setLogoutOpen(true);
                 }}
               >
                 خروج
@@ -419,6 +431,18 @@ export function AppLayout() {
           </div>
         </aside>
       </div>
+
+      <ConfirmSheet
+        open={logoutOpen}
+        title="خروج از حساب"
+        description="آیا از حساب خود خارج می‌شوید؟ برای استفاده دوباره باید وارد شوید."
+        confirmLabel="خروج"
+        tone="rose"
+        onClose={() => setLogoutOpen(false)}
+        onConfirm={() => void handleLogout()}
+      />
+
+      <LocationPermissionSheet />
     </div>
   );
 }

@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.models.business import Business, BusinessStatus
 from app.models.category import Category, Subcategory
+from app.models.tag import BusinessTag, Tag
+from app.models.user import User
 
 SORT_MODES = ("nearest", "top", "newest", "urgent", "visited")
 
@@ -85,18 +87,39 @@ def _base_conditions(params: BusinessSearchParams) -> list:
     ]
     if params.q:
         pattern = f"%{params.q.strip()}%"
+        tag_match = (
+            sa.select(BusinessTag.business_id)
+            .join(Tag, Tag.id == BusinessTag.tag_id)
+            .where(
+                BusinessTag.business_id == Business.id,
+                Tag.deleted_at.is_(None),
+                Tag.name.ilike(pattern),
+            )
+            .exists()
+        )
         conditions.append(
             or_(
                 Business.name.ilike(pattern),
                 Business.short_description.ilike(pattern),
                 Business.description.ilike(pattern),
                 Business.address.ilike(pattern),
+                Business.phone_business.ilike(pattern),
+                User.full_name.ilike(pattern),
+                User.phone.ilike(pattern),
+                tag_match,
             )
         )
     if params.category_slug:
         conditions.append(Category.slug == params.category_slug)
     if params.subcategory_slug:
-        conditions.append(Subcategory.slug == params.subcategory_slug)
+        # A business can serve several subcategories of its category; match any
+        # of them, with the legacy single column still honoured.
+        conditions.append(
+            or_(
+                Subcategory.slug == params.subcategory_slug,
+                Business.subcategories.any(Subcategory.slug == params.subcategory_slug),
+            )
+        )
     return conditions
 
 
@@ -104,6 +127,7 @@ def _base_select() -> sa.Select:
     return (
         select(Business)
         .join(Category, Business.category_id == Category.id)
+        .join(User, Business.owner_id == User.id)
         .outerjoin(Subcategory, Business.subcategory_id == Subcategory.id)
     )
 

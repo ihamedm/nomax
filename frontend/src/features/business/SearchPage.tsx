@@ -11,11 +11,10 @@ import { useToast } from "@/components/ui/toast";
 import { api, apiWithMeta, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { fa } from "@/lib/format";
-import { getCurrentPosition } from "@/lib/geolocation";
+import { getCurrentPosition, geolocationNeedsPrompt } from "@/lib/geolocation";
 import { useApi } from "@/lib/query";
 import { useUi } from "@/stores/ui";
 import { BusinessCard } from "@/features/business/BusinessCard";
-import { LocationPermissionSheet } from "@/features/location/LocationPermissionSheet";
 import { NeshanMap, type MapMarker, type MapViewport } from "@/features/map/NeshanMap";
 import type {
   BusinessCategory,
@@ -64,9 +63,12 @@ interface MapPoint {
   short_description?: string | null;
   rating_avg: number;
   rating_count: number;
+  like_count?: number;
   is_24h: boolean;
   is_verified: boolean;
+  is_license_verified?: boolean;
   profile_image_url?: string | null;
+  avatar_url?: string | null;
   category?: BusinessCategory | null;
 }
 
@@ -95,6 +97,7 @@ export function SearchPage() {
   const location = useUi((state) => state.location);
   const locationSource = useUi((state) => state.locationSource);
   const setLocation = useUi((state) => state.setLocation);
+  const openLocationPrompt = useUi((state) => state.openLocationPrompt);
 
   const qParam = params.get("q")?.trim() ?? "";
   const catParam = params.get("cat") ?? "";
@@ -322,9 +325,12 @@ export function SearchPage() {
       distance_m: null,
       rating_avg: point.rating_avg,
       rating_count: point.rating_count,
+      like_count: point.like_count ?? 0,
       is_24h: point.is_24h,
       is_verified: point.is_verified,
+      is_license_verified: point.is_license_verified ?? false,
       profile_image_url: point.profile_image_url ?? null,
+      avatar_url: point.avatar_url ?? null,
     };
   }
 
@@ -361,6 +367,10 @@ export function SearchPage() {
   }
 
   async function locateMe() {
+    if (locationSource !== "gps" && (await geolocationNeedsPrompt())) {
+      openLocationPrompt();
+      return;
+    }
     setLocating(true);
     try {
       const coords = await getCurrentPosition();
@@ -375,7 +385,6 @@ export function SearchPage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl pb-10">
-      <LocationPermissionSheet />
       <section className="sticky top-14 z-20 border-b border-slate-200 bg-slate-50/95 px-4 pb-3 pt-3 backdrop-blur">
         <form onSubmit={submitSearch} className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
@@ -383,7 +392,7 @@ export function SearchPage() {
               ref={searchInputRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="جستجوی کسب‌وکار یا خدمت…"
+              placeholder="جستجوی نام، خدمت یا شماره…"
               aria-label="جستجوی کسب‌وکار"
               className="h-11 pl-9 text-sm"
               enterKeyHint="search"

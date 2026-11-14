@@ -1,7 +1,8 @@
 """Owner-facing review inbox.
 
-Private reviews are visible only here (and to business admins). They never
-enter the public moderation queue, so they have no approve action.
+A public review reaches this inbox only after an admin accepts it; the owner
+then accepts or declines it before it appears publicly. Private reviews skip
+moderation and are visible only here (and to business admins).
 """
 import uuid
 from datetime import datetime, timezone
@@ -18,8 +19,8 @@ from app.models.user import User
 
 router = APIRouter(tags=["owner-reviews"])
 
-OWNER_VISIBLE_STATUSES = ("pending", "private", "approved")
-OWNER_UNREAD_STATUSES = ("pending", "private")
+OWNER_VISIBLE_STATUSES = ("awaiting_owner", "private", "approved", "declined")
+OWNER_UNREAD_STATUSES = ("awaiting_owner", "private")
 
 
 def _owner_review_payload(review: Review, business: Business) -> dict:

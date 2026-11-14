@@ -73,6 +73,8 @@ class QuoteDelivery(Base):
     )
     seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set when the owner marks the request as unrelated to that business.
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )

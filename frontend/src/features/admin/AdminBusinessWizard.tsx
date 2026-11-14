@@ -42,6 +42,7 @@ export interface AdminBusinessDetail {
   slug: string;
   status: BusinessStatus;
   is_verified: boolean;
+  is_license_verified: boolean;
   is_24h: boolean;
   short_description: string;
   description?: string | null;
@@ -51,7 +52,9 @@ export interface AdminBusinessDetail {
   geo?: { lat: number; lng: number } | null;
   category: CategoryRef | null;
   subcategory: CategoryRef | null;
+  subcategories?: CategoryRef[];
   profile_image_url?: string | null;
+  avatar_url?: string | null;
   rejection_reason?: string | null;
   owner: OwnerOption | null;
   images?: Array<{ url: string; is_main: boolean; sort_order: number }>;
@@ -69,15 +72,17 @@ interface WizardState {
   description: string;
   short_description: string;
   category: Category | null;
-  subcategory: Subcategory | null;
+  subcategories: Subcategory[];
   address: string;
   geo: Coordinates | null;
   phone_business: string;
   instagram: string;
   is_24h: boolean;
   photos: Photo[];
+  avatar_url: string;
   tags: string[];
   is_verified: boolean;
+  is_license_verified: boolean;
   status: BusinessStatus;
   rejection_reason: string;
 }
@@ -96,16 +101,18 @@ function asCategory(category: CategoryRef | null): Category | null {
   return category ? { ...category, sort_order: 0, subcategory_count: 0, icon: category.icon ?? "" } : null;
 }
 
-function asSubcategory(subcategory: CategoryRef | null, category: Category | null): Subcategory | null {
-  return subcategory && category
-    ? {
-        ...subcategory,
-        category_id: category.id,
-        sort_order: 0,
-        icon: subcategory.icon ?? "",
-        standard_tags: [],
-      }
-    : null;
+function asSubcategories(
+  refs: CategoryRef[] | null | undefined,
+  category: Category | null,
+): Subcategory[] {
+  if (!category) return [];
+  return (refs ?? []).map((item) => ({
+    ...item,
+    category_id: category.id,
+    sort_order: 0,
+    icon: item.icon ?? "",
+    standard_tags: [],
+  }));
 }
 
 function initialState(business: AdminBusinessDetail | null): WizardState {
@@ -116,21 +123,28 @@ function initialState(business: AdminBusinessDetail | null): WizardState {
       ? [{ url: business.profile_image_url, is_main: true, sort_order: 0 }]
       : [];
   const mainUrl = images.find((image) => image.is_main)?.url ?? images[0]?.url;
+  const rawSubcategories = business?.subcategories?.length
+    ? business.subcategories
+    : business?.subcategory
+      ? [business.subcategory]
+      : [];
   return {
     owner: business?.owner ?? null,
     name: business?.name ?? "",
     description: business?.description ?? "",
     short_description: business?.short_description ?? "",
     category,
-    subcategory: asSubcategory(business?.subcategory ?? null, category),
+    subcategories: asSubcategories(rawSubcategories, category),
     address: business?.address ?? "",
     geo: business?.geo ?? null,
     phone_business: business?.phone_business ?? "",
     instagram: business?.instagram ?? "",
     is_24h: business?.is_24h ?? false,
     photos: images.map((image) => ({ url: image.url, isMain: image.url === mainUrl })),
+    avatar_url: business?.avatar_url ?? "",
     tags: business?.tags ?? [],
     is_verified: business?.is_verified ?? false,
+    is_license_verified: business?.is_license_verified ?? false,
     status: business?.status ?? "pending",
     rejection_reason: business?.rejection_reason ?? "",
   };
@@ -171,6 +185,9 @@ export function AdminBusinessWizard({
   const [newOwnerOpen, setNewOwnerOpen] = useState(false);
   const [newOwner, setNewOwner] = useState({ phone: "", full_name: "", national_id: "" });
   const [creatingOwner, setCreatingOwner] = useState(false);
+  const [editOwnerOpen, setEditOwnerOpen] = useState(false);
+  const [editOwner, setEditOwner] = useState({ full_name: "" });
+  const [savingOwner, setSavingOwner] = useState(false);
   const [ownerQuery, setOwnerQuery] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -194,8 +211,14 @@ export function AdminBusinessWizard({
     setError(null);
   }
 
-  const suggestedTags =
-    subcategories.data?.items.find((item) => item.id === state.subcategory?.id)?.standard_tags ?? [];
+  const suggestedTags = Array.from(
+    new Set(
+      state.subcategories.flatMap(
+        (picked) =>
+          subcategories.data?.items.find((item) => item.id === picked.id)?.standard_tags ?? [],
+      ),
+    ),
+  );
 
   function validate(current: number): string | null {
     if (current === 0 && !state.owner) return "مالک کسب‌وکار را انتخاب یا ثبت کنید.";
@@ -235,7 +258,7 @@ export function AdminBusinessWizard({
       owner_id: state.owner.id,
       name: state.name.trim(),
       category_id: state.category?.id ?? null,
-      subcategory_id: state.subcategory?.id ?? null,
+      subcategory_ids: state.subcategories.map((item) => item.id),
       short_description: state.short_description.trim().slice(0, 120),
       description: state.description.trim() || null,
       phone_business: state.phone_business.trim() || null,
@@ -245,6 +268,8 @@ export function AdminBusinessWizard({
       instagram: state.instagram.trim() || null,
       is_24h: state.is_24h,
       is_verified: state.is_verified,
+      is_license_verified: state.is_license_verified,
+      avatar_url: state.avatar_url || null,
       status: state.status,
       rejection_reason: state.status === "rejected" ? state.rejection_reason.trim() || null : null,
       profile_image_url: mainPhoto,
@@ -280,6 +305,24 @@ export function AdminBusinessWizard({
       setError(errorMessage(createError));
     } finally {
       setCreatingOwner(false);
+    }
+  }
+
+  async function updateOwner() {
+    if (!state.owner) return;
+    setSavingOwner(true);
+    try {
+      const owner = await api<OwnerOption>(`/admin/businesses/owners/${state.owner.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ full_name: editOwner.full_name.trim() || null }),
+      });
+      patch({ owner: { ...state.owner, ...owner } });
+      setEditOwnerOpen(false);
+      toast("اطلاعات مالک به‌روزرسانی شد.");
+    } catch (updateError) {
+      setError(errorMessage(updateError));
+    } finally {
+      setSavingOwner(false);
     }
   }
 
@@ -344,6 +387,7 @@ export function AdminBusinessWizard({
   }
 
   function removePhoto(index: number) {
+    const removed = state.photos[index];
     const photos = state.photos.filter((_, photoIndex) => photoIndex !== index);
     patch({
       photos: photos.map((photo, photoIndex) =>
@@ -351,6 +395,7 @@ export function AdminBusinessWizard({
           ? { ...photo, isMain: true }
           : photo,
       ),
+      avatar_url: removed?.url === state.avatar_url ? "" : state.avatar_url,
     });
   }
 
@@ -386,22 +431,78 @@ export function AdminBusinessWizard({
         {step === 0 && (
           <section className="space-y-3">
             {state.owner ? (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-3 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900">
-                    {state.owner.full_name || "بدون نام"}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500" dir="ltr">
-                    {formatPhone(state.owner.phone)}
-                  </p>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-3 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900">
+                      {state.owner.full_name || "بدون نام"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500" dir="ltr">
+                      {formatPhone(state.owner.phone)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3 text-xs font-medium">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditOwner({
+                          full_name: state.owner?.full_name ?? "",
+                        });
+                        setEditOwnerOpen((open) => !open);
+                      }}
+                      className="text-brand-700 hover:underline"
+                    >
+                      ویرایش مالک
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditOwnerOpen(false);
+                        patch({ owner: null });
+                      }}
+                      className="text-rose-600 hover:underline"
+                    >
+                      تغییر مالک
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => patch({ owner: null })}
-                  className="shrink-0 text-xs font-medium text-rose-600 hover:underline"
-                >
-                  تغییر مالک
-                </button>
+                {editOwnerOpen && (
+                  <div className="space-y-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-3">
+                    <Field label="شماره موبایل" hint="غیرقابل ویرایش">
+                      <Input
+                        dir="ltr"
+                        disabled
+                        value={formatPhone(state.owner.phone)}
+                      />
+                    </Field>
+                    <Field label="نام نمایشی" hint="اختیاری">
+                      <Input
+                        value={editOwner.full_name}
+                        onChange={(event) =>
+                          setEditOwner((current) => ({ ...current, full_name: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditOwnerOpen(false)}
+                      >
+                        انصراف
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        loading={savingOwner}
+                        onClick={updateOwner}
+                      >
+                        ذخیره مالک
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -525,7 +626,11 @@ export function AdminBusinessWizard({
               >
                 <span className="min-w-0 truncate text-sm">
                   {state.category
-                    ? `${state.category.name}${state.subcategory ? ` > ${state.subcategory.name}` : ""}`
+                    ? `${state.category.name}${
+                        state.subcategories.length
+                          ? ` > ${state.subcategories.map((item) => item.name).join(" · ")}`
+                          : ""
+                      }`
                     : "انتخاب دسته‌بندی…"}
                 </span>
                 <span className="shrink-0 text-xs text-brand-600">تغییر</span>
@@ -665,6 +770,44 @@ export function AdminBusinessWizard({
                 className="hidden"
                 onChange={(event) => void uploadPhotos(event)}
               />
+              {state.photos.length > 0 && (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <p className="text-[11px] font-bold text-slate-700">آواتار کسب‌وکار</p>
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    اگر انتخاب نشود، اولین تصویر به‌عنوان آواتار نمایش داده می‌شود.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => patch({ avatar_url: "" })}
+                      className={cn(
+                        "h-12 rounded-lg border-2 px-2 text-[10px]",
+                        state.avatar_url
+                          ? "border-slate-200 text-slate-500"
+                          : "border-brand-500 text-brand-700",
+                      )}
+                    >
+                      اولین تصویر
+                    </button>
+                    {state.photos.map((photo) => (
+                      <button
+                        key={photo.url}
+                        type="button"
+                        aria-label="انتخاب آواتار"
+                        onClick={() => patch({ avatar_url: photo.url })}
+                        className={cn(
+                          "h-12 w-12 overflow-hidden rounded-lg border-2",
+                          state.avatar_url === photo.url
+                            ? "border-brand-500"
+                            : "border-transparent",
+                        )}
+                      >
+                        <img src={photo.url} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -758,6 +901,15 @@ export function AdminBusinessWizard({
                   onChange={(event) => patch({ is_verified: event.target.checked })}
                   className="h-4 w-4 accent-brand-600"
                 />
+                هویت تأییدشده
+              </label>
+              <label className="flex items-center gap-2 self-end rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={state.is_license_verified}
+                  onChange={(event) => patch({ is_license_verified: event.target.checked })}
+                  className="h-4 w-4 accent-brand-600"
+                />
                 مجوز تأییدشده
               </label>
             </div>
@@ -775,7 +927,17 @@ export function AdminBusinessWizard({
                 <b className="text-slate-800">{state.name || "بدون نام"}</b>
                 {state.category ? ` — ${state.category.name}` : ""}
               </p>
-              <p>مالک: {state.owner?.full_name || (state.owner ? formatPhone(state.owner.phone) : "—")}</p>
+              <p>
+                مالک:{" "}
+                {state.owner?.full_name ||
+                  (state.owner ? (
+                    <span dir="ltr" className="inline-block">
+                      {formatPhone(state.owner.phone)}
+                    </span>
+                  ) : (
+                    "—"
+                  ))}
+              </p>
               <p>آدرس: {state.address || "—"}</p>
               <p>
                 تصاویر: {state.photos.length} — برچسب‌ها: {state.tags.length}
@@ -802,12 +964,15 @@ export function AdminBusinessWizard({
         open={categoryOpen}
         onClose={() => setCategoryOpen(false)}
         selected={state.category}
-        selectedSubcategory={state.subcategory}
-        onSelect={(category, subcategory) =>
+        selectedSubcategory={state.subcategories[0] ?? null}
+        multiple
+        selectedSubcategories={state.subcategories}
+        onSelect={() => {}}
+        onSelectMany={(category, picked) =>
           patch({
             category,
-            subcategory,
-            tags: subcategory ? [...new Set([...state.tags, ...subcategory.standard_tags])] : state.tags,
+            subcategories: picked,
+            tags: [...new Set([...state.tags, ...picked.flatMap((item) => item.standard_tags)])],
           })
         }
       />

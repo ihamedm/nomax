@@ -280,12 +280,15 @@ async def incoming_quotes(
     business_by_id = {business.id: business for business in my_businesses}
     delivery_rows = (
         await session.execute(
-            sa.select(QuoteDelivery.request_id, QuoteDelivery.business_id).where(
-                QuoteDelivery.business_id.in_(list(business_by_id))
-            )
+            sa.select(
+                QuoteDelivery.request_id,
+                QuoteDelivery.business_id,
+                QuoteDelivery.dismissed_at,
+            ).where(QuoteDelivery.business_id.in_(list(business_by_id)))
         )
     ).all()
     delivered_quote_ids = {row[0] for row in delivery_rows}
+    dismissed_quote_ids = {row[0] for row in delivery_rows if row[2] is not None}
 
     offer_rows = (
         await session.execute(
@@ -325,7 +328,7 @@ async def incoming_quotes(
         # notification for a request they cannot open or answer.
         matches = [b for b in my_businesses if business_matches_quote(b, quote)]
         match_ids = {business.id for business in matches}
-        for request_id, business_id in delivery_rows:
+        for request_id, business_id, _dismissed_at in delivery_rows:
             if request_id == quote.id and business_id in business_by_id:
                 if business_id not in match_ids:
                     matches.append(business_by_id[business_id])
@@ -374,7 +377,7 @@ async def incoming_quotes(
     new_items = []
     new_matches: dict[uuid.UUID, list[uuid.UUID]] = {}
     for quote in candidate_quotes:
-        if quote.id in offered_quote_ids:
+        if quote.id in offered_quote_ids or quote.id in dismissed_quote_ids:
             continue
         businesses = matching_for(quote)
         if not businesses:
@@ -713,6 +716,49 @@ async def decline_quote(
             "request_id": str(quote.id),
             "business_id": str(business.id),
             "status": DECLINED,
+        }
+    }
+
+
+@router.post("/quotes/requests/{quote_id}/dismiss")
+async def dismiss_quote(
+    quote_id: str,
+    payload: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Hide a dispatched request the owner says does not fit their business."""
+    quote = await _get_quote(session, quote_id)
+    _check_not_expired(quote)
+
+    try:
+        business_id = uuid.UUID(str(payload.get("business_id")))
+    except (ValueError, TypeError):
+        raise AppError("validation_error", "invalid_business_id", 422)
+    business = await session.get(Business, business_id)
+    if business is None or business.owner_id != user.id:
+        raise AppError("forbidden", "business_not_owned", 403)
+
+    delivery = (
+        await session.execute(
+            sa.select(QuoteDelivery).where(
+                QuoteDelivery.request_id == quote.id,
+                QuoteDelivery.business_id == business.id,
+            )
+        )
+    ).scalars().first()
+    if delivery is None:
+        if not business_matches_quote(business, quote):
+            raise AppError("validation_error", "business_category_mismatch", 422)
+        delivery = QuoteDelivery(request_id=quote.id, business_id=business.id, source="manual")
+        session.add(delivery)
+    delivery.dismissed_at = datetime.now(timezone.utc)
+    await session.commit()
+    return {
+        "data": {
+            "request_id": str(quote.id),
+            "business_id": str(business.id),
+            "status": "dismissed",
         }
     }
 

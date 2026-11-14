@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button, Spinner } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icons";
 import { RatingStars } from "@/components/ui/stars";
@@ -15,10 +16,9 @@ import { useApi } from "@/lib/query";
 import { returnPath } from "@/lib/auth-redirect";
 import { useAuth } from "@/stores/auth";
 import { LoginRequiredSheet } from "@/features/auth/LoginRequiredSheet";
-import { LocationPermissionSheet } from "@/features/location/LocationPermissionSheet";
 import { NeshanMap, type MapMarker } from "@/features/map/NeshanMap";
 import { ReviewSheet } from "@/features/reviews/ReviewSheet";
-import type { BusinessDetail } from "@/types";
+import type { BusinessDetail, BusinessListItem } from "@/types";
 import { BusinessGallery } from "./detail/BusinessGallery";
 import { OwnerClaimSheet } from "./detail/OwnerClaimSheet";
 
@@ -102,10 +102,47 @@ function BookmarkIcon({ filled = false }: { filled?: boolean }) {
   );
 }
 
+function LicenseTick() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5 shrink-0 text-sky-500"
+      role="img"
+      aria-label="مجوز تأیید شده"
+    >
+      <path
+        fill="currentColor"
+        d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.1 14.3-3.6-3.6 1.4-1.4 2.2 2.2 4.8-4.8 1.4 1.4-6.2 6.2Z"
+      />
+    </svg>
+  );
+}
+
+function HeartIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3.5 w-3.5"
+      aria-hidden
+    >
+      <path d="M12 20.5S3.5 15 3.5 9.3A4.8 4.8 0 0 1 12 5.7a4.8 4.8 0 0 1 8.5 3.6C20.5 15 12 20.5 12 20.5Z" />
+    </svg>
+  );
+}
+
 function myReviewBadge(review: NonNullable<BusinessDetail["my_review"]>) {
   if (review.is_private) return { label: "نظر خصوصی", tone: "sky" as const };
   if (review.status === "approved") return { label: "نظر شما منتشر شد", tone: "brand" as const };
+  if (review.status === "declined") return { label: "مالک نظر را نپذیرفت", tone: "rose" as const };
   if (review.status === "rejected") return { label: "نظر رد شد", tone: "rose" as const };
+  if (review.status === "awaiting_owner") {
+    return { label: "در انتظار تأیید مالک", tone: "amber" as const };
+  }
   return { label: "در انتظار تأیید", tone: "amber" as const };
 }
 
@@ -118,12 +155,16 @@ function maskPhone(phone: string) {
   return phone.length > 4 ? `${phone.slice(0, -4)}****` : "****";
 }
 
-type LoginPrompt = "review" | "save" | "phone" | "instagram" | "claim";
+type LoginPrompt = "review" | "save" | "like" | "phone" | "instagram" | "claim";
 
 const LOGIN_PROMPTS: Record<LoginPrompt, { title: string; description: string }> = {
   save: {
     title: "ورود برای ذخیره کسب‌وکار",
     description: "برای ذخیره کسب‌وکار در حساب خود، ابتدا وارد شوید یا ثبت‌نام کنید.",
+  },
+  like: {
+    title: "ورود برای لایک کردن",
+    description: "برای پسندیدن این کسب‌وکار، ابتدا وارد شوید یا ثبت‌نام کنید.",
   },
   claim: {
     title: "ورود برای ثبت مالکیت",
@@ -163,28 +204,77 @@ export function BusinessDetailPage() {
   const loading = detailQuery.isLoading;
   const error = detailQuery.error ? errorMessage(detailQuery.error) : null;
   const saved = Boolean(business?.is_saved);
+  const liked = Boolean(business?.is_liked);
+  // A user can own only one business, so the claim button is pointless (and
+  // misleading) for anyone who already has one.
+  const myBusinesses = useApi<{ items: BusinessListItem[] }>(["me", "businesses"], "/me/businesses", {
+    enabled: Boolean(user),
+  });
+  const ownsBusiness =
+    Boolean(business?.is_owner) || (myBusinesses.data?.items.length ?? 0) > 0;
   const [reviewOpen, setReviewOpen] = useState(false);
   const [claimOpen, setClaimOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [reviewHint, setReviewHint] = useState<string | null>(null);
+  const reviewsRef = useRef<HTMLElement | null>(null);
   const [loginPrompt, setLoginPrompt] = useState<LoginPrompt | null>(null);
   const reviewIntentHandled = useRef(false);
 
   const saveMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (note: string) => {
       if (!business) return Promise.resolve();
-      return api(`/me/bookmarks/${business.id}`, { method: saved ? "DELETE" : "POST" });
+      return api(`/me/bookmarks/${business.id}`, {
+        method: "POST",
+        body: JSON.stringify({ note: note.trim() || null }),
+      });
     },
-    onSuccess: () => {
+    onSuccess: (_result, note) => {
+      const trimmed = note.trim() || null;
       queryClient.setQueryData<BusinessDetail>(["business", slug], (current) =>
-        current ? { ...current, is_saved: !saved } : current,
+        current ? { ...current, is_saved: true, bookmark_note: trimmed } : current,
       );
       void queryClient.invalidateQueries({ queryKey: ["me", "bookmarks"] });
-      toast(saved ? "از ذخیره‌شده‌ها حذف شد." : "کسب‌وکار ذخیره شد.");
+      setNoteOpen(false);
+      toast("کسب‌وکار ذخیره شد.");
     },
     onError: (saveError) => toast(errorMessage(saveError)),
   });
 
-  const reviewParams = new URLSearchParams(location.search);
-  reviewParams.set("review", "1");
+  const removeBookmark = useMutation({
+    mutationFn: () => {
+      if (!business) return Promise.resolve();
+      return api(`/me/bookmarks/${business.id}`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      queryClient.setQueryData<BusinessDetail>(["business", slug], (current) =>
+        current ? { ...current, is_saved: false, bookmark_note: null } : current,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["me", "bookmarks"] });
+      setNoteOpen(false);
+      toast("از ذخیره‌شده‌ها حذف شد.");
+    },
+    onError: (saveError) => toast(errorMessage(saveError)),
+  });
+
+  const likeMutation = useMutation({
+    mutationFn: () => {
+      if (!business) return Promise.resolve({ liked, like_count: 0 });
+      return api<{ liked: boolean; like_count: number }>(
+        `/me/likes/${business.id}`,
+        { method: liked ? "DELETE" : "POST" },
+      );
+    },
+    onSuccess: (result) => {
+      queryClient.setQueryData<BusinessDetail>(["business", slug], (current) =>
+        current ? { ...current, is_liked: result.liked, like_count: result.like_count } : current,
+      );
+      toast(result.liked ? "کسب‌وکار لایک شد." : "لایک برداشته شد.");
+    },
+    onError: (likeError) => toast(errorMessage(likeError)),
+  });
+
+  const reviewParams = new URLSearchParams(location.search);  reviewParams.set("review", "1");
   const reviewNext = `${location.pathname}?${reviewParams.toString()}`;
   const currentPath = returnPath(location);
 
@@ -231,13 +321,43 @@ export function BusinessDetailPage() {
     setReviewOpen(true);
   }
 
+  // Tapping the rating scrolls to the reviews list. With no reviews yet there
+  // is nothing to read, so the review sheet opens with a first-review hint.
+  function openReviews() {
+    if (!business) return;
+    const canReview = !business.is_owner && !business.my_review;
+    const opensSheet = canReview && business.reviews.length === 0;
+    // Jump instantly when the sheet opens so the list is already in place once
+    // it closes; a smooth scroll would be interrupted by the sheet.
+    reviewsRef.current?.scrollIntoView({
+      behavior: opensSheet ? "auto" : "smooth",
+      block: "start",
+    });
+    setReviewHint(
+      opensSheet
+        ? "هنوز هیچ نظری برای این کسب‌وکار ثبت نشده است؛ شما اولین نفر باشید و تجربه‌تان را با دیگران به اشتراک بگذارید."
+        : null,
+    );
+    if (opensSheet) requestReview();
+  }
+
   function requestSave() {
     if (!ready) return;
     if (!user) {
       setLoginPrompt("save");
       return;
     }
-    saveMutation.mutate();
+    setNoteDraft(business?.bookmark_note ?? "");
+    setNoteOpen(true);
+  }
+
+  function requestLike() {
+    if (!ready) return;
+    if (!user) {
+      setLoginPrompt("like");
+      return;
+    }
+    likeMutation.mutate();
   }
 
   function requestClaim() {
@@ -258,7 +378,6 @@ export function BusinessDetailPage() {
         lng: business.geo.lng,
         title: business.name,
         subtitle: business.address,
-        variant: "pushpin" as const,
       },
     ];
   }, [business]);
@@ -295,7 +414,6 @@ export function BusinessDetailPage() {
 
   return (
     <main className="mx-auto min-h-[100dvh] w-full max-w-3xl pb-16">
-      <LocationPermissionSheet />
       {loading && (
         <div className="flex justify-center py-24 text-brand-600">
           <Spinner />
@@ -377,7 +495,6 @@ export function BusinessDetailPage() {
                 aria-pressed={saved}
                 title={saved ? "ذخیره شده" : "ذخیره کسب‌وکار"}
                 onClick={requestSave}
-                disabled={saveMutation.isPending}
                 className={cn(
                   "absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border shadow-sm backdrop-blur transition disabled:opacity-60",
                   saved
@@ -393,7 +510,12 @@ export function BusinessDetailPage() {
               <div className="flex items-start justify-between gap-3">
                 <p className="min-w-0 text-[11px] font-medium text-slate-400">
                   {business.category?.icon} {business.category?.name}
-                  {business.subcategory ? ` · ${business.subcategory.name}` : ""}
+                  {(business.subcategories?.length
+                    ? business.subcategories
+                    : business.subcategory
+                      ? [business.subcategory]
+                      : []
+                  ).map((item) => ` · ${item.name}`).join("")}
                 </p>
                 {business.is_owner && (
                   <Link
@@ -405,29 +527,51 @@ export function BusinessDetailPage() {
                 )}
               </div>
 
-              <h1 className="mt-1.5 text-2xl font-black leading-9 tracking-tight text-slate-900 sm:text-3xl sm:leading-10">
-                {business.name}
+              <h1 className="mt-1.5 flex items-center gap-1.5 text-2xl font-black leading-9 tracking-tight text-slate-900 sm:text-3xl sm:leading-10">
+                <span>{business.name}</span>
+                {business.is_license_verified && <LicenseTick />}
               </h1>
 
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="inline-flex items-center gap-1 font-bold text-slate-800">
+                <button
+                  type="button"
+                  onClick={openReviews}
+                  aria-label="مشاهده نظرات کاربران"
+                  className="inline-flex items-center gap-1.5 font-bold text-slate-800 transition-colors hover:text-brand-600"
+                >
                   <span className="text-amber-500" aria-hidden>
                     ★
                   </span>
                   {business.rating_count > 0
                     ? formatRating(business.rating_avg)
                     : "بدون امتیاز"}
-                </span>
-                <span className="h-3 w-px bg-slate-200" aria-hidden />
-                <span className="text-slate-400">
-                  {business.rating_count > 0
-                    ? `${fa(business.rating_count)} نظر`
-                    : "اولین نظر را ثبت کنید"}
-                </span>
+                  <span className="h-3 w-px bg-slate-200" aria-hidden />
+                  <span className="font-normal text-slate-400">
+                    {business.rating_count > 0
+                      ? `${fa(business.rating_count)} نظر`
+                      : "اولین نظر را ثبت کنید"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={requestLike}
+                  disabled={likeMutation.isPending}
+                  aria-pressed={liked}
+                  aria-label={liked ? "برداشتن لایک" : "لایک کردن کسب‌وکار"}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold transition disabled:opacity-60",
+                    liked
+                      ? "border-rose-200 bg-rose-50 text-rose-600"
+                      : "border-slate-200 text-slate-500 hover:border-rose-200 hover:text-rose-600",
+                  )}
+                >
+                  <HeartIcon filled={liked} />
+                  {fa(business.like_count ?? 0)}
+                </button>
                 {business.is_verified && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">
                     <ShieldIcon className="h-3 w-3" />
-                    تأییدشده
+                    تایید هویت شده
                   </span>
                 )}
                 {business.is_24h && (
@@ -580,7 +724,7 @@ export function BusinessDetailPage() {
                 )}
               </div>
 
-              {!ownerVerified && (
+              {!ownerVerified && !ownsBusiness && (
                 <button
                   type="button"
                   onClick={requestClaim}
@@ -651,7 +795,10 @@ export function BusinessDetailPage() {
             </section>
           )}
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5">
+          <section
+            ref={reviewsRef}
+            className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-5"
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-bold text-slate-900">نظرات کاربران</h2>
@@ -687,16 +834,21 @@ export function BusinessDetailPage() {
                   ? "نظر خصوصی شما ثبت شده و فقط مالک کسب‌وکار آن را می‌بیند."
                   : business.my_review.status === "approved"
                     ? "نظر شما تأیید و منتشر شده است."
-                    : business.my_review.status === "rejected"
-                      ? "نظر شما توسط مدیر رد شد."
-                      : "نظر شما ثبت شده و در انتظار تأیید مدیر است."}
+                    : business.my_review.status === "awaiting_owner"
+                      ? "نظر شما توسط مدیر تأیید شد و در انتظار تأیید مالک است."
+                      : business.my_review.status === "declined"
+                        ? "مالک کسب‌وکار این نظر را نپذیرفت و منتشر نشد."
+                        : business.my_review.status === "rejected"
+                          ? "نظر شما توسط مدیر رد شد."
+                          : "نظر شما ثبت شده و در انتظار تأیید مدیر است."}
               </p>
             ) : null}
 
             <div className="mt-4 space-y-3">
               {business.reviews.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
-                  هنوز نظر تأییدشده‌ای برای این کسب‌وکار ثبت نشده است.
+                <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs leading-6 text-slate-400">
+                  هنوز نظری ثبت نشده است. اولین نفر باشید و تجربه‌تان را با دیگران به اشتراک
+                  بگذارید.
                 </p>
               ) : (
                 business.reviews.map((review) => (
@@ -737,8 +889,13 @@ export function BusinessDetailPage() {
             open={reviewOpen}
             businessName={business.name}
             businessSlug={business.slug}
-            onClose={() => setReviewOpen(false)}
+            hint={reviewHint}
+            onClose={() => {
+              setReviewOpen(false);
+              setReviewHint(null);
+            }}
             onSubmitted={() => {
+              setReviewHint(null);
               void queryClient.invalidateQueries({ queryKey: ["business", slug] });
             }}
           />
@@ -755,6 +912,53 @@ export function BusinessDetailPage() {
               void queryClient.invalidateQueries({ queryKey: ["business", slug] });
             }}
           />
+          <BottomSheet
+            open={noteOpen}
+            onClose={() => setNoteOpen(false)}
+            title={saved ? "یادداشت ذخیره‌شده" : "ذخیره کسب‌وکار"}
+          >
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="bookmark-note" className="text-xs font-bold text-slate-700">
+                  یادداشت <span className="font-normal text-slate-400">(اختیاری)</span>
+                </label>
+                <textarea
+                  id="bookmark-note"
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  rows={3}
+                  maxLength={300}
+                  placeholder="مثلاً: شنبه‌ها تعطیل است..."
+                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm leading-6 outline-none focus:border-brand-400"
+                />
+                <p className="mt-1 text-left text-[10px] text-slate-400" dir="ltr">
+                  {noteDraft.length}/300
+                </p>
+                <p className="mt-1 text-[10px] leading-5 text-slate-400">
+                  این یادداشت خصوصی است و فقط در بخش ذخیره‌شده‌های شما نمایش داده می‌شود.
+                </p>
+              </div>
+              <Button
+                type="button"
+                className="w-full"
+                loading={saveMutation.isPending}
+                onClick={() => saveMutation.mutate(noteDraft)}
+              >
+                {saved ? "ذخیره یادداشت" : "ذخیره کسب‌وکار"}
+              </Button>
+              {saved && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full text-rose-600"
+                  loading={removeBookmark.isPending}
+                  onClick={() => removeBookmark.mutate()}
+                >
+                  حذف از ذخیره‌شده‌ها
+                </Button>
+              )}
+            </div>
+          </BottomSheet>
           <LoginRequiredSheet
             open={loginPrompt !== null}
             title={loginPrompt ? LOGIN_PROMPTS[loginPrompt].title : ""}

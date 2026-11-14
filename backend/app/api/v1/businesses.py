@@ -24,6 +24,7 @@ from app.core.permissions import has_permission
 from app.db.session import get_db
 from app.models.bookmark import Bookmark
 from app.models.business import Business, BusinessImage, BusinessStatus
+from app.models.business_like import BusinessLike
 from app.models.category import Category, Subcategory
 from app.models.admin import AuditLog
 from app.models.review import Review
@@ -75,6 +76,77 @@ def _subcategory_payload(subcategory: Subcategory | None) -> dict | None:
     }
 
 
+def _business_subcategories(business: Business) -> list[Subcategory]:
+    """All picked subcategories, with the legacy single column as a fallback."""
+    rows = [row for row in business.subcategories if row.deleted_at is None]
+    if not rows and business.subcategory is not None:
+        rows = [business.subcategory]
+    return rows
+
+
+async def _resolve_subcategories(
+    session: AsyncSession,
+    category_id: int,
+    payload: dict,
+) -> list[Subcategory] | None:
+    """Read ``subcategory_ids`` (or the legacy single id) from a payload.
+
+    Returns ``None`` when the payload does not mention subcategories, so an
+    update can leave the current selection untouched.
+    """
+    if "subcategory_ids" in payload:
+        raw = payload.get("subcategory_ids") or []
+    elif "subcategory_id" in payload:
+        single = payload.get("subcategory_id")
+        raw = [] if single is None else [single]
+    else:
+        return None
+    if not isinstance(raw, list):
+        raise AppError("validation_error", "invalid_subcategory_ids", 422)
+
+    ids: list[int] = []
+    for value in raw:
+        try:
+            subcategory_id = int(value)
+        except (TypeError, ValueError):
+            raise AppError("validation_error", "invalid_subcategory_id", 422)
+        if subcategory_id not in ids:
+            ids.append(subcategory_id)
+    if not ids:
+        return []
+
+    rows = (
+        await session.execute(
+            sa.select(Subcategory).where(
+                Subcategory.id.in_(ids), Subcategory.deleted_at.is_(None)
+            )
+        )
+    ).scalars().all()
+    by_id = {row.id: row for row in rows}
+    if len(by_id) != len(ids):
+        raise AppError("not_found", "subcategory_not_found", 404)
+    ordered = [by_id[subcategory_id] for subcategory_id in ids]
+    # Every subcategory must belong to the business's own parent category.
+    for subcategory in ordered:
+        if subcategory.category_id != category_id:
+            raise AppError("validation_error", "subcategory_category_mismatch", 422)
+    return ordered
+
+
+def _apply_subcategories(business: Business, subcategories: list[Subcategory]) -> None:
+    primary = subcategories[0] if subcategories else None
+    business.subcategory_id = primary.id if primary is not None else None
+    business.subcategory = primary
+    business.subcategories = list(subcategories)
+
+
+def _standard_tag_names(subcategories: list[Subcategory]) -> set[str]:
+    names: set[str] = set()
+    for subcategory in subcategories:
+        names.update(subcategory.standard_tags or [])
+    return names
+
+
 def _business_payload(hit: BusinessHit, *, detail: bool = False) -> dict:
     business = hit.business
     payload = {
@@ -86,6 +158,10 @@ def _business_payload(hit: BusinessHit, *, detail: bool = False) -> dict:
         "phone_business": business.phone_business,
         "category": _category_payload(business.category),
         "subcategory": _subcategory_payload(business.subcategory),
+        "subcategories": [
+            _subcategory_payload(subcategory)
+            for subcategory in _business_subcategories(business)
+        ],
         "geo": (
             {"lat": business.geo_lat, "lng": business.geo_lng}
             if business.geo_lat is not None and business.geo_lng is not None
@@ -94,14 +170,17 @@ def _business_payload(hit: BusinessHit, *, detail: bool = False) -> dict:
         "distance_m": round(hit.distance_m) if hit.distance_m is not None else None,
         "rating_avg": round(business.rating_avg or 0, 2),
         "rating_count": business.rating_count or 0,
+        "like_count": business.like_count or 0,
         "view_count": business.view_count or 0,
         "is_24h": business.is_24h,
         "is_verified": business.is_verified,
+        "is_license_verified": business.is_license_verified,
         "status": (
             business.status.value if hasattr(business.status, "value") else str(business.status)
         ),
         "rejection_reason": business.rejection_reason,
         "profile_image_url": business.profile_image_url,
+        "avatar_url": business.avatar_url,
         "created_at": business.created_at.isoformat() if business.created_at else None,
     }
     if detail:
@@ -458,14 +537,8 @@ async def create_business(
     if category is None or category.deleted_at is not None:
         raise AppError("not_found", "category_not_found", 404)
 
-    subcategory_id = payload.get("subcategory_id")
-    subcategory: Subcategory | None = None
-    if subcategory_id is not None:
-        subcategory = await session.get(Subcategory, subcategory_id)
-        if subcategory is None:
-            raise AppError("not_found", "subcategory_not_found", 404)
-        if subcategory.category_id != category.id:
-            raise AppError("validation_error", "subcategory_category_mismatch", 422)
+    subcategories = await _resolve_subcategories(session, category.id, payload) or []
+    subcategory = subcategories[0] if subcategories else None
 
     geo_lat = payload.get("geo_lat")
     geo_lng = payload.get("geo_lng")
@@ -498,7 +571,7 @@ async def create_business(
     business = Business(
         owner_id=user.id,
         category_id=category_id,
-        subcategory_id=subcategory_id,
+        subcategory_id=subcategory.id if subcategory is not None else None,
         name=name,
         slug=slug,
         short_description=(payload.get("short_description") or "").strip()[:120],
@@ -510,6 +583,8 @@ async def create_business(
         instagram=instagram,
         is_24h=bool(payload.get("is_24h", False)),
         profile_image_url=profile_image_url,
+        avatar_url=_clean_image_url(payload.get("avatar_url")),
+        subcategories=subcategories,
     )
     session.add(business)
     await session.flush()
@@ -522,7 +597,7 @@ async def create_business(
             session,
             business.id,
             tags,
-            standard_names=set(subcategory.standard_tags or []) if subcategory else set(),
+            standard_names=_standard_tag_names(subcategories),
         )
 
     if user.role == UserRole.CUSTOMER:
@@ -786,11 +861,21 @@ async def moderate_review(
     business = await session.get(Business, review.business_id)
     if business is None or business.deleted_at is not None:
         raise AppError("not_found", "business_not_found", 404)
-    if business.owner_id != user.id and not has_permission(user, "review.moderate"):
+    is_owner = business.owner_id == user.id
+    is_moderator = has_permission(user, "review.moderate")
+    if not is_owner and not is_moderator:
         raise AppError("forbidden", "review_moderation_forbidden", 403)
     status = payload.get("status")
-    if status not in ("approved", "rejected", "pending"):
-        raise AppError("validation_error", "invalid_status", 422)
+    if is_owner:
+        # The owner only decides after the admin has accepted the review.
+        if status not in ("approved", "declined"):
+            raise AppError("validation_error", "invalid_status", 422)
+        if review.status != "awaiting_owner":
+            raise AppError("review_not_ready", "review_not_ready", 409)
+    else:
+        # Admin acceptance only moves the review to the owner's inbox.
+        if status not in ("awaiting_owner", "rejected", "pending"):
+            raise AppError("validation_error", "invalid_status", 422)
     review.status = status
     # Approval/rejection changes the public aggregate immediately.
     await _recalculate_business_rating(session, review.business_id)
@@ -847,20 +932,17 @@ async def update_business(
     if category is None or category.deleted_at is not None:
         raise AppError("not_found", "category_not_found", 404)
 
-    if "subcategory_id" in payload:
-        new_subcategory_id = payload["subcategory_id"]
+    if "subcategory_ids" in payload or "subcategory_id" in payload:
+        new_subcategories = await _resolve_subcategories(session, category.id, payload)
     elif "category_id" in payload:
-        new_subcategory_id = None
+        new_subcategories = []
     else:
-        new_subcategory_id = business.subcategory_id
-
-    subcategory: Subcategory | None = None
-    if new_subcategory_id is not None:
-        subcategory = await session.get(Subcategory, new_subcategory_id)
-        if subcategory is None:
-            raise AppError("not_found", "subcategory_not_found", 404)
-        if subcategory.category_id != category.id:
-            raise AppError("validation_error", "subcategory_category_mismatch", 422)
+        new_subcategories = None
+    selected_subcategories = (
+        new_subcategories
+        if new_subcategories is not None
+        else _business_subcategories(business)
+    )
 
     name = business.name
     if "name" in payload:
@@ -907,22 +989,31 @@ async def update_business(
     tags = _clean_tags(payload.get("tags")) if "tags" in payload else None
 
     # Only actual critical edits send the business back to moderation.
+    current_subcategory_ids = set(business.subcategory_ids)
+    next_subcategory_ids = (
+        {subcategory.id for subcategory in new_subcategories}
+        if new_subcategories is not None
+        else current_subcategory_ids
+    )
     critical_changed = (
         name != business.name
         or address != business.address
         or category.id != business.category_id
-        or new_subcategory_id != business.subcategory_id
+        or next_subcategory_ids != current_subcategory_ids
     )
 
     business.name = name
     business.address = address
     business.category_id = category.id
-    business.subcategory_id = new_subcategory_id
+    if new_subcategories is not None:
+        _apply_subcategories(business, new_subcategories)
     business.geo_lat = geo_lat
     business.geo_lng = geo_lng
     business.phone_business = phone_business
     business.instagram = instagram
     business.profile_image_url = profile_image_url
+    if "avatar_url" in payload:
+        business.avatar_url = _clean_image_url(payload.get("avatar_url"))
     if "short_description" in payload:
         business.short_description = (payload.get("short_description") or "").strip()[:120]
     if "description" in payload:
@@ -938,7 +1029,7 @@ async def update_business(
             session,
             business.id,
             tags,
-            standard_names=set(subcategory.standard_tags or []) if subcategory else set(),
+            standard_names=_standard_tag_names(selected_subcategories),
         )
 
     if critical_changed or (
@@ -980,6 +1071,104 @@ async def delete_business(
     business.deleted_at = datetime.now(timezone.utc)
     await session.commit()
     return {"data": {"id": str(business.id), "deleted": True}}
+
+
+@me_router.post("/me/likes/{business_id}")
+async def like_business(
+    business_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    try:
+        bid = uuid.UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    business = await session.get(Business, bid)
+    if (
+        business is None
+        or business.deleted_at is not None
+        or business.status != BusinessStatus.APPROVED
+    ):
+        raise AppError("not_found", "business_not_found", 404)
+    existing = (
+        await session.execute(
+            sa.select(BusinessLike).where(
+                BusinessLike.user_id == user.id, BusinessLike.business_id == business.id
+            )
+        )
+    ).scalars().first()
+    if existing is None:
+        session.add(BusinessLike(user_id=user.id, business_id=business.id))
+        # The counter is denormalized so list payloads need no extra query.
+        # Pin updated_at: a like is not an edit.
+        await session.execute(
+            sa.update(Business)
+            .where(Business.id == business.id)
+            .values(
+                like_count=sa.func.coalesce(Business.like_count, 0) + 1,
+                updated_at=Business.updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await session.commit()
+    count = int(
+        (
+            await session.execute(
+                sa.select(sa.func.count(BusinessLike.id)).where(
+                    BusinessLike.business_id == business.id
+                )
+            )
+        ).scalar()
+        or 0
+    )
+    return {"data": {"liked": True, "like_count": count}}
+
+
+@me_router.delete("/me/likes/{business_id}")
+async def unlike_business(
+    business_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    try:
+        bid = uuid.UUID(business_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    business = await session.get(Business, bid)
+    if business is None or business.deleted_at is not None:
+        raise AppError("not_found", "business_not_found", 404)
+    existing = (
+        await session.execute(
+            sa.select(BusinessLike).where(
+                BusinessLike.user_id == user.id, BusinessLike.business_id == business.id
+            )
+        )
+    ).scalars().first()
+    if existing is not None:
+        await session.delete(existing)
+        await session.execute(
+            sa.update(Business)
+            .where(Business.id == business.id)
+            .values(
+                like_count=sa.case(
+                    (Business.like_count > 0, Business.like_count - 1), else_=0
+                ),
+                updated_at=Business.updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await session.commit()
+    count = int(
+        (
+            await session.execute(
+                sa.select(sa.func.count(BusinessLike.id)).where(
+                    BusinessLike.business_id == business.id
+                )
+            )
+        ).scalar()
+        or 0
+    )
+    return {"data": {"liked": False, "like_count": count}}
 
 
 @me_router.get("/me/businesses")
@@ -1024,6 +1213,11 @@ async def my_business(
     payload = _business_payload(BusinessHit(business=business), detail=True)
     if payload["subcategory"] is not None and business.subcategory is not None:
         payload["subcategory"]["standard_tags"] = list(business.subcategory.standard_tags or [])
+    by_id = {row.id: row for row in business.subcategories}
+    for item in payload["subcategories"]:
+        row = by_id.get(item["id"])
+        if row is not None:
+            item["standard_tags"] = list(row.standard_tags or [])
 
     tags = (
         await session.execute(
@@ -1068,7 +1262,7 @@ async def upsert_license(
     license_row.license_number = payload["license_number"]
     license_row.image_url = payload.get("image_url") or license_row.image_url
     license_row.is_verified_by_admin = False
-    business.is_verified = False
+    business.is_license_verified = False
     await session.commit()
     return {"data": {"id": str(license_row.id), "verified": False}}
 
@@ -1239,11 +1433,7 @@ async def set_business_tags(
     if business is None or business.owner_id != user.id:
         raise AppError("not_found", "business_not_found", 404)
     names = _clean_tags(payload.get("tags"))
-    standard_names: set[str] = set()
-    if business.subcategory_id is not None:
-        subcategory = await session.get(Subcategory, business.subcategory_id)
-        if subcategory is not None:
-            standard_names = set(subcategory.standard_tags or [])
+    standard_names = _standard_tag_names(_business_subcategories(business))
     await _assign_tags(session, bid, names, standard_names=standard_names)
     await session.commit()
     return {"data": {"tags": names}}
@@ -1280,6 +1470,7 @@ async def business_analytics(
         "rating_count": business.rating_count,
         "approved_reviews": review_count,
         "is_verified": business.is_verified,
+        "is_license_verified": business.is_license_verified,
     }}
 
 
@@ -1378,16 +1569,27 @@ async def get_business(
     )
     data["is_owner"] = is_owner
     data["is_saved"] = False
+    data["bookmark_note"] = None
+    data["is_liked"] = False
     data["my_review"] = None
     if user is not None:
         saved = (
             await session.execute(
-                sa.select(Bookmark.id).where(
+                sa.select(Bookmark.note).where(
                     Bookmark.user_id == user.id, Bookmark.business_id == business.id
                 )
             )
-        ).scalars().first()
+        ).first()
         data["is_saved"] = saved is not None
+        data["bookmark_note"] = saved[0] if saved is not None else None
+        liked = (
+            await session.execute(
+                sa.select(BusinessLike.id).where(
+                    BusinessLike.user_id == user.id, BusinessLike.business_id == business.id
+                )
+            )
+        ).scalars().first()
+        data["is_liked"] = liked is not None
         my_review = (
             await session.execute(
                 sa.select(Review).where(

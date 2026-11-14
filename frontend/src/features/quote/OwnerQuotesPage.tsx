@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button, Spinner } from "@/components/ui/button";
 import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { useToast } from "@/components/ui/toast";
@@ -11,6 +12,7 @@ import { cn } from "@/lib/cn";
 import { toFa } from "@/lib/digits";
 import { formatRelative } from "@/lib/jalali";
 import { useApi } from "@/lib/query";
+import { NeshanMap } from "@/features/map/NeshanMap";
 import type { IncomingQuote, IncomingResponse } from "./types";
 import {
   QUOTE_STATUS_LABELS,
@@ -77,10 +79,14 @@ function NewRequestCard({
   quote,
   onOffer,
   onDecline,
+  onIrrelevant,
+  onMap,
 }: {
   quote: IncomingQuote;
   onOffer: () => void;
   onDecline: () => void;
+  onIrrelevant: () => void;
+  onMap: () => void;
 }) {
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -108,6 +114,16 @@ function NewRequestCard({
           <PinIcon className="h-3.5 w-3.5" />
           {quote.neighborhood || quote.address}
         </span>
+        {quote.geo && (
+          <button
+            type="button"
+            onClick={onMap}
+            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[10px] font-bold text-brand-700"
+          >
+            <PinIcon className="h-3.5 w-3.5" />
+            نقشه موقعیت
+          </button>
+        )}
         {quote.matching_businesses.length > 1 && (
           <span className="text-[10px] text-slate-400">
             {toFa(quote.matching_businesses.length)} کسب‌وکار مرتبط
@@ -123,6 +139,13 @@ function NewRequestCard({
           رد
         </Button>
       </div>
+      <button
+        type="button"
+        onClick={onIrrelevant}
+        className="mt-2 w-full text-center text-[11px] text-slate-400 underline-offset-4 transition-colors hover:text-rose-600 hover:underline"
+      >
+        این درخواست به کسب‌وکار من مربوط نیست
+      </button>
     </article>
   );
 }
@@ -261,6 +284,8 @@ export function OwnerQuotesPage() {
   const toast = useToast();
   const [offerQuote, setOfferQuote] = useState<IncomingQuote | null>(null);
   const [declining, setDeclining] = useState<IncomingQuote | null>(null);
+  const [dismissing, setDismissing] = useState<IncomingQuote | null>(null);
+  const [mapQuote, setMapQuote] = useState<IncomingQuote | null>(null);
 
   const query = useApi<IncomingResponse>(
     ["quotes", "incoming", scope],
@@ -287,6 +312,20 @@ export function OwnerQuotesPage() {
       setDeclining(null);
       await queryClient.invalidateQueries({ queryKey: ["quotes"] });
       setScope("archive");
+    },
+    onError: (error) => toast(errorMessage(error)),
+  });
+
+  const dismissMutation = useMutation({
+    mutationFn: (quote: IncomingQuote) =>
+      api(`/quotes/requests/${quote.id}/dismiss`, {
+        method: "POST",
+        body: JSON.stringify({ business_id: quote.matching_businesses[0]?.id }),
+      }),
+    onSuccess: async () => {
+      toast("درخواست نامرتبط حذف شد و دیگر در تب جدید نمایش داده نمی‌شود.");
+      setDismissing(null);
+      await queryClient.invalidateQueries({ queryKey: ["quotes"] });
     },
     onError: (error) => toast(errorMessage(error)),
   });
@@ -394,6 +433,8 @@ export function OwnerQuotesPage() {
               quote={quote}
               onOffer={() => setOfferQuote(quote)}
               onDecline={() => setDeclining(quote)}
+              onIrrelevant={() => setDismissing(quote)}
+              onMap={() => setMapQuote(quote)}
             />
           ) : scope === "customers" ? (
             <CustomerCard key={quote.id} quote={quote} />
@@ -420,6 +461,50 @@ export function OwnerQuotesPage() {
         onClose={() => setDeclining(null)}
         onConfirm={() => declining && declineMutation.mutate(declining)}
       />
+
+      <ConfirmSheet
+        open={dismissing !== null}
+        title="درخواست نامرتبط"
+        description="این درخواست از فهرست درخواست‌های جدید شما حذف می‌شود و دیگر برای این کسب‌وکار نمایش داده نمی‌شود. ادامه می‌دهید؟"
+        confirmLabel="بله، نامرتبط است"
+        tone="rose"
+        loading={dismissMutation.isPending}
+        onClose={() => setDismissing(null)}
+        onConfirm={() => dismissing && dismissMutation.mutate(dismissing)}
+      />
+
+      <BottomSheet
+        open={mapQuote !== null}
+        title="موقعیت درخواست"
+        onClose={() => setMapQuote(null)}
+      >
+        {mapQuote?.geo && (
+          <>
+            <NeshanMap
+              center={mapQuote.geo}
+              zoom={16}
+              interactive={false}
+              markers={[
+                {
+                  id: "quote-location",
+                  lat: mapQuote.geo.lat,
+                  lng: mapQuote.geo.lng,
+                  title: mapQuote.title,
+                  subtitle: mapQuote.address,
+                },
+              ]}
+              className="h-64"
+            />
+            <div className="mt-3 flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-6 text-slate-500">
+              <PinIcon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+              <span>
+                {mapQuote.address}
+                {mapQuote.neighborhood ? ` · ${mapQuote.neighborhood}` : ""}
+              </span>
+            </div>
+          </>
+        )}
+      </BottomSheet>
     </section>
   );
 }

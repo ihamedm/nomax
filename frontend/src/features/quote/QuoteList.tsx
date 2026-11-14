@@ -55,7 +55,6 @@ function ActiveQuoteCard({ quote }: { quote: Quote }) {
               {quote.category && (
                 <span className="text-[11px] font-medium text-slate-400">
                   {quote.category.icon} {quote.category.name}
-                  {quote.subcategory ? ` › ${quote.subcategory.name}` : ""}
                 </span>
               )}
               {quote.is_urgent && <Badge tone="amber">فوری</Badge>}

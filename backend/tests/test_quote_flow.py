@@ -5,7 +5,7 @@ import sqlalchemy as sa
 from app.core.security import create_access_token
 from app.db.seed import seed_categories
 from app.models.business import Business, BusinessStatus
-from app.models.category import Category
+from app.models.category import Category, Subcategory
 from app.models.notification import Notification
 from app.models.quote import Offer, QuoteRequest
 from app.models.user import UserRole
@@ -29,6 +29,7 @@ async def _business(
     slug="quote-shop",
     is_24h=False,
     geo=(30.638, 50.838),
+    subcategories=(),
 ):
     business = Business(
         owner_id=owner.id,
@@ -41,6 +42,7 @@ async def _business(
         geo_lng=geo[1] if geo else None,
         is_24h=is_24h,
         status=BusinessStatus.APPROVED,
+        subcategories=list(subcategories),
     )
     db_session.add(business)
     await db_session.commit()
@@ -220,6 +222,47 @@ async def test_decline_moves_request_to_archive(client, db_session, create_user)
     assert item["my_offer"]["status"] == "declined"
 
 
+async def test_dismiss_hides_unrelated_request(client, db_session, create_user):
+    customer = await create_user("09160000023")
+    owner = await create_user("09160000024", UserRole.OWNER)
+    category = await _category(db_session)
+    business = await _business(db_session, owner, category, slug="quote-shop-dismiss")
+    quote = await _quote(client, customer, category)
+
+    dismissed = await client.post(
+        f"/api/v1/quotes/requests/{quote['id']}/dismiss",
+        json={"business_id": str(business.id)},
+        headers=auth(owner),
+    )
+    assert dismissed.status_code == 200, dismissed.text
+
+    new = await client.get(
+        "/api/v1/quotes/requests/incoming?scope=new", headers=auth(owner)
+    )
+    assert new.json()["data"]["items"] == []
+
+
+async def test_quote_saves_and_returns_picked_location(client, db_session, create_user):
+    customer = await create_user("09160000025")
+    category = await _category(db_session)
+    quote = await _quote(
+        client, customer, category, geo_lat=30.63812, geo_lng=50.83845
+    )
+    assert quote["geo"] == {"lat": 30.63812, "lng": 50.83845}
+
+    detail = await client.get(f"/api/v1/quotes/{quote['id']}", headers=auth(customer))
+    assert detail.status_code == 200
+    assert detail.json()["data"]["geo"] == {"lat": 30.63812, "lng": 50.83845}
+
+    owner = await create_user("09160000026", UserRole.OWNER)
+    await _business(db_session, owner, category, slug="located-shop")
+    incoming = await client.get(
+        "/api/v1/quotes/requests/incoming", headers=auth(owner)
+    )
+    item = incoming.json()["data"]["items"][0]
+    assert item["geo"] == {"lat": 30.63812, "lng": 50.83845}
+
+
 async def test_unrelated_owner_cannot_open_quote(client, db_session, create_user):
     customer = await create_user("09160000031")
     owner = await create_user("09160000032", UserRole.OWNER)
@@ -392,3 +435,46 @@ async def test_normal_request_not_dispatched_at_night(db_session, create_user, s
         await db_session.execute(sa.select(Notification))
     ).scalars().all()
     assert notifications == []
+
+
+async def test_category_only_quote_reaches_every_subcategory(
+    client, db_session, create_user
+):
+    customer = await create_user("09160000091")
+    first_owner = await create_user("09160000092", UserRole.OWNER)
+    second_owner = await create_user("09160000093", UserRole.OWNER)
+    category = await _category(db_session)
+    subcategories = (
+        await db_session.execute(
+            sa.select(Subcategory)
+            .where(Subcategory.category_id == category.id)
+            .order_by(Subcategory.id)
+            .limit(2)
+        )
+    ).scalars().all()
+    first, second = subcategories
+
+    await _business(
+        db_session,
+        first_owner,
+        category,
+        slug="first-shop",
+        subcategories=[first],
+    )
+    await _business(
+        db_session,
+        second_owner,
+        category,
+        slug="second-shop",
+        subcategories=[second],
+    )
+
+    quote = await _quote(client, customer, category)
+    assert quote["subcategory"] is None
+
+    for owner in (first_owner, second_owner):
+        incoming = await client.get(
+            "/api/v1/quotes/requests/incoming", headers=auth(owner)
+        )
+        assert incoming.status_code == 200
+        assert quote["id"] in [item["id"] for item in incoming.json()["data"]["items"]]

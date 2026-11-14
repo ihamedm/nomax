@@ -11,6 +11,7 @@ interface ReviewSheetProps {
   open: boolean;
   businessName: string;
   businessSlug: string;
+  hint?: string | null;
   onClose: () => void;
   onSubmitted: () => void;
 }
@@ -19,6 +20,7 @@ export function ReviewSheet({
   open,
   businessName,
   businessSlug,
+  hint,
   onClose,
   onSubmitted,
 }: ReviewSheetProps) {
@@ -79,6 +81,11 @@ export function ReviewSheet({
       title={`ثبت نظر برای ${businessName}`}
     >
       <form onSubmit={submit} className="space-y-4">
+        {hint && (
+          <p className="rounded-xl bg-sky-50 px-3 py-2 text-[11px] leading-5 text-sky-700">
+            {hint}
+          </p>
+        )}
         <div>
           <p className="text-xs font-bold text-slate-700">امتیاز شما</p>
           <div

@@ -36,6 +36,11 @@ class ForgotPasswordRequest(BaseModel):
     phone: str = Field(..., min_length=8, max_length=13)
 
 
+class VerifyResetCodeRequest(BaseModel):
+    phone: str = Field(..., min_length=8, max_length=13)
+    code: str = Field(..., min_length=6, max_length=6)
+
+
 class ResetPasswordRequest(BaseModel):
     phone: str = Field(..., min_length=8, max_length=13)
     code: str = Field(..., min_length=6, max_length=6)

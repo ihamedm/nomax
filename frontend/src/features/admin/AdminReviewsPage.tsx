@@ -30,21 +30,25 @@ interface Row {
 
 const STATUS_FILTERS = [
   { label: "همه", value: "" },
-  { label: "تأییدشده", value: "approved" },
-  { label: "تأییدنشده", value: "pending" },
+  { label: "در انتظار بررسی", value: "pending" },
+  { label: "در انتظار مالک", value: "awaiting_owner" },
+  { label: "منتشرشده", value: "approved" },
   { label: "ردشده", value: "rejected" },
 ];
 
 function statusTone(status: string) {
   if (status === "approved") return "bg-emerald-50 text-emerald-700";
-  if (status === "rejected") return "bg-rose-50 text-rose-700";
+  if (status === "awaiting_owner") return "bg-sky-50 text-sky-700";
+  if (status === "rejected" || status === "declined") return "bg-rose-50 text-rose-700";
   return "bg-amber-50 text-amber-700";
 }
 
 function statusLabel(status: string) {
-  if (status === "approved") return "تأییدشده";
+  if (status === "approved") return "منتشرشده";
+  if (status === "awaiting_owner") return "در انتظار مالک";
   if (status === "rejected") return "ردشده";
-  return "در انتظار";
+  if (status === "declined") return "رد مالک";
+  return "در انتظار بررسی";
 }
 
 export default function AdminReviewsPage() {
@@ -87,7 +91,11 @@ export default function AdminReviewsPage() {
         body: JSON.stringify({ status: next }),
       }),
     onSuccess: async (_data, variables) => {
-      toast(variables.next === "approved" ? "نظر تأیید شد." : "نظر رد شد.");
+      toast(
+        variables.next === "awaiting_owner"
+          ? "نظر تأیید شد و برای تصمیم مالک ارسال شد."
+          : "نظر رد شد.",
+      );
       await queryClient.invalidateQueries({ queryKey: ["admin", "reviews"] });
       await queryClient.invalidateQueries({ queryKey: ["reviews"] });
     },
@@ -160,15 +168,21 @@ export default function AdminReviewsPage() {
         <div className="flex flex-wrap justify-end gap-1">
           <Button
             size="sm"
-            disabled={setStatus.isPending || row.status === "approved"}
-            onClick={() => setStatus.mutate({ id: row.id, next: "approved" })}
+            disabled={
+              setStatus.isPending ||
+              row.status === "approved" ||
+              row.status === "awaiting_owner"
+            }
+            onClick={() => setStatus.mutate({ id: row.id, next: "awaiting_owner" })}
           >
             تأیید
           </Button>
           <Button
             size="sm"
             variant="danger"
-            disabled={setStatus.isPending || row.status === "rejected"}
+            disabled={
+              setStatus.isPending || row.status === "rejected" || row.status === "declined"
+            }
             onClick={() => setStatus.mutate({ id: row.id, next: "rejected" })}
           >
             رد
@@ -183,7 +197,8 @@ export default function AdminReviewsPage() {
       <div>
         <h1 className="text-lg font-bold">نظرات</h1>
         <p className="mt-1 text-xs text-slate-500">
-          همه نظرات عمومی کسب‌وکارها؛ نظرات خصوصی فقط در پنل مالک نمایش داده می‌شوند.
+          نظرات عمومی ابتدا توسط مدیر بررسی می‌شوند و سپس برای تصمیم نهایی به مالک کسب‌وکار
+          می‌رسند؛ نظرات خصوصی فقط در پنل مالک نمایش داده می‌شوند.
         </p>
       </div>
 

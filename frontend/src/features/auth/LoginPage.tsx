@@ -17,7 +17,7 @@ import type { LoginResult } from "@/types";
 const PHONE_PATTERN = /^(?:\+?98|0)?9\d{9}$/;
 const PASSWORD_MIN = 8;
 
-type Step = "phone" | "password" | "register" | "forgot" | "reset";
+type Step = "phone" | "password" | "register" | "forgot" | "reset" | "new-password";
 
 interface SheetError {
   title: string;
@@ -249,12 +249,29 @@ export function LoginPage() {
     }
   }
 
-  async function resetPassword(event: FormEvent) {
+  async function verifyResetCode(event: FormEvent) {
     event.preventDefault();
     if (!/^\d{6}$/.test(resetCode)) {
       toast("کد تأیید باید ۶ رقم باشد.");
       return;
     }
+    setLoading(true);
+    try {
+      await api("/auth/verify-reset-code", {
+        method: "POST",
+        body: JSON.stringify({ phone, code: resetCode }),
+      });
+      setStep("new-password");
+    } catch (error) {
+      setResetCode("");
+      toast(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function resetPassword(event: FormEvent) {
+    event.preventDefault();
     if (newPassword.length < PASSWORD_MIN) {
       toast("رمز عبور جدید باید حداقل ۸ کاراکتر باشد.");
       return;
@@ -465,7 +482,7 @@ export function LoginPage() {
           )}
 
           {step === "reset" && (
-            <form onSubmit={resetPassword} className="space-y-4">
+            <form onSubmit={verifyResetCode} className="space-y-4">
               <div>
                 <label htmlFor="reset-code" className="text-sm font-medium text-slate-700">
                   کد تأیید
@@ -491,6 +508,32 @@ export function LoginPage() {
                   </p>
                 )}
               </div>
+              <Button type="submit" size="lg" className="w-full" loading={loading}>
+                تأیید کد
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                disabled={loading}
+                onClick={() => void sendResetCode()}
+              >
+                ارسال دوباره کد
+              </Button>
+              <button
+                type="button"
+                className="w-full text-center text-xs text-slate-400"
+                disabled={loading}
+                onClick={() => setStep("password")}
+              >
+                بازگشت به ورود
+              </button>
+            </form>
+          )}
+
+          {step === "new-password" && (
+            <form onSubmit={resetPassword} className="space-y-4">
               <div>
                 <label htmlFor="reset-password" className="mb-2 block text-sm font-medium text-slate-700">
                   رمز عبور جدید
@@ -503,6 +546,7 @@ export function LoginPage() {
                   className="text-left"
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
+                  autoFocus
                 />
               </div>
               <div>
@@ -521,16 +565,6 @@ export function LoginPage() {
               </div>
               <Button type="submit" size="lg" className="w-full" loading={loading}>
                 ثبت رمز جدید
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="w-full"
-                disabled={loading}
-                onClick={() => void sendResetCode()}
-              >
-                ارسال دوباره کد
               </Button>
             </form>
           )}

@@ -38,7 +38,7 @@ async def list_bookmarks(
 ) -> dict:
     rows = (
         await session.execute(
-            sa.select(Business)
+            sa.select(Business, Bookmark.note)
             .join(Bookmark, Bookmark.business_id == Business.id)
             .where(
                 Bookmark.user_id == user.id,
@@ -47,16 +47,26 @@ async def list_bookmarks(
             )
             .order_by(Bookmark.created_at.desc())
         )
-    ).scalars().all()
-    return {"data": {"items": [_business_payload(BusinessHit(business=b)) for b in rows]}}
+    ).all()
+    items = []
+    for business, note in rows:
+        item = _business_payload(BusinessHit(business=business))
+        item["bookmark_note"] = note
+        items.append(item)
+    return {"data": {"items": items}}
 
 
 @router.post("/me/bookmarks/{business_id}")
 async def save_business(
     business_id: str,
+    payload: dict | None = None,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
+    data = payload or {}
+    note = (data.get("note") or "").strip() or None
+    if note is not None and len(note) > 300:
+        raise AppError("validation_error", "bookmark_note_too_long", 422)
     business = await _get_business(session, business_id)
     existing = (
         await session.execute(
@@ -66,9 +76,12 @@ async def save_business(
         )
     ).scalars().first()
     if existing is None:
-        session.add(Bookmark(user_id=user.id, business_id=business.id))
+        session.add(Bookmark(user_id=user.id, business_id=business.id, note=note))
         await session.commit()
-    return {"data": {"saved": True}}
+    elif "note" in data and existing.note != note:
+        existing.note = note
+        await session.commit()
+    return {"data": {"saved": True, "note": note}}
 
 
 @router.delete("/me/bookmarks/{business_id}")

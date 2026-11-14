@@ -209,7 +209,7 @@ async def _eligible_candidates(
         if (
             not config.subcategory_fallback
             and quote.subcategory_id is not None
-            and business.subcategory_id != quote.subcategory_id
+            and quote.subcategory_id not in business.subcategory_ids
         ):
             continue
         band = _distance_band(quote, business, config)
@@ -218,7 +218,7 @@ async def _eligible_candidates(
         subcategory_rank = (
             0
             if quote.subcategory_id is None
-            or business.subcategory_id == quote.subcategory_id
+            or quote.subcategory_id in business.subcategory_ids
             else 1
         )
         ranked.append((business, band, subcategory_rank))
@@ -456,7 +456,8 @@ async def dispatch_quote(
         quote.subcategory_id
         and config.subcategory_fallback
         and any(
-            business.subcategory_id != quote.subcategory_id for business in businesses
+            quote.subcategory_id not in business.subcategory_ids
+            for business in businesses
         )
     )
     radius_used = (

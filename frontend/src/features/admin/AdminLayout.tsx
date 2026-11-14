@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { Button, Spinner } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { RoleBadge } from "@/components/ui/badge";
 import { Icon, MoonIcon, SunIcon } from "@/components/ui/icons";
+import { LocationPermissionSheet } from "@/features/location/LocationPermissionSheet";
 import { loginPath, returnPath } from "@/lib/auth-redirect";
 import { cn } from "@/lib/cn";
 import { fa, formatPhone, ROLE_LABELS } from "@/lib/format";
@@ -39,6 +41,8 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [attentionOpen, setAttentionOpen] = useState(false);
   const attention = useApi<{ businesses: number; reviews: number; total: number }>(
     ["admin", "attention"],
     "/admin/attention",
@@ -49,9 +53,12 @@ export function AdminLayout() {
     },
   );
   const attentionCount = attention.data?.total ?? 0;
+  const pendingBusinesses = attention.data?.businesses ?? 0;
+  const pendingReviews = attention.data?.reviews ?? 0;
 
   useEffect(() => {
     setNavOpen(false);
+    setAttentionOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -62,6 +69,15 @@ export function AdminLayout() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navOpen]);
+
+  useEffect(() => {
+    if (!attentionOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAttentionOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [attentionOpen]);
 
   if (!ready) {
     return (
@@ -125,27 +141,40 @@ export function AdminLayout() {
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={() => setNavOpen(false)}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] transition-colors",
-                  isActive
-                    ? "bg-brand-50 font-bold text-brand-700"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
-                )
-              }
-            >
-              <span className="w-4 text-center text-sm" aria-hidden>
-                {item.icon}
-              </span>
-              {item.label}
-            </NavLink>
-          ))}
+          {navItems.map((item) => {
+            const pending =
+              item.to === "/admin/businesses"
+                ? pendingBusinesses
+                : item.to === "/admin/reviews"
+                  ? pendingReviews
+                  : 0;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={() => setNavOpen(false)}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] transition-colors",
+                    isActive
+                      ? "bg-brand-50 font-bold text-brand-700"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                  )
+                }
+              >
+                <span className="w-4 text-center text-sm" aria-hidden>
+                  {item.icon}
+                </span>
+                {item.label}
+                {pending > 0 && (
+                  <span className="ms-auto rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                    {pending > 99 ? "۹۹+" : fa(pending)}
+                  </span>
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
       </aside>
 
@@ -179,38 +208,96 @@ export function AdminLayout() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={async () => {
-                await logout();
-                navigate("/login", { replace: true });
-              }}
+              onClick={() => setLogoutOpen(true)}
             >
               خروج
             </Button>
             <span className="mx-1 hidden h-6 w-px bg-slate-200 lg:block" aria-hidden />
-            <Link
-              to="/admin"
-              title={
-                attentionCount > 0
-                  ? `${fa(attentionCount)} کار در انتظار بررسی`
-                  : "کارهای در انتظار بررسی"
-              }
-              aria-label={
-                attentionCount > 0
-                  ? `${fa(attentionCount)} کار در انتظار بررسی`
-                  : "کارهای در انتظار بررسی"
-              }
-              className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-            >
-              <Icon className="h-4 w-4">
-                <circle cx="12" cy="8" r="3.5" />
-                <path d="M5 20a7 7 0 0 1 14 0" />
-              </Icon>
-              {attentionCount > 0 && (
-                <span className="absolute -left-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-bold leading-none text-white">
-                  {attentionCount > 99 ? "۹۹+" : fa(attentionCount)}
-                </span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setAttentionOpen((open) => !open)}
+                aria-expanded={attentionOpen}
+                aria-haspopup="menu"
+                title={
+                  attentionCount > 0
+                    ? `${fa(attentionCount)} کار در انتظار بررسی`
+                    : "کارهای در انتظار بررسی"
+                }
+                aria-label={
+                  attentionCount > 0
+                    ? `${fa(attentionCount)} کار در انتظار بررسی`
+                    : "کارهای در انتظار بررسی"
+                }
+                className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+              >
+                <Icon className="h-4 w-4">
+                  <circle cx="12" cy="8" r="3.5" />
+                  <path d="M5 20a7 7 0 0 1 14 0" />
+                </Icon>
+                {attentionCount > 0 && (
+                  <span className="absolute -left-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-bold leading-none text-white">
+                    {attentionCount > 99 ? "۹۹+" : fa(attentionCount)}
+                  </span>
+                )}
+              </button>
+
+              {attentionOpen && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="بستن فهرست کارها"
+                    tabIndex={-1}
+                    onClick={() => setAttentionOpen(false)}
+                    className="fixed inset-0 z-40 cursor-default"
+                  />
+                  <div
+                    role="menu"
+                    className="absolute left-0 top-11 z-50 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+                  >
+                    <p className="border-b border-slate-100 px-3 py-2 text-[11px] font-medium text-slate-400">
+                      کارهای در انتظار بررسی
+                    </p>
+                    <Link
+                      to="/admin/businesses?status=pending"
+                      role="menuitem"
+                      onClick={() => setAttentionOpen(false)}
+                      className="flex items-center justify-between gap-3 px-3 py-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <span>کسب‌وکارها</span>
+                      <span
+                        className={cn(
+                          "min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-bold leading-none",
+                          pendingBusinesses > 0
+                            ? "bg-rose-600 text-white"
+                            : "bg-slate-100 text-slate-500",
+                        )}
+                      >
+                        {fa(pendingBusinesses)}
+                      </span>
+                    </Link>
+                    <Link
+                      to="/admin/reviews?status=pending"
+                      role="menuitem"
+                      onClick={() => setAttentionOpen(false)}
+                      className="flex items-center justify-between gap-3 border-t border-slate-100 px-3 py-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <span>نظرات</span>
+                      <span
+                        className={cn(
+                          "min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-bold leading-none",
+                          pendingReviews > 0
+                            ? "bg-rose-600 text-white"
+                            : "bg-slate-100 text-slate-500",
+                        )}
+                      >
+                        {fa(pendingReviews)}
+                      </span>
+                    </Link>
+                  </div>
+                </>
               )}
-            </Link>
+            </div>
             <div className="hidden text-xs font-bold text-slate-800 lg:block">
               <p className="max-w-40 truncate">{user.full_name || formatPhone(user.phone)}</p>
             </div>
@@ -236,6 +323,22 @@ export function AdminLayout() {
           <Outlet />
         </main>
       </div>
+
+      <LocationPermissionSheet />
+
+      <ConfirmSheet
+        open={logoutOpen}
+        title="خروج از حساب"
+        description="آیا از حساب خود خارج می‌شوید؟ برای استفاده دوباره باید وارد شوید."
+        confirmLabel="خروج"
+        tone="rose"
+        onClose={() => setLogoutOpen(false)}
+        onConfirm={async () => {
+          setLogoutOpen(false);
+          await logout();
+          navigate("/login", { replace: true });
+        }}
+      />
     </div>
   );
 }

@@ -18,6 +18,7 @@ interface EditableBusiness {
   instagram?: string | null;
   is_24h: boolean;
   profile_image_url?: string | null;
+  avatar_url?: string | null;
   images?: BusinessImage[];
   category: { id: number; slug: string; name: string; icon: string } | null;
   subcategory:
@@ -29,6 +30,13 @@ interface EditableBusiness {
         standard_tags?: string[];
       }
     | null;
+  subcategories?: Array<{
+    id: number;
+    slug: string;
+    name: string;
+    icon: string;
+    standard_tags?: string[];
+  }>;
   tags: string[];
 }
 
@@ -60,25 +68,31 @@ export default function MeBusinessEditPage() {
     );
   }
 
+  const rawSubcategories = business.subcategories?.length
+    ? business.subcategories
+    : business.subcategory
+      ? [business.subcategory]
+      : [];
+  const categoryId = business.category?.id ?? null;
+  const subcategories: Subcategory[] =
+    categoryId === null
+      ? []
+      : rawSubcategories.map((item) => ({
+          ...item,
+          category_id: categoryId,
+          sort_order: 0,
+          standard_tags: item.standard_tags ?? [],
+        }));
+
   const category: Category | null = business.category
     ? {
         ...business.category,
         sort_order: 0,
-        subcategory_count: business.subcategory ? 1 : 0,
+        subcategory_count: subcategories.length,
       }
     : null;
 
-  const subcategory: Subcategory | null =
-    business.category && business.subcategory
-      ? {
-          ...business.subcategory,
-          category_id: business.category.id,
-          sort_order: 0,
-          standard_tags: business.subcategory.standard_tags ?? [],
-        }
-      : null;
-
-  const standard = new Set(subcategory?.standard_tags ?? []);
+  const standard = new Set(subcategories.flatMap((item) => item.standard_tags));
   const tags = business.tags ?? [];
   const photos = (business.images?.length
     ? [...business.images].sort((a, b) => a.sort_order - b.sort_order)
@@ -93,11 +107,12 @@ export default function MeBusinessEditPage() {
     title: business.name,
     description: business.description ?? "",
     category,
-    subcategory,
+    subcategories,
     address: business.address,
     is24h: business.is_24h,
     geo: business.geo,
     photos,
+    avatar: business.avatar_url ?? "",
     intro: business.short_description ?? "",
     shopPhone: business.phone_business ?? "",
     instagram: business.instagram ?? "",

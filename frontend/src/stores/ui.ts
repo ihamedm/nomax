@@ -17,17 +17,27 @@ type LocationSource = "default" | "gps";
 interface UiState {
   location: Coordinates;
   locationSource: LocationSource;
+  locationPromptOpen: boolean;
   setLocation: (location: Coordinates, source?: LocationSource) => void;
   resetLocation: () => void;
+  openLocationPrompt: () => void;
+  closeLocationPrompt: () => void;
 }
 
 export const useUi = create<UiState>((set) => ({
   location: BEHBAHAN_CENTER,
   locationSource: "default",
+  locationPromptOpen: false,
   setLocation(location, source = "gps") {
     set({ location, locationSource: source });
   },
   resetLocation() {
     set({ location: BEHBAHAN_CENTER, locationSource: "default" });
+  },
+  openLocationPrompt() {
+    set({ locationPromptOpen: true });
+  },
+  closeLocationPrompt() {
+    set({ locationPromptOpen: false });
   },
 }));

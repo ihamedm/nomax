@@ -20,6 +20,7 @@ from app.schemas.auth import (
     RegisterRequest,
     ResetPasswordRequest,
     UserResponse,
+    VerifyResetCodeRequest,
 )
 from app.services.auth_service import (
     authenticate_user,
@@ -32,6 +33,7 @@ from app.services.auth_service import (
     refresh_session,
     register_user,
     reset_password,
+    verify_reset_code,
 )
 from app.services.otp_service import OtpService
 
@@ -176,6 +178,17 @@ async def forgot(
             )
         return {"data": {"status": "sent"}}
     return {"data": {"status": "issued", "dev_otp": code, "expires_in": settings.OTP_TTL_SECONDS}}
+
+
+@router.post("/verify-reset-code")
+async def verify_reset(
+    payload: VerifyResetCodeRequest,
+    otp_service: OtpService = Depends(get_otp_service),
+    redis = Depends(get_redis),
+) -> dict:
+    phone = security.normalize_phone(payload.phone)
+    await verify_reset_code(otp_service, redis, phone, payload.code)
+    return {"data": {"status": "verified"}}
 
 
 @router.post("/reset-password")

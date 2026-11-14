@@ -351,7 +351,7 @@ def business_matches_quote(business: Business, quote: QuoteRequest) -> bool:
         return False
     if business.category_id != quote.category_id:
         return False
-    if quote.subcategory_id is not None and business.subcategory_id != quote.subcategory_id:
+    if quote.subcategory_id is not None and quote.subcategory_id not in business.subcategory_ids:
         return False
     if quote.geo_lat is not None and quote.geo_lng is not None:
         if business.geo_lat is None or business.geo_lng is None:

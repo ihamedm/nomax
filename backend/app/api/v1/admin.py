@@ -97,12 +97,22 @@ async def _validate_national_id(
 def _admin_business_payload(business, owner: User | None = None) -> dict:
     category = business.category
     subcategory = business.subcategory
+    subcategories = [
+        {"id": row.id, "slug": row.slug, "name": row.name, "icon": row.icon}
+        for row in business.subcategories
+        if row.deleted_at is None
+    ]
+    if not subcategories and subcategory is not None:
+        subcategories = [
+            {"id": subcategory.id, "slug": subcategory.slug, "name": subcategory.name, "icon": subcategory.icon}
+        ]
     return {
         "id": str(business.id),
         "name": business.name,
         "slug": business.slug,
         "status": business.status.value if hasattr(business.status, "value") else str(business.status),
         "is_verified": business.is_verified,
+        "is_license_verified": business.is_license_verified,
         "is_24h": business.is_24h,
         "short_description": business.short_description,
         "description": business.description,
@@ -124,10 +134,12 @@ def _admin_business_payload(business, owner: User | None = None) -> dict:
             if subcategory is not None
             else None
         ),
+        "subcategories": subcategories,
         "rating_avg": round(business.rating_avg or 0, 2),
         "rating_count": business.rating_count or 0,
         "view_count": business.view_count or 0,
         "profile_image_url": business.profile_image_url,
+        "avatar_url": business.avatar_url,
         "rejection_reason": business.rejection_reason,
         "owner": (
             {
@@ -255,10 +267,14 @@ async def create_admin_business(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.api.v1.businesses import (
+        _apply_subcategories,
         _assign_tags,
+        _clean_image_url,
         _clean_tags,
         _replace_business_images,
         _resolve_business_images,
+        _resolve_subcategories,
+        _standard_tag_names,
     )
     from app.models.business import Business, BusinessStatus
     from app.models.category import Category, Subcategory
@@ -289,14 +305,8 @@ async def create_admin_business(
     category = await session.get(Category, payload["category_id"])
     if category is None or category.deleted_at is not None:
         raise AppError("not_found", "category_not_found", 404)
-    subcategory_id = payload.get("subcategory_id")
-    subcategory: Subcategory | None = None
-    if subcategory_id is not None:
-        subcategory = await session.get(Subcategory, subcategory_id)
-        if subcategory is None:
-            raise AppError("not_found", "subcategory_not_found", 404)
-        if subcategory.category_id != category.id:
-            raise AppError("validation_error", "subcategory_category_mismatch", 422)
+    subcategories = await _resolve_subcategories(session, category.id, payload) or []
+    subcategory = subcategories[0] if subcategories else None
 
     geo_lat = payload.get("geo_lat")
     geo_lng = payload.get("geo_lng")
@@ -330,7 +340,7 @@ async def create_admin_business(
     business = Business(
         owner_id=owner.id,
         category_id=category.id,
-        subcategory_id=subcategory_id,
+        subcategory_id=subcategory.id if subcategory is not None else None,
         name=name,
         slug=f"{slug_base}-{uuid.uuid4().hex[:6]}",
         short_description=(payload.get("short_description") or "")[:120],
@@ -342,9 +352,12 @@ async def create_admin_business(
         instagram=instagram,
         is_24h=bool(payload.get("is_24h", False)),
         is_verified=bool(payload.get("is_verified", False)),
+        is_license_verified=bool(payload.get("is_license_verified", False)),
         profile_image_url=profile_image_url,
+        avatar_url=_clean_image_url(payload.get("avatar_url")),
         rejection_reason=(payload.get("rejection_reason") or None) if status_value == "rejected" else None,
         status=BusinessStatus(status_value),
+        subcategories=subcategories,
     )
     session.add(business)
     await session.flush()
@@ -356,7 +369,7 @@ async def create_admin_business(
             session,
             business.id,
             tags,
-            standard_names=set(subcategory.standard_tags or []) if subcategory else set(),
+            standard_names=_standard_tag_names(subcategories),
         )
     await _write_audit(
         session,
@@ -460,6 +473,51 @@ async def create_business_owner(
     }
 
 
+@router.patch("/businesses/owners/{owner_id}")
+async def update_business_owner(
+    owner_id: str,
+    payload: dict,
+    request: Request,
+    actor: User = Depends(_require_any_permission("business.create", "business.update")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Rename an owner from the business form. The phone is the login identity and is not editable here."""
+    owner = await session.get(User, UUID(owner_id))
+    if owner is None or owner.deleted_at is not None:
+        raise AppError("not_found", "user_not_found", 404)
+    if owner.role not in (UserRole.CUSTOMER, UserRole.OWNER):
+        raise AppError("forbidden", "not_a_business_owner", 403)
+    if "phone" in payload:
+        raise AppError("validation_error", "phone_not_editable", 422)
+
+    before = {"phone": owner.phone, "full_name": owner.full_name}
+    if "full_name" in payload:
+        full_name = _clean_text(payload.get("full_name"))
+        owner.full_name = full_name[:120] if full_name else None
+
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.owner.updated",
+        entity_type="user",
+        entity_id=str(owner.id),
+        before=before,
+        after={"phone": owner.phone, "full_name": owner.full_name},
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(owner)
+    return {
+        "data": {
+            "id": str(owner.id),
+            "phone": owner.phone,
+            "full_name": owner.full_name,
+            "role": owner.role.value,
+            "is_verified": owner.is_verified,
+        }
+    }
+
+
 @router.get("/businesses/{business_id}")
 async def get_admin_business(
     business_id: str,
@@ -481,10 +539,15 @@ async def update_admin_business(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.api.v1.businesses import (
+        _apply_subcategories,
         _assign_tags,
+        _business_subcategories,
+        _clean_image_url,
         _clean_tags,
         _replace_business_images,
         _resolve_business_images,
+        _resolve_subcategories,
+        _standard_tag_names,
     )
     from app.models.business import BusinessStatus
     from app.models.category import Category, Subcategory
@@ -513,21 +576,20 @@ async def update_admin_business(
     category = await session.get(Category, new_category_id)
     if category is None or category.deleted_at is not None:
         raise AppError("not_found", "category_not_found", 404)
-    if "subcategory_id" in payload:
-        new_subcategory_id = payload["subcategory_id"]
+    if "subcategory_ids" in payload or "subcategory_id" in payload:
+        new_subcategories = await _resolve_subcategories(session, category.id, payload)
     elif "category_id" in payload:
-        new_subcategory_id = None
+        new_subcategories = []
     else:
-        new_subcategory_id = business.subcategory_id
-    subcategory: Subcategory | None = None
-    if new_subcategory_id is not None:
-        subcategory = await session.get(Subcategory, new_subcategory_id)
-        if subcategory is None:
-            raise AppError("not_found", "subcategory_not_found", 404)
-        if subcategory.category_id != category.id:
-            raise AppError("validation_error", "subcategory_category_mismatch", 422)
+        new_subcategories = None
+    selected_subcategories = (
+        new_subcategories
+        if new_subcategories is not None
+        else _business_subcategories(business)
+    )
     business.category_id = category.id
-    business.subcategory_id = new_subcategory_id
+    if new_subcategories is not None:
+        _apply_subcategories(business, new_subcategories)
 
     editable = (
         "name",
@@ -538,6 +600,7 @@ async def update_admin_business(
         "instagram",
         "is_24h",
         "is_verified",
+        "is_license_verified",
     )
     for field in editable:
         if field in payload:
@@ -575,6 +638,8 @@ async def update_admin_business(
     if not images_changed:
         profile_image_url = business.profile_image_url
     business.profile_image_url = profile_image_url
+    if "avatar_url" in payload:
+        business.avatar_url = _clean_image_url(payload.get("avatar_url"))
     tags = _clean_tags(payload.get("tags")) if "tags" in payload else None
 
     if "rejection_reason" in payload:
@@ -593,7 +658,7 @@ async def update_admin_business(
             session,
             business.id,
             tags,
-            standard_names=set(subcategory.standard_tags or []) if subcategory else set(),
+            standard_names=_standard_tag_names(selected_subcategories),
         )
 
     if business.status != previous_status:
@@ -804,10 +869,10 @@ async def verify_license(
     if license_row is None:
         raise AppError("not_found", "license_not_found", 404)
     license_row.is_verified_by_admin = True
-    business.is_verified = True
+    business.is_license_verified = True
     await _write_audit(session, actor.id, "business.license.verify", "business", str(bid), after={"verified": True})
     await session.commit()
-    return {"data": {"id": str(bid), "is_verified": True}}
+    return {"data": {"id": str(bid), "is_verified": business.is_verified, "is_license_verified": True}}
 
 
 @router.patch("/businesses/{business_id}/toggle-24h")
@@ -944,7 +1009,7 @@ async def list_admin_reviews(
         Business.deleted_at.is_(None),
     ]
     if status:
-        if status not in ("approved", "pending", "rejected", "unapproved"):
+        if status not in ("approved", "pending", "rejected", "unapproved", "awaiting_owner", "declined"):
             raise AppError("validation_error", "invalid_status", 422)
         conditions.append(
             Review.status == ("pending" if status == "unapproved" else status)

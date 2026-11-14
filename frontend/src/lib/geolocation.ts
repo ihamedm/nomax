@@ -26,3 +26,18 @@ export function getCurrentPosition(): Promise<Coordinates> {
     );
   });
 }
+
+/**
+ * True when the browser has not already granted geolocation, so a manual
+ * location action should show the explainer sheet instead of a silent failure.
+ */
+export async function geolocationNeedsPrompt(): Promise<boolean> {
+  try {
+    const status = await navigator.permissions?.query({
+      name: "geolocation" as PermissionName,
+    });
+    return status?.state !== "granted";
+  } catch {
+    return true;
+  }
+}

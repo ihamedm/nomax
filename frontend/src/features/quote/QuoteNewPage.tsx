@@ -10,9 +10,10 @@ import { api, errorMessage, ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { toFa } from "@/lib/digits";
 import { useAuth } from "@/stores/auth";
-import type { Category, Coordinates, Subcategory } from "@/types";
+import type { Category, Coordinates } from "@/types";
 import { CategoryPickerSheet } from "@/features/business/create/CategoryPickerSheet";
 import { MapPickerSheet } from "@/features/business/create/MapPickerSheet";
+import { NeshanMap } from "@/features/map/NeshanMap";
 
 import { CheckIcon, ChevronLeftIcon, PinIcon, SparkIcon } from "./icons";
 
@@ -23,7 +24,6 @@ interface Draft {
   title: string;
   description: string;
   category: Category | null;
-  subcategory: Subcategory | null;
   address: string;
   neighborhood: string;
   geo: Coordinates | null;
@@ -34,17 +34,11 @@ const EMPTY: Draft = {
   title: "",
   description: "",
   category: null,
-  subcategory: null,
   address: "",
   neighborhood: "",
   geo: null,
   isUrgent: false,
 };
-
-function categoryPath(category: Category | null, subcategory: Subcategory | null): string {
-  if (!category) return "";
-  return subcategory ? `${category.name} › ${subcategory.name}` : category.name;
-}
 
 function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
@@ -125,7 +119,6 @@ export default function QuoteNewPage() {
           title: data.title.trim(),
           description: data.description.trim() || null,
           category_id: data.category.id,
-          subcategory_id: data.subcategory?.id ?? null,
           address: data.address.trim(),
           neighborhood: data.neighborhood.trim() || null,
           geo_lat: data.geo?.lat ?? null,
@@ -210,11 +203,11 @@ export default function QuoteNewPage() {
               <span className="min-w-0">
                 {data.category ? (
                   <span className="block truncate text-sm font-bold text-brand-700">
-                    {data.category.icon} {categoryPath(data.category, data.subcategory)}
+                    {data.category.icon} {data.category.name}
                   </span>
                 ) : (
                   <span className="block text-sm text-slate-400">
-                    انتخاب دسته و زیردسته
+                    انتخاب دسته‌بندی
                   </span>
                 )}
               </span>
@@ -303,11 +296,28 @@ export default function QuoteNewPage() {
             <p className="text-xs font-black text-slate-900">خلاصه درخواست</p>
             <p className="mt-2 text-sm font-bold text-slate-800">{data.title}</p>
             <p className="mt-1 text-[11px] text-slate-500">
-              {data.category?.icon} {categoryPath(data.category, data.subcategory)}
+              {data.category?.icon} {data.category?.name}
             </p>
             <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-6 text-slate-500">
               {data.address}
             </p>
+            {data.geo && (
+              <NeshanMap
+                center={data.geo}
+                zoom={16}
+                interactive={false}
+                markers={[
+                  {
+                    id: "quote-location",
+                    lat: data.geo.lat,
+                    lng: data.geo.lng,
+                    title: data.title,
+                    subtitle: data.address,
+                  },
+                ]}
+                className="mt-2 h-36"
+              />
+            )}
           </div>
 
           <label
@@ -395,8 +405,8 @@ export default function QuoteNewPage() {
         open={categoryOpen}
         onClose={() => setCategoryOpen(false)}
         selected={data.category}
-        selectedSubcategory={data.subcategory}
-        onSelect={(category, subcategory) => patch({ category, subcategory })}
+        onSelect={(category) => patch({ category })}
+        categoriesOnly
       />
       <MapPickerSheet
         open={mapOpen}

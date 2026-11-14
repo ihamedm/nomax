@@ -11,11 +11,12 @@ export interface WizardData {
   title: string;
   description: string;
   category: Category | null;
-  subcategory: Subcategory | null;
+  subcategories: Subcategory[];
   address: string;
   is24h: boolean;
   geo: Coordinates | null;
   photos: WizardPhoto[];
+  avatar: string;
   intro: string;
   shopPhone: string;
   instagram: string;
@@ -64,10 +65,11 @@ export function instagramId(value: string): string {
 
 export function categoryPath(
   category: Category | null,
-  subcategory: Subcategory | null,
+  subcategories: Subcategory[],
 ): string {
   if (!category) return "";
-  return subcategory ? `${category.name} > ${subcategory.name}` : category.name;
+  const names = subcategories.map((subcategory) => subcategory.name).join(" · ");
+  return names ? `${category.name} > ${names}` : category.name;
 }
 
 /** Returns a Persian error message for the step, or null when it can advance. */

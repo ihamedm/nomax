@@ -43,11 +43,12 @@ const EMPTY: WizardData = {
   title: "",
   description: "",
   category: null,
-  subcategory: null,
+  subcategories: [],
   address: "",
   is24h: false,
   geo: null,
   photos: [],
+  avatar: "",
   intro: "",
   shopPhone: "",
   instagram: "",
@@ -58,10 +59,25 @@ const EMPTY: WizardData = {
   customTags: [],
 };
 
-function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
+function FieldLabel({
+  children,
+  hint,
+  required,
+}: {
+  children: React.ReactNode;
+  hint?: string;
+  required?: boolean;
+}) {
   return (
     <div className="mb-1.5 flex items-baseline justify-between gap-3">
-      <label className="text-xs font-bold text-slate-700">{children}</label>
+      <label className="text-xs font-bold text-slate-700">
+        {children}
+        {required && (
+          <span aria-hidden className="ms-0.5 text-rose-500">
+            *
+          </span>
+        )}
+      </label>
       {hint && <span className="text-[10px] text-slate-400">{hint}</span>}
     </div>
   );
@@ -231,7 +247,7 @@ export default function CreateBusinessPage({
     const key = `${top.category.id}:${top.subcategory?.id ?? "none"}`;
     if (lastAppliedSuggestion.current === key) return;
     lastAppliedSuggestion.current = key;
-    applyCategory(top.category, top.subcategory);
+    applyCategory(top.category, top.subcategory ? [top.subcategory] : []);
     setAutoApplied(true);
   }, [categorySuggestion.result, categoryTouched, isEdit]);
 
@@ -269,19 +285,19 @@ export default function CreateBusinessPage({
     setError(null);
   }
 
-  function applyCategory(category: Category, subcategory: Subcategory | null) {
+  function applyCategory(category: Category, subcategories: Subcategory[]) {
     patch({
       category,
-      subcategory,
-      standardTags: subcategory ? Array.from(new Set(subcategory.standard_tags)) : [],
+      subcategories,
+      standardTags: Array.from(new Set(subcategories.flatMap((item) => item.standard_tags))),
     });
   }
 
-  function selectCategory(category: Category, subcategory: Subcategory | null) {
+  function selectCategory(category: Category, subcategories: Subcategory[]) {
     setCategoryTouched(true);
     setAutoApplied(false);
     lastAppliedSuggestion.current = null;
-    applyCategory(category, subcategory);
+    applyCategory(category, subcategories);
   }
 
   function openManualCategoryPicker() {
@@ -325,7 +341,7 @@ export default function CreateBusinessPage({
           name: data.title.trim(),
           description: data.description.trim() || null,
           category_id: data.category.id,
-          subcategory_id: data.subcategory?.id ?? null,
+          subcategory_ids: data.subcategories.map((item) => item.id),
           short_description: data.intro.trim(),
           phone_business: data.shopPhone.trim() || null,
           address: normalizeAddress(data.address),
@@ -334,6 +350,7 @@ export default function CreateBusinessPage({
           instagram: instagramId(data.instagram) || null,
           is_24h: data.is24h,
           profile_image_url: mainImage,
+          avatar_url: data.avatar || null,
           images: data.photos.map((photo, index) => ({
             url: photo.url,
             is_main: photo.isMain,
@@ -457,11 +474,15 @@ export default function CreateBusinessPage({
   }
 
   function removePhoto(index: number) {
+    const removed = data.photos[index];
     const next = data.photos.filter((_, photoIndex) => photoIndex !== index);
     if (next.length > 0 && !next.some((photo) => photo.isMain)) {
       next[0] = { ...next[0], isMain: true };
     }
-    patch({ photos: next });
+    patch({
+      photos: next,
+      avatar: removed?.url === data.avatar ? "" : data.avatar,
+    });
   }
 
   function addCustomTag() {
@@ -484,7 +505,9 @@ export default function CreateBusinessPage({
     setCustomInput("");
   }
 
-  const standardTags = data.subcategory?.standard_tags ?? [];
+  const standardTags = Array.from(
+    new Set(data.subcategories.flatMap((item) => item.standard_tags)),
+  );
   const removedStandard = standardTags.filter(
     (tag) => !data.standardTags.includes(tag) && !data.customTags.includes(tag),
   );
@@ -511,7 +534,7 @@ export default function CreateBusinessPage({
       {step === 0 && (
         <section className="space-y-4">
           <div>
-            <FieldLabel hint="حداقل ۳ حرف">نام کسب‌وکار</FieldLabel>
+            <FieldLabel required hint="حداقل ۳ حرف">نام کسب‌وکار</FieldLabel>
             <Input
               value={data.title}
               onChange={(event) => patch({ title: event.target.value })}
@@ -521,7 +544,7 @@ export default function CreateBusinessPage({
           </div>
 
           <div>
-            <FieldLabel hint="حداقل ۱۰ نویسه">توضیحات</FieldLabel>
+            <FieldLabel required hint="حداقل ۱۰ نویسه">توضیحات</FieldLabel>
             <textarea
               rows={4}
               value={data.description}
@@ -533,7 +556,7 @@ export default function CreateBusinessPage({
           </div>
 
           <div>
-            <FieldLabel>دسته‌بندی</FieldLabel>
+            <FieldLabel required>دسته‌بندی</FieldLabel>
             <button
               type="button"
               onClick={() => setCategoryOpen(true)}
@@ -547,7 +570,7 @@ export default function CreateBusinessPage({
               <span className="min-w-0">
                 {data.category ? (
                   <span className="block truncate text-sm font-bold text-brand-700">
-                    {categoryPath(data.category, data.subcategory)}
+                    {categoryPath(data.category, data.subcategories)}
                   </span>
                 ) : (
                   <span className="block text-sm text-slate-400">انتخاب دسته‌بندی</span>
@@ -573,7 +596,10 @@ export default function CreateBusinessPage({
                     suggestions={categorySuggestion.result.suggestions}
                     autoApplied={autoApplied}
                     onApply={(suggestion) =>
-                      selectCategory(suggestion.category, suggestion.subcategory)
+                      selectCategory(
+                        suggestion.category,
+                        suggestion.subcategory ? [suggestion.subcategory] : [],
+                      )
                     }
                     onChange={openManualCategoryPicker}
                   />
@@ -613,25 +639,6 @@ export default function CreateBusinessPage({
           </div>
 
           <div>
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <FieldLabel>آدرس</FieldLabel>
-              <Badge tone="sky" className="gap-1">
-                <PinIcon className="h-3.5 w-3.5" />
-                خوزستان ، بهبهان
-              </Badge>
-            </div>
-            <textarea
-              rows={2}
-              value={data.address}
-              onChange={(event) => patch({ address: event.target.value })}
-              onBlur={(event) => patch({ address: normalizeAddress(event.target.value) })}
-              placeholder="خیابان، کوچه، پلاک..."
-              maxLength={255}
-              className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-            />
-          </div>
-
-          <div>
             <FieldLabel hint="اختیاری">موقعیت روی نقشه</FieldLabel>
             <button
               type="button"
@@ -658,6 +665,28 @@ export default function CreateBusinessPage({
               </span>
               <ChevronLeft className="shrink-0 text-slate-400" />
             </button>
+          </div>
+
+          <div>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <FieldLabel required>آدرس</FieldLabel>
+              <Badge tone="sky" className="gap-1">
+                <PinIcon className="h-3.5 w-3.5" />
+                خوزستان ، بهبهان
+              </Badge>
+            </div>
+            <textarea
+              rows={2}
+              value={data.address}
+              onChange={(event) => patch({ address: event.target.value })}
+              onBlur={(event) => patch({ address: normalizeAddress(event.target.value) })}
+              placeholder="خیابان، کوچه، پلاک..."
+              maxLength={255}
+              className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            />
+            <p className="mt-1.5 text-[10px] leading-5 text-slate-400">
+              آدرس انتخابی از نقشه را می‌توانید ویرایش کنید؛ متن شما جستجوی نقشه را تغییر نمی‌دهد.
+            </p>
           </div>
         </section>
       )}
@@ -747,6 +776,43 @@ export default function CreateBusinessPage({
               انتخاب چند تصویر هم‌زمان ممکن است. برای تعیین تصویر اصلی، روی «تعیین به‌عنوان اصلی»
               همان تصویر بزنید.
             </p>
+
+            {data.photos.length > 0 && (
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <p className="text-[11px] font-bold text-slate-700">آواتار کسب‌وکار</p>
+                <p className="mt-0.5 text-[10px] leading-5 text-slate-400">
+                  اگر انتخاب نشود، اولین تصویر به‌عنوان آواتار نمایش داده می‌شود.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => patch({ avatar: "" })}
+                    className={cn(
+                      "h-12 rounded-lg border-2 px-2 text-[10px]",
+                      data.avatar
+                        ? "border-slate-200 text-slate-500"
+                        : "border-brand-500 text-brand-700",
+                    )}
+                  >
+                    اولین تصویر
+                  </button>
+                  {data.photos.map((photo) => (
+                    <button
+                      key={photo.url}
+                      type="button"
+                      aria-label="انتخاب آواتار"
+                      onClick={() => patch({ avatar: photo.url })}
+                      className={cn(
+                        "h-12 w-12 overflow-hidden rounded-lg border-2",
+                        data.avatar === photo.url ? "border-brand-500" : "border-transparent",
+                      )}
+                    >
+                      <img src={photo.url} alt="" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <details className="rounded-xl border border-dashed border-slate-300 bg-white">
@@ -844,7 +910,7 @@ export default function CreateBusinessPage({
                   بررسی می‌شود.
                 </p>
                 <div>
-                  <FieldLabel hint="الزامی">شماره / شناسه پروانه</FieldLabel>
+                  <FieldLabel required>شماره / شناسه پروانه</FieldLabel>
                   <Input
                     value={data.licenseNumber}
                     onChange={(event) => patch({ licenseNumber: event.target.value })}
@@ -853,7 +919,7 @@ export default function CreateBusinessPage({
                   />
                 </div>
                 <div>
-                  <FieldLabel hint="الزامی">تصویر پروانه کسب</FieldLabel>
+                  <FieldLabel required>تصویر پروانه کسب</FieldLabel>
                   {data.licenseImage ? (
                     <div className="relative overflow-hidden rounded-xl border border-slate-200">
                       <img
@@ -1006,7 +1072,7 @@ export default function CreateBusinessPage({
               </button>
             </div>
             <PreviewRow label="نام">{data.title}</PreviewRow>
-            <PreviewRow label="دسته‌بندی">{categoryPath(data.category, data.subcategory)}</PreviewRow>
+            <PreviewRow label="دسته‌بندی">{categoryPath(data.category, data.subcategories)}</PreviewRow>
             <PreviewRow label="توضیحات">
               <span className="line-clamp-3">{data.description}</span>
             </PreviewRow>
@@ -1075,7 +1141,13 @@ export default function CreateBusinessPage({
                 </span>
               ) : null}
             </PreviewRow>
-            <PreviewRow label="مالک">{user.full_name || formatPhone(user.phone)}</PreviewRow>
+            <PreviewRow label="مالک">
+              {user.full_name || (
+                <span dir="ltr" className="inline-block">
+                  {formatPhone(user.phone)}
+                </span>
+              )}
+            </PreviewRow>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1160,8 +1232,11 @@ export default function CreateBusinessPage({
         open={categoryOpen}
         onClose={() => setCategoryOpen(false)}
         selected={data.category}
-        selectedSubcategory={data.subcategory}
-        onSelect={selectCategory}
+        selectedSubcategory={data.subcategories[0] ?? null}
+        onSelect={() => {}}
+        multiple
+        selectedSubcategories={data.subcategories}
+        onSelectMany={selectCategory}
       />
       <MapPickerSheet
         open={mapOpen}
@@ -1169,7 +1244,7 @@ export default function CreateBusinessPage({
         value={data.geo}
         onClose={() => setMapOpen(false)}
         onConfirm={(address, geo) => {
-          patch({ address: normalizeAddress(address || data.address), geo });
+          patch({ address: normalizeAddress(address || data.address).slice(0, 255), geo });
           setMapOpen(false);
         }}
       />

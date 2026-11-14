@@ -12,6 +12,7 @@ interface Analytics {
   rating_count: number;
   approved_reviews: number;
   is_verified: boolean;
+  is_license_verified: boolean;
 }
 
 export default function MeAnalyticsPage() {
@@ -69,7 +70,7 @@ export default function MeAnalyticsPage() {
             { label: "میانگین امتیاز", value: formatRating(analytics.data.rating_avg) },
             { label: "تعداد امتیاز", value: fa(analytics.data.rating_count) },
             { label: "نظرات تأییدشده", value: fa(analytics.data.approved_reviews) },
-            { label: "وضعیت مجوز", value: analytics.data.is_verified ? "تأییدشده" : "تأییدنشده" },
+            { label: "وضعیت مجوز", value: analytics.data.is_license_verified ? "تأییدشده" : "تأییدنشده" },
           ].map((card) => (
             <div key={card.label} className="rounded-2xl border border-slate-200 bg-white p-4">
               <p className="text-xs text-slate-500">{card.label}</p>

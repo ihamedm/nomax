@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { Icon } from "@/components/ui/icons";
 import { useUnreadNotificationCount } from "@/features/notifications/useUnreadNotifications";
 import { useOwnerReviewBadge } from "@/features/reviews/useOwnerReviewBadge";
@@ -180,6 +182,7 @@ export default function MeHomePage() {
   const logout = useAuth((state) => state.logout);
   const unreadCount = useUnreadNotificationCount();
   const reviewBadgeCount = useOwnerReviewBadge();
+  const [logoutOpen, setLogoutOpen] = useState(false);
 
   const isOwner = user?.role === "owner";
   const businesses = useApi<BusinessList>(["me", "businesses"], "/me/businesses", {
@@ -398,12 +401,22 @@ export default function MeHomePage() {
                 title="خروج از حساب"
                 description="پایان دادن به این نشست"
                 icon={<LogoutIcon className="h-[18px] w-[18px]" />}
-                onClick={() => void handleLogout()}
+                onClick={() => setLogoutOpen(true)}
               />
             </div>
           </nav>
         </div>
       </div>
+
+      <ConfirmSheet
+        open={logoutOpen}
+        title="خروج از حساب"
+        description="آیا از حساب خود خارج می‌شوید؟ برای استفاده دوباره باید وارد شوید."
+        confirmLabel="خروج"
+        tone="rose"
+        onClose={() => setLogoutOpen(false)}
+        onConfirm={() => void handleLogout()}
+      />
     </section>
   );
 }

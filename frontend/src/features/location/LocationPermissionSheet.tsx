@@ -4,47 +4,34 @@ import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { getCurrentPosition } from "@/lib/geolocation";
+import {
+  isLocationGranted,
+  markLocationGranted,
+  recordAutoPrompt,
+  shouldAutoPrompt,
+} from "@/lib/location-prompt";
 import { useUi } from "@/stores/ui";
 
-const STORAGE_KEY = "nomax.locationPrompt";
-type PromptAnswer = "granted" | "dismissed";
-
-function readAnswer(): PromptAnswer | null {
-  try {
-    const value = localStorage.getItem(STORAGE_KEY);
-    return value === "granted" || value === "dismissed" ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeAnswer(answer: PromptAnswer): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, answer);
-  } catch {
-    // Private mode: the prompt may reappear next visit, which is acceptable.
-  }
-}
-
 /**
- * First-visit geolocation ask.
+ * Geolocation explainer sheet.
  *
- * Browsers show their own permission dialog only when `getCurrentPosition`
- * runs, and an unexplained prompt gets denied. This sheet explains the value
- * first, then asks. The answer is remembered so it never nags twice, and it is
- * skipped entirely when the browser already holds a decision.
+ * Automatically asks at most three times, one per day, until permission is
+ * granted. Location actions (search "my location", map picker) open it directly
+ * because that is when the user actually needs the service.
  */
 export function LocationPermissionSheet() {
   const toast = useToast();
   const setLocation = useUi((state) => state.setLocation);
   const locationSource = useUi((state) => state.locationSource);
-  const [open, setOpen] = useState(false);
+  const open = useUi((state) => state.locationPromptOpen);
+  const openPrompt = useUi((state) => state.openLocationPrompt);
+  const closePrompt = useUi((state) => state.closeLocationPrompt);
   const [locating, setLocating] = useState(false);
-  const answeredRef = useRef(false);
+  const busyRef = useRef(false);
 
   useEffect(() => {
     if (locationSource === "gps") {
-      storeAnswer("granted");
+      markLocationGranted();
       return;
     }
 
@@ -61,7 +48,7 @@ export function LocationPermissionSheet() {
         });
     };
 
-    if (readAnswer() === "granted") {
+    if (isLocationGranted()) {
       // Permission was granted on an earlier visit and the in-memory store was
       // reset by the reload: restore the position silently, no prompt.
       locateSilently();
@@ -69,7 +56,8 @@ export function LocationPermissionSheet() {
         cancelled = true;
       };
     }
-    if (readAnswer()) return;
+
+    if (!shouldAutoPrompt()) return;
 
     const timer = window.setTimeout(async () => {
       if (cancelled) return;
@@ -79,51 +67,45 @@ export function LocationPermissionSheet() {
         });
         if (cancelled) return;
         if (status?.state === "granted") {
-          storeAnswer("granted");
+          markLocationGranted();
           locateSilently();
           return;
         }
-        if (status?.state === "denied") {
-          storeAnswer("dismissed");
-          return;
-        }
+        if (status?.state === "denied") return;
       } catch {
         // Safari and older browsers have no Permissions API for geolocation.
       }
-      if (!cancelled) setOpen(true);
+      if (cancelled) return;
+      recordAutoPrompt();
+      openPrompt();
     }, 800);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [locationSource, setLocation]);
+  }, [locationSource, setLocation, openPrompt]);
 
   async function allow() {
-    if (answeredRef.current) return;
-    answeredRef.current = true;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setLocating(true);
     try {
       const coords = await getCurrentPosition();
       setLocation(coords, "gps");
-      storeAnswer("granted");
-      setOpen(false);
+      markLocationGranted();
+      closePrompt();
       toast("موقعیت شما ثبت شد و نتایج نزدیک‌تر نمایش داده می‌شود.");
     } catch {
       toast("دسترسی به موقعیت ممکن نشد. از تنظیمات مرورگر می‌توانید اجازه دهید.");
     } finally {
-      answeredRef.current = false;
+      busyRef.current = false;
       setLocating(false);
     }
   }
 
-  function dismiss() {
-    storeAnswer("dismissed");
-    setOpen(false);
-  }
-
   return (
-    <BottomSheet open={open} onClose={dismiss} title="کسب‌وکارهای نزدیک شما">
+    <BottomSheet open={open} onClose={closePrompt} title="کسب‌وکارهای نزدیک شما">
       <div className="space-y-4">
         <div className="rounded-2xl border border-brand-200 bg-brand-50 p-4 text-center">
           <span
@@ -148,7 +130,7 @@ export function LocationPermissionSheet() {
           <Button className="flex-1" loading={locating} onClick={() => void allow()}>
             اجازه می‌دهم
           </Button>
-          <Button variant="outline" className="flex-1" disabled={locating} onClick={dismiss}>
+          <Button variant="outline" className="flex-1" disabled={locating} onClick={closePrompt}>
             بعداً
           </Button>
         </div>

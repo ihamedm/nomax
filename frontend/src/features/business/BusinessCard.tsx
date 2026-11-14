@@ -4,29 +4,54 @@ import { Badge } from "@/components/ui/badge";
 import { fa, formatDistance, formatRating } from "@/lib/format";
 import type { BusinessListItem } from "@/types";
 
+function LicenseTick() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5 shrink-0 text-sky-500"
+      role="img"
+      aria-label="مجوز تأیید شده"
+    >
+      <path
+        fill="currentColor"
+        d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.1 14.3-3.6-3.6 1.4-1.4 2.2 2.2 4.8-4.8 1.4 1.4-6.2 6.2Z"
+      />
+    </svg>
+  );
+}
+
 export function BusinessCard({ business }: { business: BusinessListItem }) {
+  const avatar = business.avatar_url || business.profile_image_url;
+  const subcategories = business.subcategories?.length
+    ? business.subcategories
+    : business.subcategory
+      ? [business.subcategory]
+      : [];
   return (
     <Link
       to={`/businesses/${business.slug}`}
       className="flex h-full w-full flex-col rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 active:bg-brand-50/40"
     >
       <div className="flex gap-3">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-brand-50 text-2xl">
-          {business.profile_image_url ? (
-            <img
-              src={business.profile_image_url}
-              alt=""
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
+        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-brand-50 text-2xl">
+          {avatar ? (
+            <img src={avatar} alt="" className="h-full w-full object-cover" loading="lazy" />
           ) : (
             <span aria-hidden>{business.category?.icon ?? "🏪"}</span>
+          )}
+          {business.is_verified && (
+            <span className="absolute inset-x-0 bottom-0 bg-brand-600/95 py-0.5 text-center text-[8px] font-bold leading-3 text-white">
+              تایید هویت شده
+            </span>
           )}
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="truncate text-sm font-bold text-slate-900">{business.name}</h3>
+            <h3 className="flex min-w-0 items-center gap-1 text-sm font-bold text-slate-900">
+              <span className="truncate">{business.name}</span>
+              {business.is_license_verified && <LicenseTick />}
+            </h3>
             {business.rating_count > 0 && (
               <span className="shrink-0 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">
                 ★ {formatRating(business.rating_avg)}
@@ -39,20 +64,26 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
 
           <p className="mt-0.5 text-[11px] text-slate-400">
             {business.category?.name ?? "دسته‌بندی نشده"}
-            {business.subcategory ? ` · ${business.subcategory.name}` : ""}
+            {subcategories.map((item) => ` · ${item.name}`).join("")}
           </p>
 
           <p className="mt-1 line-clamp-1 text-xs text-slate-500">{business.short_description}</p>
 
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {business.is_verified && <Badge tone="brand">تأیید شده</Badge>}
             {business.is_24h && <Badge tone="amber">۲۴ ساعته</Badge>}
+            {business.like_count > 0 && <Badge tone="rose">♥ {fa(business.like_count)}</Badge>}
             {business.distance_m !== null && (
               <Badge tone="slate">{formatDistance(business.distance_m)}</Badge>
             )}
           </div>
 
           <p className="mt-2 line-clamp-1 text-[11px] text-slate-400">{business.address}</p>
+
+          {business.bookmark_note && (
+            <p className="mt-2 line-clamp-3 rounded-lg bg-amber-50 px-2 py-1 text-[11px] leading-5 text-amber-800">
+              📝 {business.bookmark_note}
+            </p>
+          )}
         </div>
       </div>
     </Link>
