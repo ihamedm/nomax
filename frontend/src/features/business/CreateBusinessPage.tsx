@@ -1142,9 +1142,13 @@ export default function CreateBusinessPage({
               ) : null}
             </PreviewRow>
             <PreviewRow label="مالک">
-              {user.full_name || (
-                <span dir="ltr" className="inline-block">
-                  {formatPhone(user.phone)}
+              <span className="block">{user.full_name || "بدون نام"}</span>
+              <span className="block text-[11px] text-slate-500">
+                <span dir="ltr">{formatPhone(user.phone)}</span>
+              </span>
+              {user.national_id && (
+                <span className="block text-[11px] text-slate-500">
+                  کد ملی: <span dir="ltr">{user.national_id}</span>
                 </span>
               )}
             </PreviewRow>

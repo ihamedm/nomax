@@ -214,11 +214,23 @@ async def test_admin_business_wizard_owner_images_and_tags(client, db_session, c
         permissions=["business.read", "business.create", "business.update"],
     )
 
-    searched = await client.get(
-        "/api/v1/admin/businesses/owners?q=09140000001", headers=auth(admin)
-    )
-    assert searched.status_code == 200
-    assert [item["id"] for item in searched.json()["data"]["items"]] == [str(owner.id)]
+    async def search(term: str) -> list[str]:
+        response = await client.get(
+            "/api/v1/admin/businesses/owners", params={"q": term}, headers=auth(admin)
+        )
+        assert response.status_code == 200
+        return [item["id"] for item in response.json()["data"]["items"]]
+
+    assert await search("09140000001") == [str(owner.id)]
+
+    customer = await create_user("09140000222", full_name="زهرا احمدی")
+    # Phones copied from the UI arrive with Persian digits.
+    assert await search("۰۹۱۴۰۰۰۰۲۲۲") == [str(customer.id)]
+    assert await search("زهرا") == [str(customer.id)]
+
+    manager = await create_user("09140000223", UserRole.ADMIN, full_name="مدیر نمونه")
+    # All users are searchable, not just owners/customers.
+    assert await search("مدیر نمونه") == [str(manager.id)]
 
     created_owner = await client.post(
         "/api/v1/admin/businesses/owners",
@@ -298,12 +310,21 @@ async def test_admin_business_wizard_owner_images_and_tags(client, db_session, c
 async def test_admin_attention_counts_pending_reviews_and_businesses(
     client, db_session, create_user
 ):
+    from app.models.quote import QuoteRequest
     from app.models.review import Review
 
     owner, business = await _setup(db_session, create_user)
     customer = await create_user("09140000150", UserRole.CUSTOMER)
     db_session.add(
         Review(business_id=business.id, user_id=customer.id, rating=5, status="pending")
+    )
+    db_session.add(
+        QuoteRequest(
+            customer_id=customer.id,
+            category_id=business.category_id,
+            title="استعلام فعال",
+            status="active",
+        )
     )
     await db_session.commit()
 
@@ -312,14 +333,31 @@ async def test_admin_attention_counts_pending_reviews_and_businesses(
     )
     both = await client.get("/api/v1/admin/attention", headers=auth(admin))
     assert both.status_code == 200
-    assert both.json()["data"] == {"businesses": 1, "reviews": 1, "total": 2}
+    assert both.json()["data"] == {
+        "businesses": 1,
+        "reviews": 1,
+        "quotes": 0,
+        "total": 2,
+    }
 
     business_only = await create_user(
         "09140000152", UserRole.ADMIN, permissions=["business.read"]
     )
     partial = await client.get("/api/v1/admin/attention", headers=auth(business_only))
     assert partial.status_code == 200
-    assert partial.json()["data"] == {"businesses": 1, "reviews": 0, "total": 1}
+    assert partial.json()["data"] == {
+        "businesses": 1,
+        "reviews": 0,
+        "quotes": 0,
+        "total": 1,
+    }
+
+    with_quotes = await create_user(
+        "09140000153", UserRole.ADMIN, permissions=["quote.read"]
+    )
+    quote_counts = await client.get("/api/v1/admin/attention", headers=auth(with_quotes))
+    assert quote_counts.status_code == 200
+    assert quote_counts.json()["data"] == {"businesses": 0, "reviews": 0, "quotes": 1, "total": 1}
 
 
 async def test_permanent_business_delete_blocked_by_relations(client, db_session, create_user):

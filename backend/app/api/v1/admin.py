@@ -77,6 +77,26 @@ def _clean_text(value: str | None) -> str | None:
     return cleaned or None
 
 
+# Operators often paste numbers copied from the UI, which renders Persian digits.
+_DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def _user_search_clauses(term: str):
+    """Match any user by full name or phone (`۰۹…`, `+989…` and `98…` all work)."""
+    term = term.strip()
+    if not term:
+        return []
+    clauses = [User.full_name.ilike(f"%{term}%")]
+    # Phones are stored as 10 digits without the leading 0/98 prefix.
+    digits = "".join(ch for ch in term.translate(_DIGIT_TRANSLATION) if ch.isdigit())
+    if digits.startswith("98") and len(digits) > 10:
+        digits = digits[2:]
+    digits = digits.lstrip("0")
+    if digits:
+        clauses.append(User.phone.ilike(f"%{digits}%"))
+    return [or_(*clauses)]
+
+
 async def _validate_national_id(
     session: AsyncSession, national_id: str | None, *, exclude_id=None
 ) -> str | None:
@@ -392,22 +412,9 @@ async def search_business_owners(
     actor: User = Depends(_require_any_permission("business.read", "business.create", "business.update")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Owners/customers an operator can assign as a business owner."""
+    """Any active user an operator can assign as a business owner."""
     del actor
-    conditions = [
-        User.deleted_at.is_(None),
-        User.role.in_([UserRole.CUSTOMER, UserRole.OWNER]),
-    ]
-    term = (q or "").strip()
-    if term:
-        clauses = [User.full_name.ilike(f"%{term}%")]
-        digits = "".join(ch for ch in term if ch.isdigit())
-        if digits.startswith("98") and len(digits) > 10:
-            digits = digits[2:]
-        digits = digits.lstrip("0")
-        if digits:
-            clauses.append(User.phone.ilike(f"%{digits}%"))
-        conditions.append(or_(*clauses))
+    conditions = [User.deleted_at.is_(None), *_user_search_clauses(q or "")]
     rows = (
         await session.execute(
             select(User).where(*conditions).order_by(User.created_at.desc()).limit(limit)
@@ -1126,11 +1133,13 @@ async def attention_counts(
 ) -> dict:
     """Pending work the viewer can action, for the admin header badge."""
     from app.models.business import Business
+    from app.models.quote import QuoteRequest
     from app.models.review import Review
 
     is_super = actor.role == UserRole.SUPERADMIN
     businesses = 0
     reviews = 0
+    quotes = 0
     if is_super or has_permission(actor, "business.read"):
         businesses = int(
             (
@@ -1155,8 +1164,26 @@ async def attention_counts(
             ).scalar()
             or 0
         )
+    if is_super or has_permission(actor, "quote.read"):
+        # Active requests are the ones an admin may still act on.
+        quotes = int(
+            (
+                await session.execute(
+                    select(func.count(QuoteRequest.id)).where(
+                        QuoteRequest.deleted_at.is_(None),
+                        QuoteRequest.status == "active",
+                    )
+                )
+            ).scalar()
+            or 0
+        )
     return {
-        "data": {"businesses": businesses, "reviews": reviews, "total": businesses + reviews}
+        "data": {
+            "businesses": businesses,
+            "reviews": reviews,
+            "quotes": quotes,
+            "total": businesses + reviews + quotes,
+        }
     }
 
 
@@ -1210,18 +1237,7 @@ async def list_users(
     if verified is not None:
         conditions.append(User.is_verified.is_(verified))
 
-    term = (q or "").strip()
-    if term:
-        clauses = [User.full_name.ilike(f"%{term}%")]
-        # Phones are stored as 10 digits without the leading 0/98 prefix, so
-        # accept operator input such as "0912…" or "+98912…" as well.
-        digits = "".join(ch for ch in term if ch.isdigit())
-        if digits.startswith("98") and len(digits) > 10:
-            digits = digits[2:]
-        digits = digits.lstrip("0")
-        if digits:
-            clauses.append(User.phone.ilike(f"%{digits}%"))
-        conditions.append(or_(*clauses))
+    conditions.extend(_user_search_clauses(q or ""))
 
     total = int(
         (await session.execute(select(func.count(User.id)).where(*conditions))).scalar() or 0

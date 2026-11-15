@@ -142,7 +142,7 @@ function NewRequestCard({
       <button
         type="button"
         onClick={onIrrelevant}
-        className="mt-2 w-full text-center text-[11px] text-slate-400 underline-offset-4 transition-colors hover:text-rose-600 hover:underline"
+        className="mt-4 w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 text-center text-[11px] font-bold text-slate-600 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
       >
         این درخواست به کسب‌وکار من مربوط نیست
       </button>

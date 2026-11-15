@@ -148,6 +148,8 @@ async def _dispatch_detail(session: AsyncSession, quote: QuoteRequest) -> dict:
                     "is_verified": business.is_verified,
                     "is_24h": business.is_24h,
                     "category": business.category.name if business.category else None,
+                    "avatar_url": business.avatar_url,
+                    "profile_image_url": business.profile_image_url,
                 },
                 "owner": {
                     "id": str(owner.id),

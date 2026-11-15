@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,8 @@ interface DispatchDelivery {
     is_verified: boolean;
     is_24h: boolean;
     category?: string | null;
+    avatar_url?: string | null;
+    profile_image_url?: string | null;
   };
   owner: { id: string; name?: string | null; phone: string };
   round: number;
@@ -612,20 +614,46 @@ export default function AdminQuotesPage() {
                           key={`${delivery.business.id}-${delivery.round}`}
                           className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2"
                         >
-                          <div className="min-w-0">
-                            <p className="truncate text-[11px] font-bold text-slate-800">
-                              {delivery.business.name}
-                              {delivery.business.is_verified && (
-                                <span className="mr-1 text-[9px] font-normal text-brand-600">تأییدشده</span>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-base">
+                              {delivery.business.avatar_url ||
+                              delivery.business.profile_image_url ? (
+                                <img
+                                  src={
+                                    delivery.business.avatar_url ||
+                                    delivery.business.profile_image_url ||
+                                    ""
+                                  }
+                                  alt=""
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span aria-hidden>🏪</span>
                               )}
-                            </p>
-                            <p className="mt-0.5 text-[9px] text-slate-400">
-                              {delivery.owner.name || "صاحب کسب‌وکار"} ·{" "}
-                              <span dir="ltr">{delivery.owner.phone}</span> ·{" "}
-                              {SOURCE_LABELS[delivery.source] ?? delivery.source} · موج {toFa(delivery.round)}
-                            </p>
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-bold text-slate-800">
+                                {delivery.business.name}
+                                {delivery.business.is_verified && (
+                                  <span className="mr-1 text-[9px] font-normal text-brand-600">تأییدشده</span>
+                                )}
+                              </p>
+                              <p className="mt-0.5 text-[9px] text-slate-400">
+                                {delivery.owner.name || "صاحب کسب‌وکار"} ·{" "}
+                                <span dir="ltr">{delivery.owner.phone}</span> ·{" "}
+                                {SOURCE_LABELS[delivery.source] ?? delivery.source} · موج {toFa(delivery.round)}
+                              </p>
+                            </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
+                            <Link
+                              to={`/businesses/${delivery.business.slug}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-lg px-1.5 py-0.5 text-[9px] font-bold text-brand-600 transition hover:bg-brand-50"
+                            >
+                              مشاهده صفحه
+                            </Link>
                             <Badge tone={delivery.seen_at ? "brand" : "slate"}>
                               {delivery.seen_at ? "مشاهده شد" : "دیده‌نشده"}
                             </Badge>

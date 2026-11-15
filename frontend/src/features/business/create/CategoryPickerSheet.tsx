@@ -296,13 +296,15 @@ export function CategoryPickerSheet({
                         <span className="block truncate text-sm font-bold text-slate-900">
                           {category.name}
                         </span>
-                        <span className="block text-[10px] text-slate-400">
-                          {category.subcategory_count > 0
-                            ? `${category.subcategory_count} زیردسته`
-                            : "بدون زیردسته"}
-                        </span>
+                        {!categoriesOnly && (
+                          <span className="block text-[10px] text-slate-400">
+                            {category.subcategory_count > 0
+                              ? `${category.subcategory_count} زیردسته`
+                              : "بدون زیردسته"}
+                          </span>
+                        )}
                       </span>
-                      <Chevron />
+                      {!categoriesOnly && <Chevron />}
                     </button>
                   ))}
                 </div>
@@ -384,13 +386,15 @@ export function CategoryPickerSheet({
                     <span className="block truncate text-sm font-bold text-slate-900">
                       {category.name}
                     </span>
-                    <span className="mt-0.5 block text-[11px] text-slate-400">
-                      {category.subcategory_count > 0
-                        ? `${category.subcategory_count} زیردسته`
-                        : "بدون زیردسته"}
-                    </span>
+                    {!categoriesOnly && (
+                      <span className="mt-0.5 block text-[11px] text-slate-400">
+                        {category.subcategory_count > 0
+                          ? `${category.subcategory_count} زیردسته`
+                          : "بدون زیردسته"}
+                      </span>
+                    )}
                   </span>
-                  <Chevron />
+                  {!categoriesOnly && <Chevron />}
                 </button>
               ))}
             </>

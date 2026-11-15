@@ -38,12 +38,6 @@ export default function MeBusinessesPage() {
         )}
       </header>
 
-      {data && !canCreate && (
-        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[11px] leading-5 text-amber-800">
-          شما به سقف مجاز ثبت کسب‌وکار ({data.limit.toLocaleString("fa-IR")}) رسیده‌اید.
-        </p>
-      )}
-
       {isLoading && (
         <div className="flex justify-center py-16 text-brand-600">
           <Spinner />

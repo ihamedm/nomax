@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatPhone } from "@/lib/format";
+import { formatPhone, ROLE_LABELS } from "@/lib/format";
 import {
   MAX_IMAGE_INPUT_BYTES,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -181,6 +181,7 @@ export function AdminBusinessWizard({
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [customTag, setCustomTag] = useState("");
   const [newOwnerOpen, setNewOwnerOpen] = useState(false);
   const [newOwner, setNewOwner] = useState({ phone: "", full_name: "", national_id: "" });
@@ -190,6 +191,7 @@ export function AdminBusinessWizard({
   const [savingOwner, setSavingOwner] = useState(false);
   const [ownerQuery, setOwnerQuery] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const avatarFileRef = useRef<HTMLInputElement | null>(null);
 
   const owners = useApi<{ items: OwnerOption[] }>(
     ["admin", "business-owners", ownerQuery],
@@ -210,6 +212,9 @@ export function AdminBusinessWizard({
     setState((current) => ({ ...current, ...partial }));
     setError(null);
   }
+
+  const avatarPreview =
+    state.avatar_url || state.photos.find((photo) => photo.isMain)?.url || state.photos[0]?.url;
 
   const suggestedTags = Array.from(
     new Set(
@@ -323,6 +328,38 @@ export function AdminBusinessWizard({
       setError(errorMessage(updateError));
     } finally {
       setSavingOwner(false);
+    }
+  }
+
+  async function uploadAvatar(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast("فقط تصویر مجاز است.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_BYTES) {
+      toast("حجم تصویر باید کمتر از ۱۵ مگابایت باشد.");
+      return;
+    }
+    setUploadingAvatar(true);
+    try {
+      const prepared = await compressImageForUpload(file);
+      if (prepared.size > MAX_IMAGE_UPLOAD_BYTES) {
+        toast("حجم تصویر پس از بهینه‌سازی هنوز بیش از ۵ مگابایت است.");
+        return;
+      }
+      const form = new FormData();
+      form.append("file", prepared);
+      form.append("crop", "square");
+      form.append("filter", "none");
+      const result = await api<{ url: string }>("/uploads/image", { method: "POST", body: form });
+      patch({ avatar_url: result.url });
+    } catch (uploadError) {
+      toast(errorMessage(uploadError));
+    } finally {
+      setUploadingAvatar(false);
     }
   }
 
@@ -442,18 +479,20 @@ export function AdminBusinessWizard({
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3 text-xs font-medium">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditOwner({
-                          full_name: state.owner?.full_name ?? "",
-                        });
-                        setEditOwnerOpen((open) => !open);
-                      }}
-                      className="text-brand-700 hover:underline"
-                    >
-                      ویرایش مالک
-                    </button>
+                    {state.owner.role !== "admin" && state.owner.role !== "superadmin" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditOwner({
+                            full_name: state.owner?.full_name ?? "",
+                          });
+                          setEditOwnerOpen((open) => !open);
+                        }}
+                        className="text-brand-700 hover:underline"
+                      >
+                        ویرایش مالک
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -508,7 +547,7 @@ export function AdminBusinessWizard({
               <>
                 <div className="space-y-1.5">
                   <div className="flex items-baseline justify-between gap-3 text-xs font-bold text-slate-700">
-                    انتخاب از مالکان / مشتریان
+                    انتخاب مالک از کاربران
                     <span className="font-normal text-slate-400">با نام یا شماره جستجو کنید</span>
                   </div>
                   <Input
@@ -538,7 +577,9 @@ export function AdminBusinessWizard({
                           </span>
                         </span>
                         <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
-                          {owner.role === "owner" ? "مالک" : "مشتری"}
+                          {owner.role === "owner"
+                            ? "مالک"
+                            : (ROLE_LABELS[owner.role ?? ""] ?? "کاربر")}
                         </span>
                       </button>
                     ))}
@@ -770,12 +811,51 @@ export function AdminBusinessWizard({
                 className="hidden"
                 onChange={(event) => void uploadPhotos(event)}
               />
-              {state.photos.length > 0 && (
-                <div className="mt-3 border-t border-slate-100 pt-3">
-                  <p className="text-[11px] font-bold text-slate-700">آواتار کسب‌وکار</p>
-                  <p className="mt-0.5 text-[10px] text-slate-400">
-                    اگر انتخاب نشود، اولین تصویر به‌عنوان آواتار نمایش داده می‌شود.
-                  </p>
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <p className="text-[11px] font-bold text-slate-700">آواتار کسب‌وکار</p>
+                <p className="mt-0.5 text-[10px] text-slate-400">
+                  تصویری جداگانه آپلود کنید؛ در غیر این صورت اولین تصویر نمایش داده می‌شود.
+                </p>
+                <div className="mt-2 flex items-center gap-3">
+                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+                    {avatarPreview ? (
+                      <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-[9px] text-slate-400">
+                        آواتار
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      loading={uploadingAvatar}
+                      onClick={() => avatarFileRef.current?.click()}
+                    >
+                      آپلود آواتار
+                    </Button>
+                    {state.avatar_url && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => patch({ avatar_url: "" })}
+                      >
+                        حذف آواتار
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  ref={avatarFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => void uploadAvatar(event)}
+                />
+                {state.photos.length > 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -806,8 +886,8 @@ export function AdminBusinessWizard({
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-white p-3">

@@ -380,3 +380,35 @@ async def test_admin_review_list_filters_and_paginates(client, db_session, creat
     )
     assert businesses.status_code == 200
     assert businesses.json()["data"]["items"][0]["id"] == str(business.id)
+
+
+async def test_moderator_who_owns_the_business_can_moderate(client, db_session, create_user):
+    """Admins can own a business (e.g. created from the dashboard); they must
+    still be able to accept a review as a moderator and later decide as the owner."""
+    _, customer, business = await _setup(db_session, create_user)
+    admin = await create_user("09130000006", UserRole.SUPERADMIN)
+    business.owner_id = admin.id
+    await db_session.commit()
+
+    created = await client.post(
+        f"/api/v1/businesses/{business.slug}/reviews",
+        json={"rating": 5},
+        headers=auth(customer),
+    )
+    review_id = created.json()["data"]["id"]
+
+    accepted = await client.patch(
+        f"/api/v1/businesses/reviews/{review_id}/status",
+        json={"status": "awaiting_owner"},
+        headers=auth(admin),
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    approved = await client.patch(
+        f"/api/v1/businesses/reviews/{review_id}/status",
+        json={"status": "approved"},
+        headers=auth(admin),
+    )
+    assert approved.status_code == 200, approved.text
+    await db_session.refresh(business)
+    assert business.rating_count == 1

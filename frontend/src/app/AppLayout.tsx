@@ -8,10 +8,13 @@ import { UnreadBadge } from "@/features/notifications/UnreadBadge";
 import { useUnreadNotificationCount } from "@/features/notifications/useUnreadNotifications";
 import { LocationPermissionSheet } from "@/features/location/LocationPermissionSheet";
 import { useOwnerReviewBadge } from "@/features/reviews/useOwnerReviewBadge";
+import type { IncomingResponse } from "@/features/quote/types";
 import { cn } from "@/lib/cn";
-import { formatPhone, ROLE_LABELS } from "@/lib/format";
+import { fa, formatPhone, ROLE_LABELS } from "@/lib/format";
+import { useApi } from "@/lib/query";
 import { isAdmin, useAuth } from "@/stores/auth";
 import { useTheme } from "@/stores/theme";
+import type { BusinessListItem } from "@/types";
 
 function Icon({ children }: { children: ReactNode }) {
   return (
@@ -112,6 +115,112 @@ const DRAWER_LINKS = [
   { to: "/me/saved", label: "ذخیره‌شده‌ها" },
 ];
 
+/** Header user icon on `/me`: opens a menu of the counts that need attention. */
+function AccountMenu() {
+  const location = useLocation();
+  const user = useAuth((state) => state.user);
+  const [open, setOpen] = useState(false);
+  const unreadCount = useUnreadNotificationCount();
+  const reviewCount = useOwnerReviewBadge();
+  const isOwner = user?.role === "owner";
+
+  // Counts load on first open, then share the dashboard's cache entries.
+  const businesses = useApi<{ items: BusinessListItem[] }>(
+    ["me", "businesses"],
+    "/me/businesses",
+    { enabled: open && Boolean(user) },
+  );
+  const incoming = useApi<IncomingResponse>(
+    ["quotes", "incoming", "new"],
+    "/quotes/requests/incoming?scope=new",
+    { enabled: open && isOwner },
+  );
+
+  useEffect(() => setOpen(false), [location.pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const pendingBusinesses =
+    businesses.data?.items.filter(
+      (business) =>
+        (business.status ?? (business.is_verified ? "approved" : "pending")) === "pending",
+    ).length ?? 0;
+  const items = [
+    { to: "/me/notifications", label: "اعلان‌ها", count: unreadCount },
+    { to: "/me/reviews", label: "نظرات", count: isOwner ? reviewCount : 0 },
+    { to: "/me/quotes", label: "درخواست‌های جدید", count: isOwner ? (incoming.data?.counts.new ?? 0) : 0 },
+    { to: "/me/businesses", label: "کسب‌وکار در انتظار تأیید", count: isOwner ? pendingBusinesses : 0 },
+  ].filter((item) => item.count > 0);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="حساب کاربری و موارد در انتظار"
+        className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-600"
+      >
+        <UserIcon />
+        <UnreadBadge count={unreadCount + reviewCount} />
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="بستن فهرست حساب"
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default"
+          />
+          <div
+            role="menu"
+            className="absolute left-0 top-12 z-50 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+          >
+            <p className="border-b border-slate-100 px-3 py-2 text-[11px] font-medium text-slate-400">
+              کارهای در انتظار شما
+            </p>
+            {items.length === 0 && (
+              <p className="px-3 py-3 text-[11px] text-slate-400">موردی در انتظار نیست.</p>
+            )}
+            {items.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="flex items-center justify-between gap-3 border-t border-slate-100 px-3 py-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                <span>{item.label}</span>
+                <span className="min-w-5 rounded-full bg-rose-600 px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
+                  {fa(item.count)}
+                </span>
+              </Link>
+            ))}
+            <Link
+              to="/me"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="block border-t border-slate-100 px-3 py-2.5 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50"
+            >
+              داشبورد حساب
+            </Link>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -122,9 +231,6 @@ export function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement | null>(null);
-  const unreadCount = useUnreadNotificationCount();
-  const reviewBadgeCount = useOwnerReviewBadge();
-  const badgeCount = unreadCount + reviewBadgeCount;
 
   const isHome = location.pathname === "/";
   const isAccount = location.pathname === "/me" || location.pathname.startsWith("/me/");
@@ -256,20 +362,17 @@ export function AppLayout() {
             </nav>
           )}
 
-          <Link
-            to={user ? "/me" : "/login"}
-            aria-label={
-              user
-                ? badgeCount > 0
-                  ? `حساب کاربری، ${badgeCount.toLocaleString("fa-IR")} مورد خوانده‌نشده`
-                  : "حساب کاربری"
-                : "ورود"
-            }
-            className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-600"
-          >
-            <UserIcon />
-            <UnreadBadge count={badgeCount} />
-          </Link>
+          {user && isAccount ? (
+            <AccountMenu />
+          ) : (
+            <Link
+              to={user ? "/me" : "/login"}
+              aria-label={user ? "حساب کاربری" : "ورود"}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-600"
+            >
+              <UserIcon />
+            </Link>
+          )}
         </div>
       </header>
 

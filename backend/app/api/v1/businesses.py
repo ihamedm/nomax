@@ -861,21 +861,20 @@ async def moderate_review(
     business = await session.get(Business, review.business_id)
     if business is None or business.deleted_at is not None:
         raise AppError("not_found", "business_not_found", 404)
-    is_owner = business.owner_id == user.id
     is_moderator = has_permission(user, "review.moderate")
-    if not is_owner and not is_moderator:
-        raise AppError("forbidden", "review_moderation_forbidden", 403)
     status = payload.get("status")
-    if is_owner:
+    if status in ("awaiting_owner", "rejected", "pending"):
+        # Admin acceptance only moves the review to the owner's inbox.
+        if not is_moderator:
+            raise AppError("forbidden", "review_moderation_forbidden", 403)
+    elif status in ("approved", "declined"):
         # The owner only decides after the admin has accepted the review.
-        if status not in ("approved", "declined"):
-            raise AppError("validation_error", "invalid_status", 422)
+        if business.owner_id != user.id:
+            raise AppError("forbidden", "review_moderation_forbidden", 403)
         if review.status != "awaiting_owner":
             raise AppError("review_not_ready", "review_not_ready", 409)
     else:
-        # Admin acceptance only moves the review to the owner's inbox.
-        if status not in ("awaiting_owner", "rejected", "pending"):
-            raise AppError("validation_error", "invalid_status", 422)
+        raise AppError("validation_error", "invalid_status", 422)
     review.status = status
     # Approval/rejection changes the public aggregate immediately.
     await _recalculate_business_rating(session, review.business_id)

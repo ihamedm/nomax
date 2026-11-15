@@ -43,18 +43,20 @@ export function AdminLayout() {
   const [navOpen, setNavOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [attentionOpen, setAttentionOpen] = useState(false);
-  const attention = useApi<{ businesses: number; reviews: number; total: number }>(
-    ["admin", "attention"],
-    "/admin/attention",
-    {
-      enabled: ready && Boolean(user) && isAdmin(user),
-      refetchInterval: 60_000,
-      staleTime: 30_000,
-    },
-  );
+  const attention = useApi<{
+    businesses: number;
+    reviews: number;
+    quotes: number;
+    total: number;
+  }>(["admin", "attention"], "/admin/attention", {
+    enabled: ready && Boolean(user) && isAdmin(user),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
   const attentionCount = attention.data?.total ?? 0;
   const pendingBusinesses = attention.data?.businesses ?? 0;
   const pendingReviews = attention.data?.reviews ?? 0;
+  const activeQuotes = attention.data?.quotes ?? 0;
 
   useEffect(() => {
     setNavOpen(false);
@@ -292,6 +294,24 @@ export function AdminLayout() {
                         )}
                       >
                         {fa(pendingReviews)}
+                      </span>
+                    </Link>
+                    <Link
+                      to="/admin/quotes?status=active"
+                      role="menuitem"
+                      onClick={() => setAttentionOpen(false)}
+                      className="flex items-center justify-between gap-3 border-t border-slate-100 px-3 py-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <span>استعلام‌های فعال</span>
+                      <span
+                        className={cn(
+                          "min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-bold leading-none",
+                          activeQuotes > 0
+                            ? "bg-rose-600 text-white"
+                            : "bg-slate-100 text-slate-500",
+                        )}
+                      >
+                        {fa(activeQuotes)}
                       </span>
                     </Link>
                   </div>
