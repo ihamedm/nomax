@@ -183,13 +183,13 @@ def _business_payload(hit: BusinessHit, *, detail: bool = False) -> dict:
         "profile_image_url": business.profile_image_url,
         "avatar_url": business.avatar_url,
         "created_at": business.created_at.isoformat() if business.created_at else None,
+        "updated_at": business.updated_at.isoformat() if business.updated_at else None,
     }
     if detail:
         payload.update(
             {
                 "description": business.description,
                 "instagram": business.instagram,
-                "updated_at": business.updated_at.isoformat() if business.updated_at else None,
                 "reviews": [],
             }
         )

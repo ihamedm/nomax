@@ -203,7 +203,7 @@ export function AdminLayout() {
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <Link
               to="/"
-              className="hidden h-9 items-center rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 sm:inline-flex"
+              className="inline-flex h-9 items-center rounded-xl border border-slate-200 px-2 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 sm:px-3 sm:text-xs"
             >
               مشاهده سایت
             </Link>

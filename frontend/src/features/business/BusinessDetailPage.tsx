@@ -15,6 +15,7 @@ import { formatJalali, formatJalaliDateTime, formatRelative } from "@/lib/jalali
 import { useApi } from "@/lib/query";
 import { returnPath } from "@/lib/auth-redirect";
 import { useAuth } from "@/stores/auth";
+import { NAVIGATION_APPS, navigationHref, useNavigationApp } from "@/stores/navigation";
 import { LoginRequiredSheet } from "@/features/auth/LoginRequiredSheet";
 import { NeshanMap, type MapMarker } from "@/features/map/NeshanMap";
 import { ReviewSheet } from "@/features/reviews/ReviewSheet";
@@ -34,6 +35,22 @@ function NavigationIcon({ className }: { className?: string }) {
   return (
     <Icon className={className}>
       <path d="m3 11 18-8-8 18-2-8-8-2Z" />
+    </Icon>
+  );
+}
+
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="m6 9 6 6 6-6" />
+    </Icon>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="m5 13 4 4L19 7" />
     </Icon>
   );
 }
@@ -217,6 +234,9 @@ export function BusinessDetailPage() {
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [reviewHint, setReviewHint] = useState<string | null>(null);
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const navigationApp = useNavigationApp((state) => state.app);
+  const setNavigationApp = useNavigationApp((state) => state.setApp);
   const reviewsRef = useRef<HTMLElement | null>(null);
   const [loginPrompt, setLoginPrompt] = useState<LoginPrompt | null>(null);
   const reviewIntentHandled = useRef(false);
@@ -406,11 +426,11 @@ export function BusinessDetailPage() {
   // The primary call button only reveals the owner's number when the business
   // has no public phone, so anonymous visitors must sign in first.
   const callNeedsLogin = !user && !businessPhone && Boolean(ownerPhone);
-  const neshanLink = business?.geo
-    ? `https://neshan.org/maps#c${business.geo.lat.toFixed(5)}-${business.geo.lng.toFixed(
-        5,
-      )}-17z-0p`
+  const navigationLink = business?.geo
+    ? navigationHref(navigationApp, business.geo.lat, business.geo.lng)
     : null;
+  const navigationLabel =
+    NAVIGATION_APPS.find((item) => item.value === navigationApp)?.label ?? "نشان";
 
   return (
     <main className="mx-auto min-h-[100dvh] w-full max-w-3xl pb-16">
@@ -645,26 +665,114 @@ export function BusinessDetailPage() {
               </span>
             )}
 
-            {neshanLink ? (
-              <a
-                href={neshanLink}
-                target="_blank"
-                rel="noreferrer"
-                className="flex min-h-16 items-center gap-2.5 rounded-2xl border border-slate-200 bg-white px-3.5 text-slate-800 transition hover:border-brand-200 hover:bg-brand-50/30"
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
-                  <NavigationIcon className="h-[18px] w-[18px]" />
-                </span>
-                <span className="min-w-0 leading-tight">
-                  <span className="block text-[13px] font-bold">مسیریابی</span>
-                  <span className="mt-1 block text-[10px] text-slate-400">در نشان</span>
-                </span>
-              </a>
+            {navigationLink ? (
+              <div className="relative">
+                <div className="flex min-h-16 items-stretch rounded-2xl border border-slate-200 bg-white transition hover:border-brand-200 hover:bg-brand-50/30">
+                  <a
+                    href={navigationLink}
+                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-s-2xl px-3.5 text-slate-800"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                      <NavigationIcon className="h-[18px] w-[18px]" />
+                    </span>
+                    <span className="min-w-0 leading-tight">
+                      <span className="block text-[13px] font-bold">مسیریابی</span>
+                      <span className="mt-1 block text-[10px] text-slate-400">
+                        در {navigationLabel}
+                      </span>
+                    </span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setNavMenuOpen((open) => !open)}
+                    aria-label="انتخاب اپلیکیشن مسیریابی"
+                    aria-expanded={navMenuOpen}
+                    aria-haspopup="menu"
+                    className="flex w-9 shrink-0 items-center justify-center rounded-e-2xl border-s border-slate-100 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+                  >
+                    <ChevronDownIcon className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {navMenuOpen && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="بستن فهرست اپلیکیشن‌ها"
+                      tabIndex={-1}
+                      onClick={() => setNavMenuOpen(false)}
+                      className="fixed inset-0 z-20 cursor-default"
+                    />
+                    <div
+                      role="menu"
+                      className="absolute inset-x-0 bottom-full z-30 mb-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+                    >
+                      {NAVIGATION_APPS.map((app) => (
+                        <button
+                          key={app.value}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={navigationApp === app.value}
+                          onClick={() => {
+                            setNavigationApp(app.value);
+                            setNavMenuOpen(false);
+                          }}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-2 px-3 py-2.5 text-right text-xs transition-colors hover:bg-slate-50",
+                            navigationApp === app.value
+                              ? "font-bold text-brand-700"
+                              : "text-slate-600",
+                          )}
+                        >
+                          {app.label}
+                          {navigationApp === app.value && <CheckIcon className="h-4 w-4" />}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             ) : (
               <span className="flex min-h-16 items-center justify-center rounded-2xl bg-slate-100 px-3 text-center text-[11px] text-slate-400">
                 موقعیت ثبت نشده
               </span>
             )}
+
+            {instagramHandle &&
+              (user ? (
+                <a
+                  href={`https://instagram.com/${instagramHandle}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="col-span-2 flex min-h-16 items-center gap-2.5 rounded-2xl border border-slate-200 bg-white px-3.5 text-slate-800 transition hover:border-brand-200 hover:bg-brand-50/30"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                    <InstagramIcon className="h-[18px] w-[18px]" />
+                  </span>
+                  <span className="min-w-0 leading-tight">
+                    <span className="block text-[13px] font-bold">اینستاگرام</span>
+                    <span dir="ltr" className="mt-1 block text-[10px] text-slate-400">
+                      @{instagramHandle}
+                    </span>
+                  </span>
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setLoginPrompt("instagram")}
+                  className="col-span-2 flex min-h-16 items-center gap-2.5 rounded-2xl border border-slate-200 bg-white px-3.5 text-right text-slate-800 transition hover:border-brand-200 hover:bg-brand-50/30"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                    <InstagramIcon className="h-[18px] w-[18px]" />
+                  </span>
+                  <span className="min-w-0 leading-tight">
+                    <span className="block text-[13px] font-bold">اینستاگرام</span>
+                    <span dir="ltr" className="mt-1 block text-[10px] text-slate-400">
+                      مشاهده صفحه · @{instagramHandle}
+                    </span>
+                  </span>
+                </button>
+              ))}
           </section>
 
           {business.owner && (
@@ -737,31 +845,7 @@ export function BusinessDetailPage() {
           )}
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-bold text-slate-900">درباره کسب‌وکار</h2>
-              {instagramHandle && (
-                user ? (
-                  <a
-                    href={`https://instagram.com/${instagramHandle}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:text-brand-700"
-                  >
-                    <InstagramIcon className="h-3.5 w-3.5" />
-                    اینستاگرام
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setLoginPrompt("instagram")}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:text-brand-700"
-                  >
-                    <InstagramIcon className="h-3.5 w-3.5" />
-                    اینستاگرام
-                  </button>
-                )
-              )}
-            </div>
+            <h2 className="text-sm font-bold text-slate-900">درباره کسب‌وکار</h2>
             {business.description && (
               <p className="mt-2 whitespace-pre-line text-xs leading-7 text-slate-600">
                 {business.description}

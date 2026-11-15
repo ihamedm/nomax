@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { fa, formatDistance, formatRating } from "@/lib/format";
+import { formatJalaliDateTime, formatRelative } from "@/lib/jalali";
 import type { BusinessListItem } from "@/types";
 
 function LicenseTick() {
@@ -78,6 +79,18 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
           </div>
 
           <p className="mt-2 line-clamp-1 text-[11px] text-slate-400">{business.address}</p>
+
+          {business.updated_at && (
+            <p className="mt-1.5 text-[10px] text-slate-400">
+              آخرین به‌روزرسانی{" "}
+              <time
+                dateTime={business.updated_at}
+                title={formatJalaliDateTime(business.updated_at)}
+              >
+                {formatRelative(business.updated_at)}
+              </time>
+            </p>
+          )}
 
           {business.bookmark_note && (
             <p className="mt-2 line-clamp-3 rounded-lg bg-amber-50 px-2 py-1 text-[11px] leading-5 text-amber-800">

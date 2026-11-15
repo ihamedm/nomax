@@ -110,6 +110,7 @@ export interface BusinessListItem {
   /** Only present on `/me/bookmarks` and the saved business's own detail. */
   bookmark_note?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface BusinessReview {
@@ -144,7 +145,6 @@ export interface BusinessOwner {
 export interface BusinessDetail extends BusinessListItem {
   description?: string | null;
   instagram?: string | null;
-  updated_at?: string | null;
   owner?: BusinessOwner | null;
   is_saved?: boolean;
   is_liked?: boolean;
