@@ -184,7 +184,6 @@ export default function MeHomePage() {
   const reviewBadgeCount = useOwnerReviewBadge();
   const [logoutOpen, setLogoutOpen] = useState(false);
 
-  const isOwner = user?.role === "owner";
   const businesses = useApi<BusinessList>(["me", "businesses"], "/me/businesses", {
     enabled: Boolean(user),
   });
@@ -197,7 +196,8 @@ export default function MeHomePage() {
   const incoming = useApi<IncomingResponse>(
     ["quotes", "incoming", "new"],
     "/quotes/requests/incoming?scope=new",
-    { enabled: Boolean(user) && isOwner },
+    // Ownership decides this, not the role: admins can own a business too.
+    { enabled: Boolean(user) && Boolean(businesses.data?.items.length) },
   );
 
   if (!user) return null;
@@ -205,6 +205,7 @@ export default function MeHomePage() {
   const displayName = user.full_name?.trim() || "کاربر نومکس";
   const initial = Array.from(displayName)[0] || "ن";
   const businessCount = businesses.data ? businesses.data.items.length : null;
+  const hasBusiness = (businessCount ?? 0) > 0;
   const activeQuoteCount = quotes.data
     ? quotes.data.items.filter((quote) => isActiveQuote(quote)).length
     : null;
@@ -328,7 +329,7 @@ export default function MeHomePage() {
                     : undefined
                 }
               />
-              {isOwner && (
+              {hasBusiness && (
                 <DashboardRow
                   to="/me/customers"
                   title="مشتریان"
@@ -349,7 +350,7 @@ export default function MeHomePage() {
                   icon={<ChartIcon className="h-[18px] w-[18px]" />}
                 />
               )}
-              {isOwner && (
+              {hasBusiness && (
                 <DashboardRow
                   to="/me/reviews"
                   title="نظرات"

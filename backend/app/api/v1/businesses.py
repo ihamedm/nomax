@@ -6,6 +6,7 @@ from typing import Literal
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -803,14 +804,13 @@ async def create_review(
         raise AppError("cannot_review_own_business", "cannot_review_own_business", 403)
     existing = (
         await session.execute(
-            sa.select(Review.id).where(
+            sa.select(Review).where(
                 Review.business_id == business.id,
                 Review.user_id == user.id,
-                Review.deleted_at.is_(None),
             )
         )
     ).scalars().first()
-    if existing is not None:
+    if existing is not None and existing.deleted_at is None:
         raise AppError("review_already_exists", "review_already_exists", 409)
 
     rating = int(payload.get("rating", 0))
@@ -820,17 +820,36 @@ async def create_review(
     if text and len(text) > 300:
         raise AppError("review_too_long", "review_too_long", 422)
     is_private = bool(payload.get("is_private"))
-    review = Review(
-        business_id=business.id,
-        user_id=user.id,
-        rating=rating,
-        text=text,
-        author_name=user.full_name or "کاربر نومکس",
-        is_private=is_private,
-        status="private" if is_private else "pending",
-    )
-    session.add(review)
-    await session.commit()
+    if existing is not None:
+        # One row per user+business (unique constraint), so re-reviewing after
+        # a moderation delete rewrites the soft-deleted row.
+        review = existing
+        review.rating = rating
+        review.text = text
+        review.author_name = user.full_name or "کاربر نومکس"
+        review.is_private = is_private
+        review.status = "private" if is_private else "pending"
+        review.reply = None
+        review.replied_at = None
+        review.owner_seen_at = None
+        review.deleted_at = None
+    else:
+        review = Review(
+            business_id=business.id,
+            user_id=user.id,
+            rating=rating,
+            text=text,
+            author_name=user.full_name or "کاربر نومکس",
+            is_private=is_private,
+            status="private" if is_private else "pending",
+        )
+        session.add(review)
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Concurrent double-submit still hits the unique constraint.
+        await session.rollback()
+        raise AppError("review_already_exists", "review_already_exists", 409)
     await session.refresh(review)
     return {
         "data": {

@@ -28,6 +28,23 @@ export function SearchIcon({ className }: { className?: string }) {
   );
 }
 
+export function FilterIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M3 5h18l-7 8v5l-4 2v-7Z" />
+    </Icon>
+  );
+}
+
+export function LocationIcon({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10Z" />
+      <circle cx="12" cy="11" r="2.2" />
+    </Icon>
+  );
+}
+
 export function SunIcon({ className }: { className?: string }) {
   return (
     <Icon className={className}>

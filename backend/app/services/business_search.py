@@ -1,5 +1,6 @@
 import base64
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -79,36 +80,87 @@ def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * radius * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _q_term(params: BusinessSearchParams) -> str | None:
+    if not params.q:
+        return None
+    return params.q.strip() or None
+
+
+# Phones are stored without the leading 0/98, and users type them in Persian
+# digits on mobile keyboards, so match on the normalized digits.
+_DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def _phone_digits(term: str) -> str | None:
+    compact = re.sub(r"[\s\-()+.]", "", term.translate(_DIGIT_TRANSLATION))
+    if not compact.isdigit():
+        return None
+    if compact.startswith("98") and len(compact) > 10:
+        compact = compact[2:]
+    digits = compact.lstrip("0")
+    return digits or None
+
+
+def _tag_match(pattern: str):
+    return (
+        sa.select(BusinessTag.business_id)
+        .join(Tag, Tag.id == BusinessTag.tag_id)
+        .where(
+            BusinessTag.business_id == Business.id,
+            Tag.deleted_at.is_(None),
+            Tag.name.ilike(pattern),
+        )
+        .exists()
+    )
+
+
+def _relevance_rank(params: BusinessSearchParams):
+    """Order matches the way people search: name first, then tags and
+    descriptions (equally), then the incidental fields (address, phone, owner).
+    """
+    term = _q_term(params)
+    if term is None:
+        return None
+    pattern = f"%{term}%"
+    return sa.case(
+        (Business.name.ilike(pattern), 0),
+        (
+            or_(
+                Business.short_description.ilike(pattern),
+                Business.description.ilike(pattern),
+                _tag_match(pattern),
+            ),
+            1,
+        ),
+        else_=2,
+    )
+
+
 def _base_conditions(params: BusinessSearchParams) -> list:
     conditions = [
         Business.status == BusinessStatus.APPROVED,
         Business.deleted_at.is_(None),
         Category.deleted_at.is_(None),
     ]
-    if params.q:
-        pattern = f"%{params.q.strip()}%"
-        tag_match = (
-            sa.select(BusinessTag.business_id)
-            .join(Tag, Tag.id == BusinessTag.tag_id)
-            .where(
-                BusinessTag.business_id == Business.id,
-                Tag.deleted_at.is_(None),
-                Tag.name.ilike(pattern),
-            )
-            .exists()
-        )
-        conditions.append(
-            or_(
-                Business.name.ilike(pattern),
-                Business.short_description.ilike(pattern),
-                Business.description.ilike(pattern),
-                Business.address.ilike(pattern),
-                Business.phone_business.ilike(pattern),
-                User.full_name.ilike(pattern),
-                User.phone.ilike(pattern),
-                tag_match,
-            )
-        )
+    term = _q_term(params)
+    if term is not None:
+        pattern = f"%{term}%"
+        clauses = [
+            Business.name.ilike(pattern),
+            Business.short_description.ilike(pattern),
+            Business.description.ilike(pattern),
+            Business.address.ilike(pattern),
+            Business.phone_business.ilike(pattern),
+            User.full_name.ilike(pattern),
+            User.phone.ilike(pattern),
+            _tag_match(pattern),
+        ]
+        digits = _phone_digits(term)
+        if digits is not None:
+            # Accept «۰۹…», «09…», «+989…» and «98…» for both phones.
+            clauses.append(Business.phone_business.ilike(f"%{digits}%"))
+            clauses.append(User.phone.ilike(f"%{digits}%"))
+        conditions.append(or_(*clauses))
     if params.category_slug:
         conditions.append(Category.slug == params.category_slug)
     if params.subcategory_slug:
@@ -132,7 +184,7 @@ def _base_select() -> sa.Select:
     )
 
 
-def _order_without_geo(sort: str) -> list:
+def _order_by(sort: str, distance_expr=None) -> list:
     if sort == "top":
         return [
             Business.rating_avg.desc().nullslast(),
@@ -148,52 +200,84 @@ def _order_without_geo(sort: str) -> list:
         ]
     if sort == "visited":
         return [Business.view_count.desc(), Business.rating_avg.desc(), Business.id]
+    if sort == "nearest" and distance_expr is not None:
+        return [distance_expr.asc().nullslast(), Business.rating_avg.desc(), Business.id]
     # `nearest` without coordinates and `newest` both fall back to recency.
     return [Business.created_at.desc(), Business.id]
 
 
-def _python_sort(hits: list[BusinessHit], sort: str, has_coords: bool) -> list[BusinessHit]:
+def _ordered_for(params: BusinessSearchParams, distance_expr=None) -> list:
+    """Relevance first when searching, so the chosen sort only breaks ties."""
+    rank = _relevance_rank(params)
+    order = _order_by(params.sort, distance_expr)
+    return [rank, *order] if rank is not None else order
+
+
+def _relevance_tier(
+    business: Business, term: str | None, tag_names: list[str]
+) -> int:
+    if term is None:
+        return 0
+    needle = term.casefold()
+    if needle in (business.name or "").casefold():
+        return 0
+    if needle in (business.short_description or "").casefold() or needle in (
+        business.description or ""
+    ).casefold():
+        return 1
+    if any(needle in name for name in tag_names):
+        return 1
+    return 2
+
+
+def _python_sort(
+    hits: list[BusinessHit],
+    params: BusinessSearchParams,
+    tag_names: dict,
+) -> list[BusinessHit]:
+    term = _q_term(params)
+    sort = params.sort
+    has_coords = params.has_coords
+
+    def tier(hit: BusinessHit) -> int:
+        return _relevance_tier(hit.business, term, tag_names.get(hit.business.id, []))
+
     if sort == "top":
-        return sorted(
-            hits,
-            key=lambda hit: (
-                -(hit.business.rating_avg or 0),
-                -(hit.business.rating_count or 0),
-                str(hit.business.id),
-            ),
+        key = lambda hit: (
+            tier(hit),
+            -(hit.business.rating_avg or 0),
+            -(hit.business.rating_count or 0),
+            str(hit.business.id),
         )
-    if sort == "urgent":
-        return sorted(
-            hits,
-            key=lambda hit: (
-                not hit.business.is_24h,
-                -(hit.business.rating_avg or 0),
-                -_timestamp(hit.business.created_at),
-                str(hit.business.id),
-            ),
+    elif sort == "urgent":
+        key = lambda hit: (
+            tier(hit),
+            not hit.business.is_24h,
+            -(hit.business.rating_avg or 0),
+            -_timestamp(hit.business.created_at),
+            str(hit.business.id),
         )
-    if sort == "visited":
-        return sorted(
-            hits,
-            key=lambda hit: (
-                -(hit.business.view_count or 0),
-                -(hit.business.rating_avg or 0),
-                str(hit.business.id),
-            ),
+    elif sort == "visited":
+        key = lambda hit: (
+            tier(hit),
+            -(hit.business.view_count or 0),
+            -(hit.business.rating_avg or 0),
+            str(hit.business.id),
         )
-    if sort == "nearest" and has_coords:
-        return sorted(
-            hits,
-            key=lambda hit: (
-                hit.distance_m if hit.distance_m is not None else float("inf"),
-                -(hit.business.rating_avg or 0),
-                str(hit.business.id),
-            ),
+    elif sort == "nearest" and has_coords:
+        key = lambda hit: (
+            tier(hit),
+            hit.distance_m if hit.distance_m is not None else float("inf"),
+            -(hit.business.rating_avg or 0),
+            str(hit.business.id),
         )
-    return sorted(
-        hits,
-        key=lambda hit: (-_timestamp(hit.business.created_at), str(hit.business.id)),
-    )
+    else:
+        key = lambda hit: (
+            tier(hit),
+            -_timestamp(hit.business.created_at),
+            str(hit.business.id),
+        )
+    return sorted(hits, key=key)
 
 
 def _timestamp(value: datetime | None) -> float:
@@ -220,7 +304,7 @@ async def search_businesses(
     statement = (
         _base_select()
         .where(*conditions)
-        .order_by(*_order_without_geo(params.sort))
+        .order_by(*_ordered_for(params))
         .limit(params.limit + 1)
         .offset(params.offset)
     )
@@ -247,11 +331,7 @@ async def _search_postgres(
         _base_select()
         .add_columns(distance_expr.label("distance_m"))
         .where(*conditions)
-        .order_by(
-            sa.text("distance_m ASC NULLS LAST"),
-            Business.rating_avg.desc(),
-            Business.id,
-        )
+        .order_by(*_ordered_for(params, distance_expr))
         .limit(params.limit + 1)
         .offset(params.offset)
     )
@@ -261,20 +341,6 @@ async def _search_postgres(
             f"ST_DWithin(businesses.geo, {point_sql}, {float(params.radius_km) * 1000!r})"
         )
         statement = statement.where(within_expr)
-    if params.sort == "top":
-        statement = statement.order_by(None).order_by(
-            Business.rating_avg.desc(), Business.rating_count.desc(), Business.id
-        )
-    elif params.sort == "newest":
-        statement = statement.order_by(None).order_by(Business.created_at.desc(), Business.id)
-    elif params.sort == "urgent":
-        statement = statement.order_by(None).order_by(
-            Business.is_24h.desc(), Business.rating_avg.desc(), Business.id
-        )
-    elif params.sort == "visited":
-        statement = statement.order_by(None).order_by(
-            Business.view_count.desc(), Business.rating_avg.desc(), Business.id
-        )
 
     rows = (await session.execute(statement)).all()
     has_more = len(rows) > params.limit
@@ -315,7 +381,21 @@ async def _search_in_memory(
             continue
         hits.append(BusinessHit(business=business, distance_m=distance))
 
-    ordered = _python_sort(hits, params.sort, params.has_coords)
+    tag_names: dict = {}
+    term = _q_term(params)
+    if term is not None and hits:
+        rows = await session.execute(
+            select(BusinessTag.business_id, Tag.name)
+            .join(Tag, Tag.id == BusinessTag.tag_id)
+            .where(
+                BusinessTag.business_id.in_([hit.business.id for hit in hits]),
+                Tag.deleted_at.is_(None),
+            )
+        )
+        for business_id, name in rows:
+            tag_names.setdefault(business_id, []).append(name.casefold())
+
+    ordered = _python_sort(hits, params, tag_names)
     window = ordered[params.offset : params.offset + params.limit + 1]
     has_more = len(window) > params.limit
     window = window[: params.limit]

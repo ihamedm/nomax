@@ -615,7 +615,7 @@ export default function AdminQuotesPage() {
                           className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2"
                         >
                           <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-base">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-slate-200 bg-slate-100 text-base">
                               {delivery.business.avatar_url ||
                               delivery.business.profile_image_url ? (
                                 <img

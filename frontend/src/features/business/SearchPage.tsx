@@ -5,7 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button, Spinner } from "@/components/ui/button";
-import { SearchIcon } from "@/components/ui/icons";
+import { FilterIcon, LocationIcon } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, apiWithMeta, errorMessage } from "@/lib/api";
@@ -98,6 +98,8 @@ export function SearchPage() {
   const locationSource = useUi((state) => state.locationSource);
   const setLocation = useUi((state) => state.setLocation);
   const openLocationPrompt = useUi((state) => state.openLocationPrompt);
+  const chromeHidden = useUi((state) => state.chromeHidden);
+  const setChromeHidden = useUi((state) => state.setChromeHidden);
 
   const qParam = params.get("q")?.trim() ?? "";
   const catParam = params.get("cat") ?? "";
@@ -155,6 +157,26 @@ export function SearchPage() {
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, qParam]);
+
+  // Collapse the app chrome while reading results: hide on scroll down, bring
+  // it back on scroll up (or at the very top). Reset when leaving the page.
+  useEffect(() => {
+    let lastY = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      // Wait until the results have scrolled past the header + search bar,
+      // otherwise collapsing them would leave an empty band at the top.
+      if (y <= 8) setChromeHidden(false);
+      else if (y > 180 && y - lastY > 6) setChromeHidden(true);
+      else if (lastY - y > 6) setChromeHidden(false);
+      lastY = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      setChromeHidden(false);
+    };
+  }, [setChromeHidden]);
 
   const selectedCategory = categories.find((category) => category.slug === catParam);
   const activeSubcategoriesQuery = useApi<{ items: Subcategory[] }>(
@@ -385,7 +407,12 @@ export function SearchPage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl pb-10">
-      <section className="sticky top-14 z-20 border-b border-slate-200 bg-slate-50/95 px-4 pb-3 pt-3 backdrop-blur">
+      <section
+        className={cn(
+          "sticky top-14 z-20 border-b border-slate-200 bg-slate-50/95 px-4 pb-3 pt-3 backdrop-blur transition-transform duration-200",
+          chromeHidden && "-translate-y-[calc(100%+3.5rem)]",
+        )}
+      >
         <form onSubmit={submitSearch} className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Input
@@ -414,14 +441,6 @@ export function SearchPage() {
               </button>
             )}
           </div>
-          <Button
-            type="submit"
-            size="sm"
-            aria-label="جستجو"
-            className="h-11 w-11 shrink-0 px-0"
-          >
-            <SearchIcon />
-          </Button>
         </form>
 
         <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-0.5">
@@ -429,11 +448,12 @@ export function SearchPage() {
             type="button"
             onClick={openFilters}
             className={cn(
-              "shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-medium",
+              "flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-[11px] font-medium",
               catParam ? "border-brand-200 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600",
             )}
           >
-            دسته‌بندی
+            <FilterIcon className="h-3.5 w-3.5" />
+            فیلترها
             {catParam ? " ●" : ""}
           </button>
           <button
@@ -447,9 +467,16 @@ export function SearchPage() {
             type="button"
             onClick={() => void locateMe()}
             disabled={locating}
-            className="shrink-0 rounded-full border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 disabled:opacity-50"
+            aria-label="موقعیت من"
+            title="موقعیت من"
+            className={cn(
+              "flex shrink-0 items-center justify-center rounded-full border p-1.5 disabled:opacity-50",
+              locationSource === "gps"
+                ? "border-brand-200 bg-brand-50 text-brand-700"
+                : "border-slate-200 text-slate-600",
+            )}
           >
-            {locating ? "در حال یافتن…" : locationSource === "gps" ? "موقعیت من ✓" : "موقعیت من"}
+            {locating ? <Spinner /> : <LocationIcon className="h-4 w-4" />}
           </button>
           <div className="mr-auto flex shrink-0 rounded-full bg-slate-100 p-1">
             <button
@@ -546,11 +573,10 @@ export function SearchPage() {
           </div>
         ) : (
           <>
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3">
               <p className="text-xs text-slate-500">
                 {loading ? "در حال جستجو…" : `${fa(items.length)} نتیجه`}
               </p>
-              {hasMore && <span className="text-[11px] text-slate-400">نتایج بیشتر در راه است</span>}
             </div>
 
             {loading && (
@@ -617,7 +643,21 @@ export function SearchPage() {
         )}
       </BottomSheet>
 
-      <BottomSheet open={filterOpen} title="دسته‌بندی و فاصله" onClose={() => setFilterOpen(false)}>
+      <BottomSheet
+        open={filterOpen}
+        title="دسته‌بندی و فاصله"
+        onClose={() => setFilterOpen(false)}
+        footer={
+          <div className="flex gap-2">
+            <Button className="flex-1" onClick={applyFilters}>
+              اعمال فیلتر
+            </Button>
+            <Button variant="ghost" onClick={clearFilters}>
+              حذف همه
+            </Button>
+          </div>
+        }
+      >
         <div className="space-y-5">
           <div>
             <p className="mb-2 text-xs font-bold text-slate-400">دسته‌بندی</p>
@@ -729,15 +769,6 @@ export function SearchPage() {
                 </button>
               ))}
             </div>
-          </div>
-
-          <div className="flex gap-2">
-            <Button className="flex-1" onClick={applyFilters}>
-              اعمال فیلتر
-            </Button>
-            <Button variant="ghost" onClick={clearFilters}>
-              حذف همه
-            </Button>
           </div>
         </div>
       </BottomSheet>

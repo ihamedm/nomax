@@ -360,7 +360,7 @@ export default function AdminBusinessesPage() {
       header: "کسب‌وکار",
       cell: (business) => (
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-xl md:h-12 md:w-12">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-slate-200 bg-brand-50 text-xl md:h-12 md:w-12">
             {business.avatar_url || business.profile_image_url ? (
               <img
                 src={(business.avatar_url || business.profile_image_url) as string}
@@ -643,7 +643,7 @@ export default function AdminBusinessesPage() {
       {detail && (
         <AdminModal title={`جزئیات ${detail.name}`} onClose={() => setDetail(null)}>
           <div className="mb-4 flex items-start gap-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
-            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-3xl">
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-slate-200 bg-brand-50 text-3xl">
               {detail.avatar_url || detail.profile_image_url ? (
                 <img
                   src={(detail.avatar_url || detail.profile_image_url) as string}

@@ -14,6 +14,7 @@ import { fa, formatPhone, ROLE_LABELS } from "@/lib/format";
 import { useApi } from "@/lib/query";
 import { isAdmin, useAuth } from "@/stores/auth";
 import { useTheme } from "@/stores/theme";
+import { useUi } from "@/stores/ui";
 import type { BusinessListItem } from "@/types";
 
 function Icon({ children }: { children: ReactNode }) {
@@ -122,7 +123,6 @@ function AccountMenu() {
   const [open, setOpen] = useState(false);
   const unreadCount = useUnreadNotificationCount();
   const reviewCount = useOwnerReviewBadge();
-  const isOwner = user?.role === "owner";
 
   // Counts load on first open, then share the dashboard's cache entries.
   const businesses = useApi<{ items: BusinessListItem[] }>(
@@ -133,7 +133,7 @@ function AccountMenu() {
   const incoming = useApi<IncomingResponse>(
     ["quotes", "incoming", "new"],
     "/quotes/requests/incoming?scope=new",
-    { enabled: open && isOwner },
+    { enabled: open && Boolean(user) },
   );
 
   useEffect(() => setOpen(false), [location.pathname]);
@@ -154,9 +154,9 @@ function AccountMenu() {
     ).length ?? 0;
   const items = [
     { to: "/me/notifications", label: "اعلان‌ها", count: unreadCount },
-    { to: "/me/reviews", label: "نظرات", count: isOwner ? reviewCount : 0 },
-    { to: "/me/quotes", label: "درخواست‌های جدید", count: isOwner ? (incoming.data?.counts.new ?? 0) : 0 },
-    { to: "/me/businesses", label: "کسب‌وکار در انتظار تأیید", count: isOwner ? pendingBusinesses : 0 },
+    { to: "/me/reviews", label: "نظرات", count: reviewCount },
+    { to: "/me/quotes", label: "درخواست‌های جدید", count: incoming.data?.counts.new ?? 0 },
+    { to: "/me/businesses", label: "کسب‌وکار در انتظار تأیید", count: pendingBusinesses },
   ].filter((item) => item.count > 0);
 
   return (
@@ -228,6 +228,7 @@ export function AppLayout() {
   const logout = useAuth((state) => state.logout);
   const theme = useTheme((state) => state.theme);
   const toggleTheme = useTheme((state) => state.toggleTheme);
+  const chromeHidden = useUi((state) => state.chromeHidden);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement | null>(null);
@@ -289,7 +290,12 @@ export function AppLayout() {
         isFullscreenFlow ? "pb-0" : "pb-24 md:pb-0",
       )}
     >
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <header
+        className={cn(
+          "sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur transition-transform duration-200",
+          chromeHidden && "-translate-y-full",
+        )}
+      >
         <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-3 px-4">
           <div className="flex items-center gap-2">
             {isFormFlow ? (
@@ -379,7 +385,12 @@ export function AppLayout() {
       <Outlet />
 
       {!isFullscreenFlow && (
-        <nav className="fixed inset-x-4 bottom-4 z-30 md:hidden">
+        <nav
+          className={cn(
+            "fixed inset-x-4 bottom-4 z-30 transition-transform duration-200 md:hidden",
+            chromeHidden && "translate-y-[calc(100%+2rem)]",
+          )}
+        >
           <div className="mx-auto flex max-w-md items-center justify-around rounded-2xl border border-slate-200 bg-white/95 px-2 py-2 shadow-xl shadow-slate-900/10 backdrop-blur">
             {bottomItems.map((item) => (
               <NavLink

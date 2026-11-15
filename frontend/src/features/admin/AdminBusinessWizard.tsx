@@ -817,7 +817,7 @@ export function AdminBusinessWizard({
                   تصویری جداگانه آپلود کنید؛ در غیر این صورت اولین تصویر نمایش داده می‌شود.
                 </p>
                 <div className="mt-2 flex items-center gap-3">
-                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full border-2 border-slate-200 bg-slate-100">
                     {avatarPreview ? (
                       <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
                     ) : (

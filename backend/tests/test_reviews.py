@@ -412,3 +412,95 @@ async def test_moderator_who_owns_the_business_can_moderate(client, db_session, 
     assert approved.status_code == 200, approved.text
     await db_session.refresh(business)
     assert business.rating_count == 1
+
+
+async def test_admin_can_delete_a_review(client, db_session, create_user):
+    owner, customer, business = await _setup(db_session, create_user)
+    created = await client.post(
+        f"/api/v1/businesses/{business.slug}/reviews",
+        json={"rating": 5, "text": "قابل حذف"},
+        headers=auth(customer),
+    )
+    review_id = created.json()["data"]["id"]
+
+    admin = await create_user(
+        "09130000007", UserRole.ADMIN, permissions=["review.read", "review.moderate"]
+    )
+    await client.patch(
+        f"/api/v1/businesses/reviews/{review_id}/status",
+        json={"status": "awaiting_owner"},
+        headers=auth(admin),
+    )
+    await client.patch(
+        f"/api/v1/businesses/reviews/{review_id}/status",
+        json={"status": "approved"},
+        headers=auth(owner),
+    )
+    await db_session.refresh(business)
+    assert business.rating_count == 1
+
+    removed = await client.delete(f"/api/v1/admin/reviews/{review_id}", headers=auth(admin))
+    assert removed.status_code == 200
+    assert removed.json()["data"]["deleted"] is True
+
+    public = await client.get(f"/api/v1/businesses/{business.slug}")
+    assert public.json()["data"]["reviews"] == []
+    await db_session.refresh(business)
+    assert business.rating_count == 0
+    assert business.rating_avg == 0
+
+    admin_list = await client.get("/api/v1/admin/reviews", headers=auth(admin))
+    assert admin_list.json()["data"]["items"] == []
+    owner_inbox = await client.get("/api/v1/me/reviews", headers=auth(owner))
+    assert owner_inbox.json()["data"]["items"] == []
+
+    again = await client.delete(f"/api/v1/admin/reviews/{review_id}", headers=auth(admin))
+    assert again.status_code == 404
+
+
+async def test_review_delete_requires_moderate_permission(client, db_session, create_user):
+    _, customer, business = await _setup(db_session, create_user)
+    created = await client.post(
+        f"/api/v1/businesses/{business.slug}/reviews",
+        json={"rating": 4},
+        headers=auth(customer),
+    )
+    review_id = created.json()["data"]["id"]
+    reader = await create_user(
+        "09130000008", UserRole.ADMIN, permissions=["review.read"]
+    )
+    denied = await client.delete(f"/api/v1/admin/reviews/{review_id}", headers=auth(reader))
+    assert denied.status_code == 403
+
+
+async def test_customer_can_review_again_after_admin_delete(client, db_session, create_user):
+    """The user+business unique constraint keeps the soft-deleted row, so a new
+    review must reuse it instead of failing with a 500."""
+    _, customer, business = await _setup(db_session, create_user)
+    first = await client.post(
+        f"/api/v1/businesses/{business.slug}/reviews",
+        json={"rating": 1, "text": "اول"},
+        headers=auth(customer),
+    )
+    first_id = first.json()["data"]["id"]
+
+    admin = await create_user(
+        "09130000009", UserRole.ADMIN, permissions=["review.read", "review.moderate"]
+    )
+    removed = await client.delete(f"/api/v1/admin/reviews/{first_id}", headers=auth(admin))
+    assert removed.status_code == 200
+
+    again = await client.post(
+        f"/api/v1/businesses/{business.slug}/reviews",
+        json={"rating": 4, "text": "دوباره"},
+        headers=auth(customer),
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["data"]["id"] == first_id
+    assert again.json()["data"]["status"] == "pending"
+
+    listing = await client.get("/api/v1/admin/reviews", headers=auth(admin))
+    items = listing.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["rating"] == 4
+    assert items[0]["text"] == "دوباره"

@@ -8,6 +8,7 @@ import { RatingStars } from "@/components/ui/stars";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { useApi, useApiWithMeta } from "@/lib/query";
+import { useAuth } from "@/stores/auth";
 import {
   DataTable,
   FilterLinks,
@@ -54,6 +55,9 @@ function statusLabel(status: string) {
 export default function AdminReviewsPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
+  const user = useAuth((state) => state.user);
+  const canModerate =
+    user?.role === "superadmin" || Boolean(user?.permissions.includes("review.moderate"));
   const [params, setParams] = useSearchParams();
 
   const status = params.get("status") ?? "";
@@ -96,8 +100,19 @@ export default function AdminReviewsPage() {
           ? "نظر تأیید شد و برای تصمیم مالک ارسال شد."
           : "نظر رد شد.",
       );
-      await queryClient.invalidateQueries({ queryKey: ["admin", "reviews"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin"] });
       await queryClient.invalidateQueries({ queryKey: ["reviews"] });
+    },
+    onError: (error) => toast(errorMessage(error)),
+  });
+
+  const removeReview = useMutation({
+    mutationFn: (id: string) => api(`/admin/reviews/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      toast("نظر حذف شد.");
+      await queryClient.invalidateQueries({ queryKey: ["admin"] });
+      await queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      await queryClient.invalidateQueries({ queryKey: ["business"] });
     },
     onError: (error) => toast(errorMessage(error)),
   });
@@ -166,27 +181,53 @@ export default function AdminReviewsPage() {
       className: "text-left",
       cell: (row) => (
         <div className="flex flex-wrap justify-end gap-1">
-          <Button
-            size="sm"
-            disabled={
-              setStatus.isPending ||
-              row.status === "approved" ||
-              row.status === "awaiting_owner"
-            }
-            onClick={() => setStatus.mutate({ id: row.id, next: "awaiting_owner" })}
-          >
-            تأیید
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            disabled={
-              setStatus.isPending || row.status === "rejected" || row.status === "declined"
-            }
-            onClick={() => setStatus.mutate({ id: row.id, next: "rejected" })}
-          >
-            رد
-          </Button>
+          {canModerate ? (
+            <>
+              <Button
+                size="sm"
+                disabled={
+                  setStatus.isPending ||
+                  row.status === "approved" ||
+                  row.status === "awaiting_owner"
+                }
+                onClick={() => setStatus.mutate({ id: row.id, next: "awaiting_owner" })}
+              >
+                تأیید
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={
+                  setStatus.isPending ||
+                  row.status === "rejected" ||
+                  row.status === "declined"
+                }
+                onClick={() => setStatus.mutate({ id: row.id, next: "rejected" })}
+              >
+                رد
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-rose-600 hover:bg-rose-50"
+                loading={removeReview.isPending}
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      "این نظر برای همیشه از صفحه کسب‌وکار و پنل مالک حذف شود؟",
+                    )
+                  ) {
+                    return;
+                  }
+                  removeReview.mutate(row.id);
+                }}
+              >
+                حذف
+              </Button>
+            </>
+          ) : (
+            <span className="text-[11px] text-slate-400">فقط مشاهده</span>
+          )}
         </div>
       ),
     },

@@ -803,8 +803,8 @@ export default function CreateBusinessPage({
                       aria-label="انتخاب آواتار"
                       onClick={() => patch({ avatar: photo.url })}
                       className={cn(
-                        "h-12 w-12 overflow-hidden rounded-lg border-2",
-                        data.avatar === photo.url ? "border-brand-500" : "border-transparent",
+                        "h-12 w-12 overflow-hidden rounded-full border-2",
+                        data.avatar === photo.url ? "border-brand-500" : "border-slate-200",
                       )}
                     >
                       <img src={photo.url} alt="" className="h-full w-full object-cover" />

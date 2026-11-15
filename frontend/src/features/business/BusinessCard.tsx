@@ -33,15 +33,23 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
       className="flex h-full w-full flex-col rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 active:bg-brand-50/40"
     >
       <div className="flex gap-3">
-        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-brand-50 text-2xl">
-          {avatar ? (
-            <img src={avatar} alt="" className="h-full w-full object-cover" loading="lazy" />
-          ) : (
-            <span aria-hidden>{business.category?.icon ?? "🏪"}</span>
-          )}
+        <div className="flex w-16 shrink-0 flex-col items-center">
+          <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 border-slate-200 bg-brand-50 text-2xl">
+            {avatar ? (
+              <img src={avatar} alt="" className="h-full w-full object-cover" loading="lazy" />
+            ) : (
+              <span aria-hidden>{business.category?.icon ?? "🏪"}</span>
+            )}
+          </div>
           {business.is_verified && (
-            <span className="absolute inset-x-0 bottom-0 bg-brand-600/95 py-0.5 text-center text-[8px] font-bold leading-3 text-white">
+            <span className="mt-1 whitespace-nowrap rounded-full bg-brand-600 px-1.5 py-0.5 text-[7px] font-bold leading-3 text-white shadow-sm">
               تایید هویت شده
+            </span>
+          )}
+          {business.rating_count > 0 && (
+            <span className="mt-1.5 inline-flex items-center gap-0.5 whitespace-nowrap rounded-lg bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">
+              ★ {formatRating(business.rating_avg)}
+              <span className="font-normal text-amber-500">({fa(business.rating_count)})</span>
             </span>
           )}
         </div>
@@ -52,14 +60,6 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
               <span className="truncate">{business.name}</span>
               {business.is_license_verified && <LicenseTick />}
             </h3>
-            {business.rating_count > 0 && (
-              <span className="shrink-0 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">
-                ★ {formatRating(business.rating_avg)}
-                <span className="mr-1 font-normal text-amber-500">
-                  ({fa(business.rating_count)})
-                </span>
-              </span>
-            )}
           </div>
 
           <p className="mt-0.5 text-[11px] text-slate-400">

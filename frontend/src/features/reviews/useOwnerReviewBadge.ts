@@ -27,11 +27,11 @@ export interface OwnerReviewList {
 /** Number of pending/private reviews the owner has not opened yet. */
 export function useOwnerReviewBadge(): number {
   const user = useAuth((state) => state.user);
-  const enabled = Boolean(user) && user?.role === "owner";
+  // Ownership decides this, not the role: admins can own a business too.
   const { data } = useApi<{ count: number }>(
     ["reviews", "owner-unread", user?.id ?? "guest"],
     "/me/reviews/unread-count",
-    { enabled, refetchInterval: 60_000 },
+    { enabled: Boolean(user), refetchInterval: 60_000 },
   );
-  return enabled ? (data?.count ?? 0) : 0;
+  return data?.count ?? 0;
 }

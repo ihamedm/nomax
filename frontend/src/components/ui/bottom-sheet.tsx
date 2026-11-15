@@ -7,10 +7,11 @@ interface BottomSheetProps {
   title?: string;
   onClose: () => void;
   children: ReactNode;
+  footer?: ReactNode;
   className?: string;
 }
 
-export function BottomSheet({ open, title, onClose, children, className }: BottomSheetProps) {
+export function BottomSheet({ open, title, onClose, children, footer, className }: BottomSheetProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -54,6 +55,11 @@ export function BottomSheet({ open, title, onClose, children, className }: Botto
           </button>
         </div>
         <div className="px-5 pb-6 pt-1">{children}</div>
+        {footer && (
+          <div className="sticky bottom-0 z-10 border-t border-slate-100 bg-white px-5 pb-3 pt-3">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

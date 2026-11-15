@@ -47,7 +47,7 @@ function OfferCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-lg">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-slate-200 bg-slate-100 text-lg">
             {business?.profile_image_url ? (
               <img src={business.profile_image_url} alt="" className="h-full w-full object-cover" />
             ) : (

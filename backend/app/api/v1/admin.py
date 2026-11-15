@@ -1080,6 +1080,43 @@ async def list_admin_reviews(
     }
 
 
+@router.delete("/reviews/{review_id}")
+async def delete_admin_review(
+    review_id: str,
+    request: Request,
+    actor: User = Depends(require_permissions("review.moderate")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Soft-delete a review (public, owner inbox and rating) for moderation."""
+    from datetime import datetime, timezone
+
+    from app.api.v1.businesses import _recalculate_business_rating
+    from app.models.review import Review
+
+    try:
+        rid = uuid.UUID(review_id)
+    except ValueError:
+        raise AppError("validation_error", "invalid_id", 422)
+    review = await session.get(Review, rid)
+    if review is None or review.deleted_at is not None:
+        raise AppError("not_found", "review_not_found", 404)
+    before = {"status": review.status, "rating": review.rating, "is_private": review.is_private}
+    review.deleted_at = datetime.now(timezone.utc)
+    # A deleted approved review must drop out of the public aggregate.
+    await _recalculate_business_rating(session, review.business_id)
+    await _write_audit(
+        session,
+        actor_id=actor.id,
+        action="admin.review.deleted",
+        entity_type="review",
+        entity_id=str(review.id),
+        before=before,
+        ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    return {"data": {"id": str(review.id), "deleted": True}}
+
+
 @router.get("/stats/overview")
 async def stats_overview(
     actor: User = Depends(require_permissions("stats.read")),

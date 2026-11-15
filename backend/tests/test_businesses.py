@@ -394,3 +394,69 @@ async def test_search_matches_title_description_tags_and_owner(
     assert await found("98877") == ["search-shop"]  # owner phone
     assert await found("33445566") == ["search-shop"]  # business phone
     assert await found("ناموجود") == []
+
+
+@pytest.mark.asyncio
+async def test_search_ranks_name_before_tags_and_descriptions(
+    client, db_session, create_user, catalog
+):
+    """A name hit must outrank tag/description hits, which outrank the rest,
+    regardless of distance (the old ordering was pure distance)."""
+    owner = await create_user("09121110000")
+    automotive = catalog["categories"]["automotive"]
+    named = await make_business(
+        db_session,
+        owner.id,
+        automotive,
+        slug="named-hit",
+        name="تعمیرگاه آفتاب",
+        lat=BEHBAHAN["lat"] + 0.2,
+        lng=BEHBAHAN["lng"] + 0.2,
+    )
+    tagged = await make_business(
+        db_session, owner.id, automotive, slug="tag-hit", name="فروشگاه مرکزی"
+    )
+    described = await make_business(
+        db_session, owner.id, automotive, slug="description-hit", name="فروشگاه گندم"
+    )
+    other = await make_business(
+        db_session, owner.id, automotive, slug="incidental-hit", name="سوپرمارکت آیس"
+    )
+    described.description = "تعمیر لوازم برقی"
+    other.address = "بهبهان، خیابان تعمیر"
+    tag = Tag(name="تعمیر تخصصی")
+    db_session.add(tag)
+    await db_session.flush()
+    db_session.add(BusinessTag(business_id=tagged.id, tag_id=tag.id))
+    await db_session.commit()
+
+    response = await client.get(
+        "/api/v1/businesses",
+        params={"q": "تعمیر", "lat": BEHBAHAN["lat"], "lng": BEHBAHAN["lng"]},
+    )
+    assert response.status_code == 200
+    slugs = [item["slug"] for item in _items(response)]
+    assert slugs[0] == named.slug
+    assert set(slugs[1:3]) == {tagged.slug, described.slug}
+    assert slugs[3] == other.slug
+
+
+@pytest.mark.asyncio
+async def test_search_matches_owner_phone_in_any_format(
+    client, db_session, create_user, catalog
+):
+    owner = await create_user("09129990000", full_name="مریم احمدی")
+    automotive = catalog["categories"]["automotive"]
+    await make_business(
+        db_session, owner.id, automotive, slug="phone-shop", name="فروشگاه نمونه"
+    )
+    await db_session.commit()
+
+    async def found(term: str) -> list[str]:
+        response = await client.get("/api/v1/businesses", params={"q": term})
+        assert response.status_code == 200
+        return [item["slug"] for item in _items(response)]
+
+    assert await found("9129990000") == ["phone-shop"]
+    assert await found("09129990000") == ["phone-shop"]
+    assert await found("۰۹۱۲۹۹۹۰۰۰۰") == ["phone-shop"]

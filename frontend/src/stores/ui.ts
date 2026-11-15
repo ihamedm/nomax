@@ -18,6 +18,9 @@ interface UiState {
   location: Coordinates;
   locationSource: LocationSource;
   locationPromptOpen: boolean;
+  /** Search-style pages collapse the app header and bottom nav while scrolling. */
+  chromeHidden: boolean;
+  setChromeHidden: (hidden: boolean) => void;
   setLocation: (location: Coordinates, source?: LocationSource) => void;
   resetLocation: () => void;
   openLocationPrompt: () => void;
@@ -28,6 +31,10 @@ export const useUi = create<UiState>((set) => ({
   location: BEHBAHAN_CENTER,
   locationSource: "default",
   locationPromptOpen: false,
+  chromeHidden: false,
+  setChromeHidden(hidden) {
+    set({ chromeHidden: hidden });
+  },
   setLocation(location, source = "gps") {
     set({ location, locationSource: source });
   },
