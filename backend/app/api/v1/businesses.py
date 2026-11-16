@@ -666,6 +666,8 @@ async def update_business_status(
         reason = None
     business.status = BusinessStatus(status)
     business.rejection_reason = reason
+    if status != "pending":
+        business.pending_changes = None
     status_changed = before["status"] != status
     if status_changed and status == "rejected":
         await notify_business_rejected(
@@ -1006,19 +1008,89 @@ async def update_business(
 
     tags = _clean_tags(payload.get("tags")) if "tags" in payload else None
 
-    # Only actual critical edits send the business back to moderation.
-    current_subcategory_ids = set(business.subcategory_ids)
+    short_description = (
+        (payload.get("short_description") or "").strip()[:120]
+        if "short_description" in payload
+        else business.short_description
+    )
+    description = payload.get("description") if "description" in payload else business.description
+    is_24h = bool(payload["is_24h"]) if "is_24h" in payload else business.is_24h
+    avatar_url = (
+        _clean_image_url(payload.get("avatar_url"))
+        if "avatar_url" in payload
+        else business.avatar_url
+    )
+
+    # Every changed field sends the business back to moderation, not just
+    # name/address/category. ``changes`` maps field -> (before, after) and is
+    # also stored as the admin's "what changed" note.
+    was_approved = business.status == BusinessStatus.APPROVED
+    was_reviewed = business.status in (BusinessStatus.APPROVED, BusinessStatus.REJECTED)
+    current_geo = (
+        {"lat": business.geo_lat, "lng": business.geo_lng}
+        if business.geo_lat is not None and business.geo_lng is not None
+        else None
+    )
+    next_geo = (
+        {"lat": geo_lat, "lng": geo_lng}
+        if geo_lat is not None and geo_lng is not None
+        else None
+    )
+    current_category_name = business.category.name if business.category else None
+    candidates = (
+        ("name", business.name, name),
+        ("short_description", business.short_description, short_description),
+        ("description", business.description, description),
+        ("phone_business", business.phone_business, phone_business),
+        ("address", business.address, address),
+        ("geo", current_geo, next_geo),
+        ("instagram", business.instagram, instagram),
+        ("is_24h", business.is_24h, is_24h),
+        ("profile_image_url", business.profile_image_url, profile_image_url),
+        ("avatar_url", business.avatar_url, avatar_url),
+        ("category_id", current_category_name, category.name),
+    )
+    changes = {
+        field: (before, after) for field, before, after in candidates if before != after
+    }
+
+    current_subcategories = _business_subcategories(business)
+    current_subcategory_ids = {subcategory.id for subcategory in current_subcategories}
     next_subcategory_ids = (
         {subcategory.id for subcategory in new_subcategories}
         if new_subcategories is not None
         else current_subcategory_ids
     )
-    critical_changed = (
-        name != business.name
-        or address != business.address
-        or category.id != business.category_id
-        or next_subcategory_ids != current_subcategory_ids
-    )
+    if next_subcategory_ids != current_subcategory_ids:
+        changes["subcategory_ids"] = (
+            sorted(subcategory.name for subcategory in current_subcategories),
+            sorted(subcategory.name for subcategory in selected_subcategories),
+        )
+
+    if images_changed:
+        # Compare URLs in order; a main-image-only change is reported through
+        # profile_image_url instead.
+        current_images = [
+            image["url"] for image in await _business_images_payload(session, business)
+        ]
+        next_images = [image["url"] for image in gallery_images]
+        if current_images != next_images:
+            changes["images"] = (current_images, next_images)
+
+    if tags is not None:
+        from app.models.tag import BusinessTag, Tag
+
+        current_tags = set(
+            (
+                await session.execute(
+                    sa.select(Tag.name)
+                    .join(BusinessTag, BusinessTag.tag_id == Tag.id)
+                    .where(BusinessTag.business_id == business.id)
+                )
+            ).scalars()
+        )
+        if current_tags != set(tags):
+            changes["tags"] = (sorted(current_tags), sorted(tags))
 
     business.name = name
     business.address = address
@@ -1030,14 +1102,10 @@ async def update_business(
     business.phone_business = phone_business
     business.instagram = instagram
     business.profile_image_url = profile_image_url
-    if "avatar_url" in payload:
-        business.avatar_url = _clean_image_url(payload.get("avatar_url"))
-    if "short_description" in payload:
-        business.short_description = (payload.get("short_description") or "").strip()[:120]
-    if "description" in payload:
-        business.description = payload.get("description")
-    if "is_24h" in payload:
-        business.is_24h = bool(payload["is_24h"])
+    business.avatar_url = avatar_url
+    business.short_description = short_description
+    business.description = description
+    business.is_24h = is_24h
 
     if images_changed:
         await _replace_business_images(session, business.id, gallery_images)
@@ -1050,7 +1118,29 @@ async def update_business(
             standard_names=_standard_tag_names(selected_subcategories),
         )
 
-    if critical_changed or (
+    if changes:
+        if was_reviewed:
+            business.pending_changes = {
+                field: {"from": before, "to": after}
+                for field, (before, after) in changes.items()
+            }
+        elif business.pending_changes is not None:
+            # Another edit before approval: keep the original "from" values.
+            merged = {
+                field: dict(entry) for field, entry in business.pending_changes.items()
+            }
+            for field, (before, after) in changes.items():
+                entry = merged.get(field)
+                if entry is not None and entry.get("from") == after:
+                    merged.pop(field)
+                    continue
+                if entry is None:
+                    entry = {"from": before}
+                    merged[field] = entry
+                entry["to"] = after
+            business.pending_changes = merged or None
+
+    if changes or (
         business.status == BusinessStatus.REJECTED and user.id == business.owner_id
     ):
         # Any owner edit on a rejected business is a resubmission for review.
@@ -1059,8 +1149,9 @@ async def update_business(
 
     # Explicit so gallery-only edits also move the public "last updated" time.
     business.updated_at = datetime.now(timezone.utc)
-    if business.status == BusinessStatus.APPROVED:
-        # Name/address/coordinates may have changed under the map snapshot.
+    if was_approved or business.status == BusinessStatus.APPROVED:
+        # Name/address/coordinates may have changed under the map snapshot, or
+        # an approved business just went back to moderation.
         await map_cache.enqueue_refresh(session)
     await session.commit()
     await session.refresh(business)

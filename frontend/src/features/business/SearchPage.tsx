@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -13,11 +13,17 @@ import { cn } from "@/lib/cn";
 import { fa } from "@/lib/format";
 import { getCurrentPosition, geolocationNeedsPrompt } from "@/lib/geolocation";
 import { useApi } from "@/lib/query";
-import { useUi } from "@/stores/ui";
+import { BEHBAHAN_CENTER, DEFAULT_MAP_ZOOM, useUi } from "@/stores/ui";
 import { BusinessCard } from "@/features/business/BusinessCard";
+import { BEHBAHAN_VIEW_BOUNDS, INITIAL_MAP_VIEWPORT } from "@/features/map/city";
+import {
+  buildClusterIndex,
+  clusteredFeatures,
+  pointMatchesFilters,
+} from "@/features/map/clustering";
 import { NeshanMap, type MapMarker, type MapViewport } from "@/features/map/NeshanMap";
+import type { MapFeed, MapPoint } from "@/features/map/types";
 import type {
-  BusinessCategory,
   BusinessListItem,
   BusinessSort,
   Category,
@@ -44,40 +50,6 @@ function parseSort(value: string | null): BusinessSort {
 function parseRadius(value: string | null): number | null {
   const parsed = Number(value);
   return value && RADIUS_OPTIONS.includes(parsed) ? parsed : null;
-}
-
-interface MapCluster {
-  id: string;
-  lat: number;
-  lng: number;
-  count: number;
-}
-
-interface MapPoint {
-  id: string;
-  slug: string;
-  name: string;
-  lat: number;
-  lng: number;
-  address: string;
-  short_description?: string | null;
-  rating_avg: number;
-  rating_count: number;
-  like_count?: number;
-  is_24h: boolean;
-  is_verified: boolean;
-  is_license_verified?: boolean;
-  profile_image_url?: string | null;
-  avatar_url?: string | null;
-  category?: BusinessCategory | null;
-}
-
-interface MapFeed {
-  mode: "clusters" | "points";
-  zoom: number;
-  generated_at?: string | null;
-  clusters: MapCluster[];
-  items: MapPoint[];
 }
 
 function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
@@ -116,9 +88,8 @@ export function SearchPage() {
 
   const [view, setView] = useState<"list" | "map">("list");
   const [selectedPoint, setSelectedPoint] = useState<MapPoint | null>(null);
-  const [viewport, setViewport] = useState<MapViewport | null>(null);
+  const [viewport, setViewport] = useState<MapViewport>(INITIAL_MAP_VIEWPORT);
   const [camera, setCamera] = useState<{ center: Coordinates; zoom: number } | null>(null);
-  const viewportTimer = useRef<number | null>(null);
 
   const [locating, setLocating] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -219,54 +190,25 @@ export function SearchPage() {
     [searchQuery.data],
   );
 
-  // The map never downloads every business: it asks for the current viewport at
-  // the current zoom and receives either grid clusters (low zoom) or the
-  // individual businesses inside that box (detail zoom).
-  const bboxKey = viewport
-    ? [viewport.bbox.west, viewport.bbox.south, viewport.bbox.east, viewport.bbox.north]
-        .map((value) => value.toFixed(4))
-        .join(",")
-    : "";
+  // One cached snapshot, clustered in the browser. Panning and zooming only
+  // re-query the local index, so the map never waits for the network mid-drag.
   const mapFeed = useQuery({
-    queryKey: ["map", "businesses", viewport?.zoom ?? null, bboxKey, qParam, catParam, subcatParam],
-    enabled: view === "map" && viewport !== null,
+    queryKey: ["map", "snapshot", qParam],
+    enabled: view === "map",
+    // Cached snapshot is shown immediately; revalidate in the background after
+    // five minutes so newly approved businesses appear without a reload.
+    staleTime: 5 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
     placeholderData: keepPreviousData,
     queryFn: () => {
-      if (!viewport) throw new Error("no_viewport");
-      const search = new URLSearchParams({
-        zoom: String(viewport.zoom),
-        west: String(viewport.bbox.west),
-        south: String(viewport.bbox.south),
-        east: String(viewport.bbox.east),
-        north: String(viewport.bbox.north),
-      });
+      const search = new URLSearchParams();
       if (qParam) search.set("q", qParam);
-      if (catParam) search.set("cat", catParam);
-      if (subcatParam) search.set("subcat", subcatParam);
-      return api<MapFeed>(`/map/businesses?${search.toString()}`);
+      const query = search.toString();
+      return api<MapFeed>(`/map/businesses${query ? `?${query}` : ""}`);
     },
   });
 
   const mapLoading = mapFeed.isFetching && !mapFeed.data;
-
-  const handleViewport = useCallback((next: MapViewport) => {
-    if (viewportTimer.current) window.clearTimeout(viewportTimer.current);
-    viewportTimer.current = window.setTimeout(() => setViewport(next), 220);
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (viewportTimer.current) window.clearTimeout(viewportTimer.current);
-    },
-    [],
-  );
-
-  // Entering the map view seeds the camera from the user's location.
-  useEffect(() => {
-    if (view === "map" && camera === null) {
-      setCamera({ center: location, zoom: 13 });
-    }
-  }, [view, camera, location]);
   const loading = searchQuery.isLoading;
   const loadingMore = searchQuery.isFetchingNextPage;
   const hasMore = searchQuery.hasNextPage;
@@ -290,47 +232,53 @@ export function SearchPage() {
 
   const sortLabel = SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "";
 
-  const mapMarkers = useMemo<MapMarker[]>(() => {
-    const feed = mapFeed.data;
-    if (!feed) return [];
-    if (feed.mode === "clusters") {
-      return feed.clusters.map((cluster) => ({
-        id: cluster.id,
-        lat: cluster.lat,
-        lng: cluster.lng,
-        count: cluster.count,
-        title: `${fa(cluster.count)} کسب‌وکار`,
-      }));
-    }
-    return feed.items.map((point) => ({
-      id: point.id,
-      lat: point.lat,
-      lng: point.lng,
-      title: point.name,
-      subtitle: point.address,
-    }));
-  }, [mapFeed.data]);
+  const mapPoints = useMemo(
+    () =>
+      (mapFeed.data?.items ?? []).filter((point) =>
+        pointMatchesFilters(point, catParam, subcatParam),
+      ),
+    [mapFeed.data, catParam, subcatParam],
+  );
 
-  const mapTotal = useMemo(() => {
-    const feed = mapFeed.data;
-    if (!feed) return 0;
-    return feed.mode === "clusters"
-      ? feed.clusters.reduce((sum, cluster) => sum + cluster.count, 0)
-      : feed.items.length;
-  }, [mapFeed.data]);
+  const mapIndex = useMemo(() => buildClusterIndex(mapPoints), [mapPoints]);
+
+  const mapMarkers = useMemo<MapMarker[]>(() => {
+    if (!mapIndex) return [];
+    return clusteredFeatures(mapIndex, viewport).map((feature) => {
+      const properties = feature.properties;
+      const [lng, lat] = feature.geometry.coordinates;
+      if ("cluster" in properties && properties.cluster) {
+        return {
+          id: `cluster-${properties.cluster_id}`,
+          lat,
+          lng,
+          count: properties.point_count,
+          expansionZoom: mapIndex.getClusterExpansionZoom(properties.cluster_id),
+          title: `${fa(properties.point_count)} کسب‌وکار`,
+        };
+      }
+      const point = properties as MapPoint;
+      return {
+        id: point.id,
+        lat: point.lat,
+        lng: point.lng,
+        title: point.name,
+        subtitle: point.address,
+      };
+    });
+  }, [mapIndex, viewport]);
 
   function handleMapMarker(marker: MapMarker) {
-    const feed = mapFeed.data;
-    if (!feed) return;
-    if (feed.mode === "clusters") {
-      const currentZoom = viewport?.zoom ?? camera?.zoom ?? 13;
-      setCamera({
-        center: { lat: marker.lat, lng: marker.lng },
-        zoom: Math.min(currentZoom + 2, 18),
-      });
+    if (marker.count !== undefined) {
+      const currentZoom = camera?.zoom ?? viewport.zoom;
+      const zoom =
+        marker.expansionZoom !== undefined && marker.expansionZoom > currentZoom
+          ? marker.expansionZoom
+          : Math.min(currentZoom + 1, 18);
+      setCamera({ center: { lat: marker.lat, lng: marker.lng }, zoom });
       return;
     }
-    const point = feed.items.find((item) => item.id === marker.id);
+    const point = mapPoints.find((item) => item.id === marker.id);
     if (point) setSelectedPoint(point);
   }
 
@@ -339,7 +287,7 @@ export function SearchPage() {
       id: point.id,
       slug: point.slug,
       name: point.name,
-      short_description: point.short_description ?? "",
+      short_description: "",
       address: point.address,
       category: point.category ?? null,
       subcategory: null,
@@ -546,30 +494,20 @@ export function SearchPage() {
           <div className="space-y-3">
             <div className="relative">
               <NeshanMap
-                center={camera?.center ?? location}
+                center={camera?.center ?? BEHBAHAN_CENTER}
                 markers={mapMarkers}
                 onMarkerClick={handleMapMarker}
-                onViewportChange={handleViewport}
+                onViewportChange={setViewport}
+                initialBounds={BEHBAHAN_VIEW_BOUNDS}
                 className="h-[55dvh]"
-                zoom={camera?.zoom ?? 13}
+                zoom={camera?.zoom ?? DEFAULT_MAP_ZOOM}
               />
               {mapLoading && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-white/60 text-brand-600 backdrop-blur-[1px]">
                   <Spinner />
                 </div>
               )}
-              {mapFeed.data && mapFeed.data.mode === "clusters" && (
-                <div className="pointer-events-none absolute inset-x-3 top-3 rounded-xl bg-white/95 px-3 py-2 text-center text-[11px] text-slate-600 shadow-sm">
-                  نمایش خوشه‌ای {fa(mapTotal)} کسب‌وکار — برای دیدن جزئیات بیشتر روی هر
-                  خوشه بزنید.
-                </div>
-              )}
             </div>
-            <p className="text-center text-[11px] text-slate-400">
-              {mapFeed.data?.mode === "points"
-                ? `${fa(mapTotal)} کسب‌وکار در این محدوده؛ روی نشان هر کسب‌وکار بزنید.`
-                : "با بزرگ‌نمایی نقشه، کسب‌وکارهای بیشتری نمایش داده می‌شود."}
-            </p>
           </div>
         ) : (
           <>

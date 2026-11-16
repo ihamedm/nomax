@@ -26,11 +26,30 @@ async def _setup(db_session, create_user):
 
 async def test_admin_approves_business(client, db_session, create_user):
     owner, business = await _setup(db_session, create_user)
+    business.pending_changes = {"name": {"from": "قدیم", "to": "جدید"}}
+    await db_session.commit()
     admin = await create_user("09140000002", UserRole.ADMIN, permissions=["business.approve"])
     response = await client.patch(f"/api/v1/admin/businesses/{business.id}/approve", headers=auth(admin))
     assert response.status_code == 200
     await db_session.refresh(business)
     assert business.status == BusinessStatus.APPROVED
+    assert business.pending_changes is None
+
+
+async def test_admin_business_detail_exposes_pending_changes(client, db_session, create_user):
+    owner, business = await _setup(db_session, create_user)
+    business.pending_changes = {"is_24h": {"from": False, "to": True}}
+    await db_session.commit()
+    admin = await create_user("09140000007", UserRole.ADMIN, permissions=["business.read"])
+
+    response = await client.get(
+        f"/api/v1/admin/businesses/{business.id}", headers=auth(admin)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["pending_changes"] == {
+        "is_24h": {"from": False, "to": True}
+    }
 
 
 async def test_admin_rejects_business_with_reason(client, db_session, create_user):

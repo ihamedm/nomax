@@ -52,6 +52,7 @@ interface BusinessRow {
   profile_image_url?: string | null;
   avatar_url?: string | null;
   rejection_reason?: string | null;
+  pending_changes?: Record<string, { from: unknown; to: unknown }> | null;
   owner: Owner | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -93,6 +94,41 @@ function BlueTick() {
       />
     </svg>
   );
+}
+
+const CHANGE_LABELS: Record<string, string> = {
+  name: "نام",
+  short_description: "توضیح کوتاه",
+  description: "توضیحات",
+  phone_business: "تلفن",
+  address: "آدرس",
+  geo: "مختصات",
+  instagram: "اینستاگرام",
+  is_24h: "۲۴ ساعته",
+  profile_image_url: "عکس اصلی",
+  avatar_url: "آواتار",
+  category_id: "دسته",
+  subcategory_ids: "زیردسته‌ها",
+  images: "تصاویر",
+  tags: "برچسب‌ها",
+};
+
+function changeValue(field: string, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "بله" : "خیر";
+  if (Array.isArray(value)) {
+    if (field === "images") return `${fa(value.length)} عکس`;
+    return value.length ? value.join("، ") : "—";
+  }
+  if (typeof value === "object") {
+    const geo = value as { lat?: number; lng?: number };
+    if (typeof geo.lat === "number" && typeof geo.lng === "number") {
+      return `${geo.lat}, ${geo.lng}`;
+    }
+    return JSON.stringify(value);
+  }
+  const text = String(value);
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 }
 
 function StatusPill({ status }: { status: BusinessStatus }) {
@@ -696,6 +732,26 @@ export default function AdminBusinessesPage() {
               </div>
             </div>
           </div>
+          {detail.pending_changes && Object.keys(detail.pending_changes).length > 0 && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+              <p className="mb-2 text-xs font-bold text-amber-800">تغییرات در انتظار تأیید</p>
+              <ul className="space-y-1.5">
+                {Object.entries(detail.pending_changes).map(([field, change]) => (
+                  <li
+                    key={field}
+                    className="flex flex-wrap items-baseline gap-1 text-xs text-amber-900"
+                  >
+                    <span className="font-medium">{CHANGE_LABELS[field] ?? field}:</span>
+                    <span className="text-amber-700/70 line-through">
+                      {changeValue(field, change.from)}
+                    </span>
+                    <span aria-hidden>→</span>
+                    <span className="font-medium">{changeValue(field, change.to)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="space-y-1">
             <DetailRow label="شناسه">{detail.slug}</DetailRow>
             <DetailRow label="وضعیت">

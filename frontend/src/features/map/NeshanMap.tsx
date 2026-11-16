@@ -18,6 +18,8 @@ export interface MapMarker {
   offsetY?: number;
   /** When set, the pin renders as a numbered cluster bubble. */
   count?: number;
+  /** Zoom at which this cluster splits into its children. */
+  expansionZoom?: number;
 }
 
 export interface MapViewport {
@@ -33,6 +35,8 @@ interface NeshanMapProps {
   className?: string;
   interactive?: boolean;
   fitToMarkers?: boolean;
+  /** Fit the city once on mount, then leave camera moves to center/zoom. */
+  initialBounds?: [[number, number], [number, number]];
   onMapClick?: (coords: Coordinates) => void;
   onMarkerClick?: (marker: MapMarker) => void;
   /** Fires after pan/zoom so callers can fetch only the visible area. */
@@ -104,6 +108,7 @@ export function NeshanMap({
   className,
   interactive = true,
   fitToMarkers = false,
+  initialBounds,
   onMapClick,
   onMarkerClick,
   onViewportChange,
@@ -114,6 +119,7 @@ export function NeshanMap({
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
   const pickerRef = useRef<any>(null);
+  const fittedRef = useRef(false);
   const clickRef = useRef(onMapClick);
   const markerClickRef = useRef(onMarkerClick);
   const pickerMoveRef = useRef(onPickerMove);
@@ -148,6 +154,7 @@ export function NeshanMap({
           maptype: "dreamy",
           center: [center.lat, center.lng],
           zoom,
+          zoomSnap: 0.25,
           zoomControl: interactive,
           dragging: interactive,
           scrollWheelZoom: interactive,
@@ -198,6 +205,7 @@ export function NeshanMap({
       }
       layerRef.current = null;
       pickerRef.current = null;
+      fittedRef.current = false;
       setReady(false);
     };
     // Re-create only when the key changes; center/zoom/markers are synced below.
@@ -206,8 +214,13 @@ export function NeshanMap({
 
   useEffect(() => {
     if (!mapRef.current || !ready) return;
+    if (initialBounds && !fittedRef.current) {
+      fittedRef.current = true;
+      mapRef.current.fitBounds(initialBounds, { padding: [8, 8], maxZoom: 14 });
+      return;
+    }
     mapRef.current.setView([center.lat, center.lng], zoom);
-  }, [center.lat, center.lng, zoom, ready]);
+  }, [center.lat, center.lng, zoom, ready, initialBounds]);
 
   // The map often mounts inside tabs/sheets whose width settles one frame
   // later. Without invalidateSize the tile pane can stay at the old size.

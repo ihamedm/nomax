@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -50,6 +51,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # The map snapshot is a few hundred KB; compress it even when the API is
+    # reached directly (local Docker, health checks) rather than through Caddy.
+    application.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
     @application.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError):

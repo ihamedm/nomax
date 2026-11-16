@@ -14,8 +14,8 @@ interface CacheEntry {
   points?: number;
   categories?: number;
   subcategories?: number;
-  counts?: Record<string, number>;
-  detail_zoom?: number;
+  version?: number;
+  mode?: string;
 }
 
 interface CacheStatus {
@@ -37,16 +37,13 @@ const CARDS: Array<{
     name: "map",
     title: "نقشه و خوشه‌بندی",
     description:
-      "موقعیت کسب‌وکارهای تأییدشده و خوشه‌های آماده برای هر سطح زوم. صفحه نقشه به‌جای پرس‌وجوی مستقیم از این داده می‌خواند.",
+      "یک عکس فوری از موقعیت کسب‌وکارهای تأییدشده. صفحه نقشه همین داده را از Redis می‌خواند و خوشه‌بندی را روی دستگاه انجام می‌دهد.",
     readyLabel: "ساخته‌شده",
     emptyLabel: "خالی",
     stats: (entry) => [
       { label: "کسب‌وکار روی نقشه", value: fa(entry.points ?? 0) },
-      { label: "زوم جزئیات", value: fa(entry.detail_zoom ?? 15) },
-      {
-        label: "سطوح خوشه",
-        value: fa(Object.keys(entry.counts ?? {}).length),
-      },
+      { label: "روش خوشه‌بندی", value: "دستگاه" },
+      { label: "نسخه", value: fa(entry.version ?? 4) },
     ],
   },
   {
@@ -111,8 +108,9 @@ export function AdminCachePage() {
           <h1 className="text-lg font-black text-slate-900">کش‌ها</h1>
           <p className="mt-1 max-w-2xl text-xs leading-6 text-slate-500">
             داده‌های پرمصرف در Redis نگهداری می‌شوند تا نقشه و دسته‌بندی‌ها سریع بارگذاری
-            شوند. پس از تأیید یا رد کسب‌وکار، کارگر به‌صورت خودکار کش نقشه را تازه می‌کند؛
-            از این صفحه می‌توانید وضعیت را ببینید و دستی بازسازی یا پاک کنید.
+            شوند. نقشه یک عکس فوری واحد می‌گیرد و خوشه‌ها را در مرورگر می‌سازد؛ بنابراین
+            جابه‌جایی و زوم روی نقشه درخواست تازه‌ای به سرور نمی‌فرستد. پس از تأیید یا رد
+            کسب‌وکار، کارگر به‌صورت خودکار این عکس فوری را تازه می‌کند.
           </p>
         </div>
         <div className="flex items-center gap-2">

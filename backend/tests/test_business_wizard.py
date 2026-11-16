@@ -303,7 +303,7 @@ async def test_edit_business_accepts_full_wizard_payload(client, db_session, cre
     assert business.status == BusinessStatus.PENDING
 
 
-async def test_edit_business_non_critical_change_keeps_status(client, db_session, create_user):
+async def test_edit_business_any_change_requires_approval(client, db_session, create_user):
     from app.models.business import BusinessStatus
 
     owner = await create_user("09160000007", UserRole.OWNER)
@@ -325,7 +325,102 @@ async def test_edit_business_non_critical_change_keeps_status(client, db_session
 
     response = await client.patch(
         f"/api/v1/businesses/{business_id}",
-        json={"short_description": "فقط معرفی"},
+        json={"is_24h": True},
+        headers=auth(owner),
+    )
+    assert response.status_code == 200
+    await db_session.refresh(business)
+    assert business.status == BusinessStatus.PENDING
+    assert business.pending_changes == {"is_24h": {"from": False, "to": True}}
+
+
+async def test_edit_business_merges_and_drops_reverted_pending_changes(
+    client, db_session, create_user
+):
+    from app.models.business import BusinessStatus
+
+    owner = await create_user("09160000007", UserRole.OWNER)
+    category, subcategory = await _catalog(db_session)
+    created = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "کسب‌وکار ثابت",
+            "category_id": category.id,
+            "subcategory_id": subcategory.id,
+            "address": "بهبهان",
+            "short_description": "معرفی اول",
+        },
+        headers=auth(owner),
+    )
+    business_id = created.json()["data"]["id"]
+    business = await db_session.get(Business, __import__("uuid").UUID(business_id))
+    business.status = BusinessStatus.APPROVED
+    await db_session.commit()
+
+    await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={"is_24h": True},
+        headers=auth(owner),
+    )
+    await db_session.refresh(business)
+    assert business.pending_changes == {"is_24h": {"from": False, "to": True}}
+
+    await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={"short_description": "معرفی دوم"},
+        headers=auth(owner),
+    )
+    await db_session.refresh(business)
+    assert business.pending_changes == {
+        "is_24h": {"from": False, "to": True},
+        "short_description": {"from": "معرفی اول", "to": "معرفی دوم"},
+    }
+
+    await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={"is_24h": False},
+        headers=auth(owner),
+    )
+    await db_session.refresh(business)
+    assert business.pending_changes == {
+        "short_description": {"from": "معرفی اول", "to": "معرفی دوم"},
+    }
+
+
+async def test_edit_business_unchanged_payload_keeps_status(client, db_session, create_user):
+    from app.models.business import BusinessStatus
+
+    owner = await create_user("09160000007", UserRole.OWNER)
+    category, subcategory = await _catalog(db_session)
+    created = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "کسب‌وکار ثابت",
+            "category_id": category.id,
+            "subcategory_id": subcategory.id,
+            "address": "بهبهان",
+            "short_description": "معرفی",
+            "is_24h": False,
+            "tags": [subcategory.standard_tags[0]],
+        },
+        headers=auth(owner),
+    )
+    business_id = created.json()["data"]["id"]
+    business = await db_session.get(Business, __import__("uuid").UUID(business_id))
+    business.status = BusinessStatus.APPROVED
+    await db_session.commit()
+
+    response = await client.patch(
+        f"/api/v1/businesses/{business_id}",
+        json={
+            "name": "کسب‌وکار ثابت",
+            "category_id": category.id,
+            "subcategory_id": subcategory.id,
+            "address": "بهبهان",
+            "short_description": "معرفی",
+            "is_24h": False,
+            "tags": [subcategory.standard_tags[0]],
+        },
         headers=auth(owner),
     )
     assert response.status_code == 200

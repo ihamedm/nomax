@@ -56,6 +56,7 @@ export interface AdminBusinessDetail {
   profile_image_url?: string | null;
   avatar_url?: string | null;
   rejection_reason?: string | null;
+  pending_changes?: Record<string, { from: unknown; to: unknown }> | null;
   owner: OwnerOption | null;
   images?: Array<{ url: string; is_main: boolean; sort_order: number }>;
   tags?: string[];

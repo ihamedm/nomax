@@ -85,6 +85,9 @@ class Business(Base):
         server_default=BusinessStatus.PENDING.value,
     )
     rejection_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Owner edits waiting for moderation: {field: {"from": ..., "to": ...}}.
+    # Cleared on approve/reject; see update_business.
+    pending_changes: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
     rating_avg: Mapped[float] = mapped_column(Float, nullable=False, default=0, server_default=sa.text("0"))
     rating_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa.text("0"))
     view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa.text("0"))

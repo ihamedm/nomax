@@ -1,26 +1,24 @@
-"""Pre-computed map snapshot with zoom-dependent clustering.
+"""Versioned map snapshot consumed by the search page.
 
-Approved businesses that have coordinates are materialised once into Redis as a
-small "pyramid":
+Approved businesses that have coordinates are materialised once into a single
+Redis value:
 
-* ``map:v1:points``           – flat list of business markers used at detail zooms
-* ``map:v1:clusters:{zoom}``  – grid clusters for zoom 6..14
-* ``map:v1:manifest``         – build timestamp and counts
+* ``map:v4:snapshot`` – manifest, compact point list and the private search
+  haystack used to filter the map.
 
 The snapshot is rebuilt by a worker job after a business changes state and on
 demand from the dashboard. A cold cache is filled synchronously on the first
 map request, so the map never depends on the worker being up.
 
-Clustering is a plain lat/lng grid whose cell size halves with each zoom level
-(``360 / 2**zoom`` degrees, i.e. one Web-Mercator tile). That is the same idea
-used by server-side clustering endpoints (Mapbox/Google/Leaflet.markercluster)
-but is computed once per rebuild instead of per request.
+Clustering happens in the browser (Supercluster) from this snapshot. A single
+atomic value is enough at the city scale (thousands of businesses): it removes
+per-zoom/pre-computed grids, keeps cluster counts truthful, and makes panning
+and zooming independent of the network.
 """
 from __future__ import annotations
 
 import json
 import logging
-import math
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
@@ -33,32 +31,29 @@ from app.models.user import User
 
 logger = logging.getLogger("nomax.map_cache")
 
-CACHE_VERSION = 3
-MANIFEST_KEY = f"map:v{CACHE_VERSION}:manifest"
-POINTS_KEY = f"map:v{CACHE_VERSION}:points"
-CLUSTERS_KEY = f"map:v{CACHE_VERSION}:clusters:{{zoom}}"
+CACHE_VERSION = 4
+SNAPSHOT_KEY = f"map:v{CACHE_VERSION}:snapshot"
 
-MIN_CLUSTER_ZOOM = 6
-MAX_CLUSTER_ZOOM = 14
-DETAIL_ZOOM = 15
-
-MAX_POINTS_IN_RESPONSE = 300
-MAX_CLUSTERS_IN_RESPONSE = 400
-MAX_CACHED_POINTS = 5000
+# The snapshot is intentionally larger than the current city size; the next
+# growth step (10k businesses) must not silently truncate the map.
+MAX_CACHED_POINTS = 20000
 
 # Keeps a stale snapshot from living forever if the worker never runs.
 CACHE_TTL_SECONDS = 7 * 24 * 3600
 
 JOB_TYPE = "map_cache.refresh"
 
+# Older versions kept nine cluster keys and a 16 MB point list. Removing them
+# on flush keeps Redis tidy after an upgrade.
+_LEGACY_KEYS = [
+    "map:v3:manifest",
+    "map:v3:points",
+    *[f"map:v3:clusters:{zoom}" for zoom in range(6, 15)],
+]
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def cell_size(zoom: int) -> float:
-    """Grid cell size in degrees for a zoom level (one Web-Mercator tile)."""
-    return 360.0 / (2 ** zoom)
 
 
 def _category_ref(category: Category | None) -> dict | None:
@@ -72,7 +67,7 @@ def _category_ref(category: Category | None) -> dict | None:
     }
 
 
-async def _load_points(session: AsyncSession) -> list[dict]:
+async def _load_points(session: AsyncSession) -> tuple[list[dict], dict[str, str]]:
     rows = (
         await session.execute(
             sa.select(Business, Category, User)
@@ -107,6 +102,7 @@ async def _load_points(session: AsyncSession) -> list[dict]:
             tags_by_business.setdefault(business_id, []).append(tag_name)
 
     points: list[dict] = []
+    search: dict[str, str] = {}
     for business, category, owner in rows:
         subcategories = [
             _category_ref(subcategory)
@@ -120,6 +116,15 @@ async def _load_points(session: AsyncSession) -> list[dict]:
         )
         if not subcategories and primary is not None:
             subcategories = [primary]
+
+        subcategory_slugs = sorted(
+            {
+                item["slug"]
+                for item in subcategories
+                if item is not None
+            }
+            | ({primary["slug"]} if primary is not None else set())
+        )
         points.append(
             {
                 "id": str(business.id),
@@ -128,7 +133,6 @@ async def _load_points(session: AsyncSession) -> list[dict]:
                 "lat": round(float(business.geo_lat), 6),
                 "lng": round(float(business.geo_lng), 6),
                 "address": business.address,
-                "short_description": business.short_description,
                 "rating_avg": round(business.rating_avg or 0, 2),
                 "rating_count": business.rating_count or 0,
                 "like_count": business.like_count or 0,
@@ -139,91 +143,45 @@ async def _load_points(session: AsyncSession) -> list[dict]:
                 "avatar_url": business.avatar_url,
                 "category": _category_ref(category),
                 "subcategory": primary,
-                "subcategories": subcategories,
-                # Lower-cased haystack so a filtered map view can reuse the cache
-                # instead of re-querying the database per keystroke.
-                "search_text": " ".join(
-                    filter(
-                        None,
-                        [
-                            business.name or "",
-                            business.short_description or "",
-                            business.description or "",
-                            business.address or "",
-                            " ".join(tags_by_business.get(business.id, [])),
-                            owner.full_name or "",
-                            owner.phone or "",
-                        ],
-                    )
-                ).lower(),
+                "subcategory_slugs": subcategory_slugs,
             }
         )
-    return points
+        # Kept out of the public payload; it can contain the owner phone.
+        search[str(business.id)] = " ".join(
+            filter(
+                None,
+                [
+                    business.name or "",
+                    business.short_description or "",
+                    business.description or "",
+                    business.address or "",
+                    " ".join(tags_by_business.get(business.id, [])),
+                    owner.full_name or "",
+                    owner.phone or "",
+                ],
+            )
+        ).lower()
 
-
-def build_clusters(points: list[dict], zoom: int) -> list[dict]:
-    """Bucket points into a lat/lng grid and emit one cluster per occupied cell."""
-    size = cell_size(zoom)
-    buckets: dict[tuple[int, int], dict] = {}
-
-    for point in points:
-        key = (math.floor(point["lat"] / size), math.floor(point["lng"] / size))
-        bucket = buckets.get(key)
-        if bucket is None:
-            buckets[key] = {
-                "lat_sum": point["lat"],
-                "lng_sum": point["lng"],
-                "count": 1,
-            }
-        else:
-            bucket["lat_sum"] += point["lat"]
-            bucket["lng_sum"] += point["lng"]
-            bucket["count"] += 1
-
-    clusters: list[dict] = []
-    for (row, column), bucket in buckets.items():
-        count = bucket["count"]
-        clusters.append(
-            {
-                "id": f"z{zoom}:{row}:{column}",
-                "lat": round(bucket["lat_sum"] / count, 6),
-                "lng": round(bucket["lng_sum"] / count, 6),
-                "count": count,
-            }
-        )
-    clusters.sort(key=lambda item: (-item["count"], item["id"]))
-    return clusters
+    return points, search
 
 
 async def build_snapshot(session: AsyncSession) -> dict:
-    points = await _load_points(session)
-    clusters = {
-        zoom: build_clusters(points, zoom)
-        for zoom in range(MIN_CLUSTER_ZOOM, MAX_CLUSTER_ZOOM + 1)
-    }
+    points, search = await _load_points(session)
     manifest = {
         "version": CACHE_VERSION,
         "generated_at": _now().isoformat(),
         "points": len(points),
-        "cluster_zooms": [MIN_CLUSTER_ZOOM, MAX_CLUSTER_ZOOM],
-        "detail_zoom": DETAIL_ZOOM,
-        "counts": {str(zoom): len(items) for zoom, items in clusters.items()},
+        "mode": "client-clusters",
     }
-    return {"manifest": manifest, "points": points, "clusters": clusters}
+    return {"manifest": manifest, "points": points, "search": search}
 
 
 async def _write_snapshot(redis, snapshot: dict) -> None:
-    manifest = snapshot["manifest"]
     await redis.set(
-        POINTS_KEY, json.dumps(snapshot["points"], separators=(",", ":")), ex=CACHE_TTL_SECONDS
+        SNAPSHOT_KEY,
+        json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False),
+        ex=CACHE_TTL_SECONDS,
     )
-    for zoom, clusters in snapshot["clusters"].items():
-        await redis.set(
-            CLUSTERS_KEY.format(zoom=zoom),
-            json.dumps(clusters, separators=(",", ":")),
-            ex=CACHE_TTL_SECONDS,
-        )
-    await redis.set(MANIFEST_KEY, json.dumps(manifest), ex=CACHE_TTL_SECONDS)
 
 
 async def rebuild_map_cache(session: AsyncSession, redis) -> dict:
@@ -250,16 +208,16 @@ async def _safe_get(redis, key: str):
         return None
 
 
-def _in_bbox(lat: float, lng: float, bbox: tuple[float, float, float, float], margin: float) -> bool:
-    west, south, east, north = bbox
-    return (
-        south - margin <= lat <= north + margin
-        and west - margin <= lng <= east + margin
-    )
+async def _snapshot(session: AsyncSession, redis) -> dict:
+    snapshot = await _safe_get(redis, SNAPSHOT_KEY)
+    if snapshot is not None:
+        return snapshot
+    return await rebuild_map_cache(session, redis)
 
 
 def _matches(
     point: dict,
+    search: dict[str, str],
     *,
     category_slug: str | None,
     subcategory_slug: str | None,
@@ -270,155 +228,84 @@ def _matches(
         if category is None or category["slug"] != category_slug:
             return False
     if subcategory_slug:
-        matches = point.get("subcategories") or []
-        if not any(item["slug"] == subcategory_slug for item in matches):
+        if subcategory_slug not in (point.get("subcategory_slugs") or []):
             return False
-    if q:
-        if q.strip().lower() not in point.get("search_text", ""):
-            return False
+    if q and q not in search.get(point["id"], ""):
+        return False
     return True
-
-
-async def _manifest_and_points(session: AsyncSession, redis) -> tuple[dict, list[dict]]:
-    manifest = await _safe_get(redis, MANIFEST_KEY)
-    if manifest is not None:
-        points = await _safe_get(redis, POINTS_KEY)
-        if points is not None:
-            return manifest, points
-    snapshot = await rebuild_map_cache(session, redis)
-    return snapshot["manifest"], snapshot["points"]
 
 
 async def get_map_view(
     session: AsyncSession,
     redis,
     *,
-    zoom: int,
-    bbox: tuple[float, float, float, float] | None = None,
     category_slug: str | None = None,
     subcategory_slug: str | None = None,
     q: str | None = None,
 ) -> dict:
-    """Return clusters (low zoom) or individual business markers (detail zoom).
+    """Return every matching point from the cached snapshot.
 
-    Unfiltered low-zoom requests read the pre-computed cluster list straight
-    from Redis. When a search/category filter is active the cached points are
-    re-bucketed in memory, so filtering never hits the database.
+    Category, subcategory and text filters are applied to the cached rows, so a
+    filtered map never re-queries the database.
     """
-    detail = zoom >= DETAIL_ZOOM
-    cluster_zoom = min(max(zoom, MIN_CLUSTER_ZOOM), MAX_CLUSTER_ZOOM)
-    filtered = bool(category_slug or subcategory_slug or q)
+    snapshot = await _snapshot(session, redis)
+    points = snapshot.get("points", [])
+    search = snapshot.get("search", {})
+    term = (q or "").strip().lower() or None
 
-    if detail:
-        manifest, rows = await _manifest_and_points(session, redis)
-        if filtered:
-            rows = [
-                point
-                for point in rows
-                if _matches(
-                    point,
-                    category_slug=category_slug,
-                    subcategory_slug=subcategory_slug,
-                    q=q,
-                )
-            ]
-        if bbox is not None:
-            rows = [item for item in rows if _in_bbox(item["lat"], item["lng"], bbox, 0.0)]
-        total = len(rows)
-        truncated = total > MAX_POINTS_IN_RESPONSE
-        rows = rows[:MAX_POINTS_IN_RESPONSE]
-        # The haystack is server-side only; it can contain the owner phone.
-        for point in rows:
-            point.pop("search_text", None)
-        return {
-            "data": {
-                "mode": "points",
-                "zoom": zoom,
-                "generated_at": manifest.get("generated_at"),
-                "items": rows,
-                "clusters": [],
-            },
-            "meta": {
-                "total": total,
-                "returned": len(rows),
-                "truncated": truncated,
-                "cached": True,
-            },
-        }
-
-    if filtered:
-        manifest, points = await _manifest_and_points(session, redis)
+    if category_slug or subcategory_slug or term:
         points = [
             point
             for point in points
             if _matches(
                 point,
+                search,
                 category_slug=category_slug,
                 subcategory_slug=subcategory_slug,
-                q=q,
+                q=term,
             )
         ]
-        clusters = build_clusters(points, cluster_zoom)
-    else:
-        manifest = await _safe_get(redis, MANIFEST_KEY)
-        clusters = (
-            await _safe_get(redis, CLUSTERS_KEY.format(zoom=cluster_zoom))
-            if manifest is not None
-            else None
-        )
-        if clusters is None:
-            snapshot = await rebuild_map_cache(session, redis)
-            manifest = snapshot["manifest"]
-            clusters = snapshot["clusters"][cluster_zoom]
 
-    if bbox is not None:
-        # Clusters are cell centroids; pad by half a cell so members sitting
-        # just outside the viewport still surface on screen edges.
-        margin = cell_size(cluster_zoom) * 0.5
-        clusters = [item for item in clusters if _in_bbox(item["lat"], item["lng"], bbox, margin)]
-    total = sum(item["count"] for item in clusters)
-    truncated = len(clusters) > MAX_CLUSTERS_IN_RESPONSE
-    clusters = clusters[:MAX_CLUSTERS_IN_RESPONSE]
     return {
         "data": {
-            "mode": "clusters",
-            "zoom": zoom,
-            "generated_at": manifest.get("generated_at"),
-            "items": [],
-            "clusters": clusters,
+            "generated_at": snapshot.get("manifest", {}).get("generated_at"),
+            "version": snapshot.get("manifest", {}).get("version", CACHE_VERSION),
+            "items": points,
         },
         "meta": {
-            "total": total,
-            "returned": len(clusters),
-            "truncated": truncated,
+            "total": len(points),
+            "returned": len(points),
+            "truncated": len(points) >= MAX_CACHED_POINTS,
             "cached": True,
         },
     }
 
 
 async def flush_map_cache(redis) -> None:
-    """Drop every snapshot key; the next map request rebuilds on demand."""
-    keys = [MANIFEST_KEY, POINTS_KEY] + [
-        CLUSTERS_KEY.format(zoom=zoom)
-        for zoom in range(MIN_CLUSTER_ZOOM, MAX_CLUSTER_ZOOM + 1)
-    ]
+    """Drop the snapshot and leftover v3 keys; the next request rebuilds."""
     try:
-        await redis.delete(*keys)
+        await redis.delete(SNAPSHOT_KEY, *_LEGACY_KEYS)
     except Exception:  # noqa: BLE001
         logger.warning("map cache flush failed", exc_info=True)
 
 
 async def cache_status(redis) -> dict:
-    manifest = await _safe_get(redis, MANIFEST_KEY)
-    if manifest is None:
-        return {"ready": False, "generated_at": None, "points": 0, "counts": {}}
+    snapshot = await _safe_get(redis, SNAPSHOT_KEY)
+    if snapshot is None:
+        return {
+            "ready": False,
+            "generated_at": None,
+            "points": 0,
+            "version": CACHE_VERSION,
+            "mode": "client-clusters",
+        }
+    manifest = snapshot.get("manifest", {})
     return {
         "ready": True,
         "generated_at": manifest.get("generated_at"),
         "points": manifest.get("points", 0),
-        "counts": manifest.get("counts", {}),
-        "detail_zoom": manifest.get("detail_zoom", DETAIL_ZOOM),
-        "cluster_zooms": manifest.get("cluster_zooms", [MIN_CLUSTER_ZOOM, MAX_CLUSTER_ZOOM]),
+        "version": manifest.get("version", CACHE_VERSION),
+        "mode": manifest.get("mode", "client-clusters"),
     }
 
 
@@ -450,10 +337,10 @@ async def refresh_from_job(session: AsyncSession, redis) -> dict:
 
 __all__ = [
     "JOB_TYPE",
-    "build_clusters",
+    "MAX_CACHED_POINTS",
+    "SNAPSHOT_KEY",
     "build_snapshot",
     "cache_status",
-    "cell_size",
     "enqueue_refresh",
     "flush_map_cache",
     "get_map_view",

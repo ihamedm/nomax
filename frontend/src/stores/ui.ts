@@ -2,15 +2,15 @@ import { create } from "zustand";
 
 import type { Coordinates } from "@/types";
 
-const envLat = Number(import.meta.env.VITE_MAP_CENTER_LAT ?? 30.638);
-const envLng = Number(import.meta.env.VITE_MAP_CENTER_LNG ?? 50.838);
+const envLat = Number(import.meta.env.VITE_MAP_CENTER_LAT ?? 30.5959);
+const envLng = Number(import.meta.env.VITE_MAP_CENTER_LNG ?? 50.2417);
 
 export const BEHBAHAN_CENTER: Coordinates = {
-  lat: Number.isFinite(envLat) ? envLat : 30.638,
-  lng: Number.isFinite(envLng) ? envLng : 50.838,
+  lat: Number.isFinite(envLat) ? envLat : 30.5959,
+  lng: Number.isFinite(envLng) ? envLng : 50.2417,
 };
 
-export const DEFAULT_MAP_ZOOM = Number(import.meta.env.VITE_MAP_DEFAULT_ZOOM ?? 13) || 13;
+export const DEFAULT_MAP_ZOOM = Number(import.meta.env.VITE_MAP_DEFAULT_ZOOM ?? 12) || 12;
 
 type LocationSource = "default" | "gps";
 

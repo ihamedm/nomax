@@ -161,6 +161,7 @@ def _admin_business_payload(business, owner: User | None = None) -> dict:
         "profile_image_url": business.profile_image_url,
         "avatar_url": business.avatar_url,
         "rejection_reason": business.rejection_reason,
+        "pending_changes": business.pending_changes,
         "owner": (
             {
                 "id": str(owner.id),
@@ -655,6 +656,8 @@ async def update_admin_business(
         if payload["status"] not in [item.value for item in BusinessStatus]:
             raise AppError("validation_error", "invalid_status", 422)
         business.status = BusinessStatus(payload["status"])
+        if business.status != BusinessStatus.PENDING:
+            business.pending_changes = None
         if business.status != BusinessStatus.REJECTED and "rejection_reason" not in payload:
             business.rejection_reason = None
 
@@ -921,6 +924,7 @@ async def approve_business(
     was_approved = business.status == BusinessStatus.APPROVED
     business.status = BusinessStatus.APPROVED
     business.rejection_reason = None
+    business.pending_changes = None
     if not was_approved:
         await notify_business_approved(
             session,
@@ -956,6 +960,7 @@ async def reject_business(
         raise AppError("rejection_reason_required", "rejection_reason_required", 422)
     business.status = BusinessStatus.REJECTED
     business.rejection_reason = reason
+    business.pending_changes = None
     await notify_business_rejected(
         session,
         owner_id=business.owner_id,
