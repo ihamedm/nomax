@@ -57,6 +57,41 @@ async def _fetch(path: str, params: dict) -> dict | list:
         raise AppError("geocoder_invalid_response", "geocoder_invalid_response", 502)
 
 
+# Reverse geocoding returns the whole hierarchy. The picker only needs the
+# local part; country/state/city are already implied by the map.
+_EXCLUDED_ADDRESS_KEYS = (
+    "country",
+    "state",
+    "state_district",
+    "region",
+    "province",
+    "county",
+    "municipality",
+    "city",
+    "town",
+    "village",
+    "district",
+    "postcode",
+)
+
+
+def _local_display_name(payload: dict) -> str:
+    display_name = payload["display_name"]
+    address = payload.get("address")
+    if not isinstance(address, dict):
+        return display_name
+    excluded = {
+        address[key].strip()
+        for key in _EXCLUDED_ADDRESS_KEYS
+        if isinstance(address.get(key), str) and address[key].strip()
+    }
+    if not excluded:
+        return display_name
+    parts = [part.strip() for part in display_name.split(",")]
+    kept = [part for part in parts if part and part not in excluded]
+    return "، ".join(kept) or display_name
+
+
 def _parse_search(payload: dict | list) -> list[dict]:
     items: list[dict] = []
     if not isinstance(payload, list):
@@ -113,6 +148,7 @@ async def reverse_address(
             "lon": lng,
             "format": "jsonv2",
             "zoom": 18,
+            "addressdetails": 1,
             "accept-language": "fa",
         },
     )
@@ -128,7 +164,7 @@ async def reverse_address(
 
     return {
         "data": {
-            "display_name": payload["display_name"],
+            "display_name": _local_display_name(payload),
             "lat": resolved_lat,
             "lng": resolved_lng,
         }

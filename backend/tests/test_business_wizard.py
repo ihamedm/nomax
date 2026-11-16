@@ -180,7 +180,10 @@ async def test_geo_search_rejects_short_query(client):
 
 
 async def test_geo_reverse_returns_address(client, monkeypatch):
+    calls = {}
+
     async def fake_fetch(path, params):
+        calls["params"] = params
         return {"display_name": "بهبهان، خیابان امام", "lat": "30.5959", "lon": "50.2417"}
 
     monkeypatch.setattr(geo, "_fetch", fake_fetch)
@@ -189,6 +192,35 @@ async def test_geo_reverse_returns_address(client, monkeypatch):
     data = response.json()["data"]
     assert data["display_name"] == "بهبهان، خیابان امام"
     assert data["lat"] == 30.5959
+    assert calls["params"]["addressdetails"] == 1
+
+
+async def test_geo_reverse_drops_country_state_and_city(client, monkeypatch):
+    async def fake_fetch(path, params):
+        return {
+            "display_name": (
+                "حسینیه مهاجرین بهبهان, خیابان عدالت, دهستان حومه, بخش مرکزی, "
+                "شهرستان بهبهان, استان خوزستان, 63617-80010, ایران"
+            ),
+            "lat": "30.5959",
+            "lon": "50.2417",
+            "address": {
+                "amenity": "حسینیه مهاجرین بهبهان",
+                "road": "خیابان عدالت",
+                "city": "دهستان حومه",
+                "district": "بخش مرکزی",
+                "county": "شهرستان بهبهان",
+                "state": "استان خوزستان",
+                "postcode": "63617-80010",
+                "country": "ایران",
+            },
+        }
+
+    monkeypatch.setattr(geo, "_fetch", fake_fetch)
+    response = await client.get("/api/v1/geo/reverse", params={"lat": 30.5959, "lng": 50.2417})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["display_name"] == "حسینیه مهاجرین بهبهان، خیابان عدالت"
 
 
 async def test_geo_reverse_not_found(client, monkeypatch):
