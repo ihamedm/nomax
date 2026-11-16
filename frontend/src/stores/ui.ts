@@ -10,7 +10,7 @@ export const BEHBAHAN_CENTER: Coordinates = {
   lng: Number.isFinite(envLng) ? envLng : 50.2417,
 };
 
-export const DEFAULT_MAP_ZOOM = Number(import.meta.env.VITE_MAP_DEFAULT_ZOOM ?? 12) || 12;
+export const DEFAULT_MAP_ZOOM = Number(import.meta.env.VITE_MAP_DEFAULT_ZOOM ?? 13) || 13;
 
 type LocationSource = "default" | "gps";
 

@@ -85,6 +85,10 @@ docker compose exec api python -m app.cli create-superadmin \
   --phone 09123456789 --name "Super Admin"
 ```
 
+`VITE_NESHAN_MAP_KEY` is compiled into the web bundle. After changing it in
+`.env`, rebuild that image (`docker compose up -d --build web`); restarting the
+container alone keeps the old bundle.
+
 Then sign in at <http://localhost:8080/login> with that phone number. In local
 development the OTP is shown on the login screen; a superadmin can also inspect
 live codes at <http://localhost:8080/admin/dev-otps>.

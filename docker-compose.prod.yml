@@ -202,7 +202,7 @@ services:
         VITE_NESHAN_MAP_KEY: ${VITE_NESHAN_MAP_KEY:-}
         VITE_MAP_CENTER_LAT: ${VITE_MAP_CENTER_LAT:-30.5959}
         VITE_MAP_CENTER_LNG: ${VITE_MAP_CENTER_LNG:-50.2417}
-        VITE_MAP_DEFAULT_ZOOM: ${VITE_MAP_DEFAULT_ZOOM:-12}
+        VITE_MAP_DEFAULT_ZOOM: ${VITE_MAP_DEFAULT_ZOOM:-13}
     restart: unless-stopped
     depends_on:
       api:

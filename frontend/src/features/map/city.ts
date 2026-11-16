@@ -14,7 +14,7 @@ export const BEHBAHAN_VIEW_BOUNDS: [[number, number], [number, number]] = [
 ];
 
 export const INITIAL_MAP_VIEWPORT: MapViewport = {
-  zoom: 12,
-  center: { lat: 30.64, lng: 50.25 },
+  zoom: 13,
+  center: { lat: 30.5959, lng: 50.2417 },
   bbox: BEHBAHAN_BOUNDS,
 };

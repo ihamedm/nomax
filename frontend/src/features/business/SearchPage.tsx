@@ -15,10 +15,12 @@ import { getCurrentPosition, geolocationNeedsPrompt } from "@/lib/geolocation";
 import { useApi } from "@/lib/query";
 import { BEHBAHAN_CENTER, DEFAULT_MAP_ZOOM, useUi } from "@/stores/ui";
 import { BusinessCard } from "@/features/business/BusinessCard";
-import { BEHBAHAN_VIEW_BOUNDS, INITIAL_MAP_VIEWPORT } from "@/features/map/city";
+import { BEHBAHAN_BOUNDS, INITIAL_MAP_VIEWPORT } from "@/features/map/city";
 import {
   buildClusterIndex,
   clusteredFeatures,
+  clusterZoomTarget,
+  isClusterFeature,
   pointMatchesFilters,
 } from "@/features/map/clustering";
 import { NeshanMap, type MapMarker, type MapViewport } from "@/features/map/NeshanMap";
@@ -50,6 +52,14 @@ function parseSort(value: string | null): BusinessSort {
 function parseRadius(value: string | null): number | null {
   const parsed = Number(value);
   return value && RADIUS_OPTIONS.includes(parsed) ? parsed : null;
+}
+
+/** Keep the map over Behbahan when the visitor shares a location elsewhere. */
+function centerForLocation(location: Coordinates): Coordinates {
+  const { west, south, east, north } = BEHBAHAN_BOUNDS;
+  const inside =
+    location.lng >= west && location.lng <= east && location.lat >= south && location.lat <= north;
+  return inside ? location : BEHBAHAN_CENTER;
 }
 
 function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
@@ -244,37 +254,40 @@ export function SearchPage() {
 
   const mapMarkers = useMemo<MapMarker[]>(() => {
     if (!mapIndex) return [];
+    // At the deepest zooms the remaining waypoints are individual businesses.
+    // Teardrops there turn a dense street into a wall of pins, so switch to
+    // compact dots once the map is close enough to identify addresses.
+    const compact = viewport.zoom >= 17;
     return clusteredFeatures(mapIndex, viewport).map((feature) => {
-      const properties = feature.properties;
       const [lng, lat] = feature.geometry.coordinates;
-      if ("cluster" in properties && properties.cluster) {
+      if (isClusterFeature(feature)) {
+        const { cluster_id, point_count } = feature.properties;
         return {
-          id: `cluster-${properties.cluster_id}`,
+          id: `cluster-${cluster_id}`,
           lat,
           lng,
-          count: properties.point_count,
-          expansionZoom: mapIndex.getClusterExpansionZoom(properties.cluster_id),
-          title: `${fa(properties.point_count)} کسب‌وکار`,
+          count: point_count,
+          expansionZoom: mapIndex.getClusterExpansionZoom(cluster_id),
+          title: `${fa(point_count)} کسب‌وکار`,
         };
       }
-      const point = properties as MapPoint;
+      const point = feature.properties as MapPoint;
       return {
         id: point.id,
         lat: point.lat,
         lng: point.lng,
         title: point.name,
         subtitle: point.address,
+        compact,
       };
     });
   }, [mapIndex, viewport]);
 
   function handleMapMarker(marker: MapMarker) {
     if (marker.count !== undefined) {
-      const currentZoom = camera?.zoom ?? viewport.zoom;
-      const zoom =
-        marker.expansionZoom !== undefined && marker.expansionZoom > currentZoom
-          ? marker.expansionZoom
-          : Math.min(currentZoom + 1, 18);
+      // viewport.zoom is the live map zoom (fractional). The old code mixed in
+      // a stale camera zoom, so after panning it could zoom back out.
+      const zoom = clusterZoomTarget(viewport.zoom, marker.expansionZoom);
       setCamera({ center: { lat: marker.lat, lng: marker.lng }, zoom });
       return;
     }
@@ -494,11 +507,10 @@ export function SearchPage() {
           <div className="space-y-3">
             <div className="relative">
               <NeshanMap
-                center={camera?.center ?? BEHBAHAN_CENTER}
+                center={camera?.center ?? centerForLocation(location)}
                 markers={mapMarkers}
                 onMarkerClick={handleMapMarker}
                 onViewportChange={setViewport}
-                initialBounds={BEHBAHAN_VIEW_BOUNDS}
                 className="h-[55dvh]"
                 zoom={camera?.zoom ?? DEFAULT_MAP_ZOOM}
               />

@@ -20,6 +20,11 @@ export interface MapMarker {
   count?: number;
   /** Zoom at which this cluster splits into its children. */
   expansionZoom?: number;
+  /**
+   * Render an individual business as a compact dot. Used at high zoom where
+   * hundreds of full-size teardrops would make the map unreadable.
+   */
+  compact?: boolean;
 }
 
 export interface MapViewport {
@@ -69,16 +74,27 @@ function markerIcon(
 }
 
 function clusterIcon(L: Leaflet, count: number) {
-  const size = count >= 100 ? 56 : count >= 10 ? 46 : 38;
-  const label = count.toLocaleString("fa-IR", { useGrouping: false });
+  // Keep bubbles below the 64 px cluster radius so two neighbouring groups
+  // never paint over each other.
+  const size = count >= 1000 ? 44 : count >= 100 ? 38 : count >= 10 ? 32 : 28;
+  const fontSize = count >= 1000 ? 13 : count >= 100 ? 12 : 11;
+  const label = count.toLocaleString("fa-IR");
   return L.divIcon({
     className: "",
-    html: `<span class="nomax-map-cluster" style="width:${size}px;height:${size}px;font-size:${
-      count >= 100 ? 12 : 13
-    }px">${label}</span>`,
+    html: `<span class="nomax-map-cluster" style="width:${size}px;height:${size}px;font-size:${fontSize}px">${label}</span>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     popupAnchor: [0, -size / 2],
+  });
+}
+
+function dotIcon(L: Leaflet, color: string) {
+  return L.divIcon({
+    className: "",
+    html: `<span class="nomax-map-dot" style="background:${color}"></span>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -12],
   });
 }
 
@@ -124,6 +140,7 @@ export function NeshanMap({
   const markerClickRef = useRef(onMarkerClick);
   const pickerMoveRef = useRef(onPickerMove);
   const viewportRef = useRef(onViewportChange);
+  const viewportFrame = useRef(0);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -138,7 +155,9 @@ export function NeshanMap({
     let cancelled = false;
 
     if (!key) {
-      setError("کلید نقشه تنظیم نشده است. مقدار VITE_NESHAN_MAP_KEY را در محیط تنظیم کنید.");
+      setError(
+        "کلید نقشه در بسته برنامه نیست. VITE_NESHAN_MAP_KEY را تنظیم و برنامه را دوباره بسازید (Docker: docker compose up -d --build web).",
+      );
       return;
     }
 
@@ -174,17 +193,25 @@ export function NeshanMap({
         }
 
         const emitViewport = () => {
-          const bounds = map.getBounds();
-          const current = map.getCenter();
-          viewportRef.current?.({
-            zoom: Math.round(map.getZoom()),
-            center: { lat: current.lat, lng: current.lng },
-            bbox: {
-              west: bounds.getWest(),
-              south: bounds.getSouth(),
-              east: bounds.getEast(),
-              north: bounds.getNorth(),
-            },
+          if (viewportFrame.current) return;
+          // moveend and zoomend usually fire together; coalescing them into one
+          // frame keeps the cluster index from being queried twice per gesture.
+          viewportFrame.current = window.requestAnimationFrame(() => {
+            viewportFrame.current = 0;
+            const bounds = map.getBounds();
+            const current = map.getCenter();
+            viewportRef.current?.({
+              // Keep the fractional zoom: clustering floors it, but click-to-
+              // expand needs to know how far the user has actually zoomed.
+              zoom: map.getZoom(),
+              center: { lat: current.lat, lng: current.lng },
+              bbox: {
+                west: bounds.getWest(),
+                south: bounds.getSouth(),
+                east: bounds.getEast(),
+                north: bounds.getNorth(),
+              },
+            });
           });
         };
         map.on("moveend", emitViewport);
@@ -199,6 +226,10 @@ export function NeshanMap({
 
     return () => {
       cancelled = true;
+      if (viewportFrame.current) {
+        window.cancelAnimationFrame(viewportFrame.current);
+        viewportFrame.current = 0;
+      }
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -246,16 +277,15 @@ export function NeshanMap({
     layer.clearLayers();
 
     for (const marker of markers) {
+      const color = marker.color ?? "#12b886";
+      const icon =
+        marker.count !== undefined
+          ? clusterIcon(L, marker.count)
+          : marker.compact
+            ? dotIcon(L, color)
+            : markerIcon(L, color, marker.offsetX, marker.offsetY);
       const instance = L.marker([marker.lat, marker.lng], {
-        icon:
-          marker.count !== undefined
-            ? clusterIcon(L, marker.count)
-            : markerIcon(
-                L,
-                marker.color ?? "#12b886",
-                marker.offsetX,
-                marker.offsetY,
-              ),
+        icon,
         title: marker.title ?? "",
         zIndexOffset: marker.count !== undefined ? 500 : marker.zIndexOffset ?? 0,
       });
