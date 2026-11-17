@@ -1,5 +1,9 @@
+from datetime import datetime, timedelta, timezone
+
+import jwt
 import pytest
 
+from app.core.config import settings
 from app.core.security import create_access_token
 
 
@@ -62,6 +66,41 @@ async def test_refresh_rotation_and_logout(client, fake_redis):
 
     logout = await client.post("/api/v1/auth/logout", json={"refresh": new_refresh})
     assert logout.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_lifetime_is_long_and_sliding(client):
+    request = await client.post("/api/v1/auth/otp/request", json={"phone": "09120002222"})
+    dev_otp = request.json()["data"]["dev_otp"]
+    verify = await client.post(
+        "/api/v1/auth/otp/verify", json={"phone": "09120002222", "code": dev_otp}
+    )
+    token = verify.json()["data"]["refresh"]
+
+    payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+    assert payload["exp"] - payload["iat"] == settings.JWT_REFRESH_TTL_DAYS * 86400
+    assert payload["exp"] - int(datetime.now(timezone.utc).timestamp()) > 300 * 86400
+
+
+@pytest.mark.asyncio
+async def test_expired_refresh_token_is_rejected(client):
+    now = datetime.now(timezone.utc)
+    expired = jwt.encode(
+        {
+            "sub": "00000000-0000-0000-0000-000000000000",
+            "role": "customer",
+            "fam": "fam",
+            "jti": "jti",
+            "typ": "refresh",
+            "iat": int((now - timedelta(days=400)).timestamp()),
+            "exp": int((now - timedelta(days=1)).timestamp()),
+        },
+        settings.JWT_SECRET,
+        algorithm="HS256",
+    )
+    response = await client.post("/api/v1/auth/refresh", json={"refresh": expired})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "token_invalid"
 
 
 @pytest.mark.asyncio

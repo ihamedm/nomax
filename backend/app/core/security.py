@@ -102,7 +102,9 @@ def create_refresh_token(user_id, role: str, family_id: str | None = None) -> tu
         # Needed to revoke sessions issued before an admin force-logout.
         "iat": int(now.timestamp()),
     }
-    token = jwt.encode(claims, settings.JWT_SECRET, algorithm="HS256")
+    # Rotation hands out a fresh token on every refresh, so the expiry below is
+    # a sliding window: an active user stays signed in.
+    token = _encode_jwt(claims, timedelta(days=settings.JWT_REFRESH_TTL_DAYS))
     return token, jti, family_id
 
 

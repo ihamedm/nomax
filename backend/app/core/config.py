@@ -28,8 +28,11 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     JWT_SECRET: str = "nomax-local-dev-secret-change-me-please-0123456789abcdef"
+    # Access tokens are short-lived and refreshed silently. The refresh token
+    # (rotated on every refresh) is what sets the session lifetime, so this is
+    # a sliding one-year window for active users.
     JWT_ACCESS_TTL_MINUTES: int = 15
-    JWT_REFRESH_TTL_DAYS: int = 30
+    JWT_REFRESH_TTL_DAYS: int = 365
 
     OTP_TTL_SECONDS: int = 120
     # 0 disables request throttling; development overrides set this to 0.
