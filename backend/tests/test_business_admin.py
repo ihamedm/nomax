@@ -400,6 +400,33 @@ async def test_permanent_business_delete_blocked_by_relations(client, db_session
     assert purged.status_code == 200
 
 
+async def test_admin_list_hides_archived_unless_filtered(client, db_session, create_user):
+    owner, active = await _setup(db_session, create_user)
+    archived = Business(
+        owner_id=owner.id,
+        category_id=active.category_id,
+        name="بایگانی",
+        slug="biz-archived",
+        address="بهبهان",
+        status=BusinessStatus.ARCHIVED,
+    )
+    db_session.add(archived)
+    await db_session.commit()
+    admin = await create_user("09140000301", UserRole.ADMIN, permissions=["business.read"])
+
+    normal = await client.get("/api/v1/admin/businesses", headers=auth(admin))
+    assert normal.status_code == 200
+    ids = {item["id"] for item in normal.json()["data"]["items"]}
+    assert str(active.id) in ids
+    assert str(archived.id) not in ids
+
+    filtered = await client.get(
+        "/api/v1/admin/businesses?status=archived", headers=auth(admin)
+    )
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["data"]["items"]] == [str(archived.id)]
+
+
 async def test_admin_can_edit_business_owner(client, db_session, create_user):
     owner, _ = await _setup(db_session, create_user)
     admin = await create_user(

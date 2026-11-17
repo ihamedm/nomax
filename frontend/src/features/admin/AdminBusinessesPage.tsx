@@ -16,7 +16,7 @@ import { AdminModal } from "@/features/admin/AdminModal";
 import { AdminBusinessWizard, type AdminBusinessDetail } from "@/features/admin/AdminBusinessWizard";
 import { DataTable, type DataColumn } from "@/features/admin/data-table";
 
-type BusinessStatus = "pending" | "approved" | "rejected";
+type BusinessStatus = "pending" | "approved" | "rejected" | "archived";
 
 interface Owner {
   id: string;
@@ -71,6 +71,7 @@ const FILTERS: Array<{ label: string; value: string }> = [
   { label: "در انتظار تأیید", value: "pending" },
   { label: "تأییدشده", value: "approved" },
   { label: "ردشده", value: "rejected" },
+  { label: "بایگانی", value: "archived" },
   { label: "سبد حذف‌شده‌ها", value: "trash" },
 ];
 
@@ -78,6 +79,7 @@ const STATUS_META: Record<BusinessStatus, { label: string; className: string }> 
   pending: { label: "در انتظار", className: "bg-amber-50 text-amber-700" },
   approved: { label: "تأییدشده", className: "bg-emerald-50 text-emerald-700" },
   rejected: { label: "ردشده", className: "bg-rose-50 text-rose-700" },
+  archived: { label: "بایگانی‌شده", className: "bg-slate-100 text-slate-600" },
 };
 
 function BlueTick() {

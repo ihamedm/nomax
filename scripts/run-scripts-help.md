@@ -11,9 +11,11 @@ Run these commands from the repo root on the VPS.
 The compose project is `nomax-prod`, so target the service by name (`api`)
 rather than a container name.
 
-### Set an owner's businesses to pending
+### Archive an owner's businesses
 
-Owner phone defaults to `09123456789`; override with `--phone`.
+Owner phone defaults to `09123456789`; override with `--phone`. Archived
+businesses are hidden from public listings and from the admin list unless the
+`بایگانی` filter is selected.
 
 ```bash
 # 1. Copy the script into the running API container
@@ -23,7 +25,7 @@ docker compose -f docker-compose.prod.yml cp scripts/set_owner_businesses_pendin
 docker compose -f docker-compose.prod.yml exec api \
   python /tmp/set_owner_businesses_pending.py
 
-# 3. Apply: set all of that owner's businesses to pending
+# 3. Apply: archive all of that owner's businesses
 docker compose -f docker-compose.prod.yml exec api \
   python /tmp/set_owner_businesses_pending.py --yes
 
@@ -32,8 +34,8 @@ docker compose -f docker-compose.prod.yml exec api \
   python /tmp/set_owner_businesses_pending.py --phone 09120000000 --yes
 ```
 
-Approved businesses become invisible on the public site until an admin
-approves them again.
+To bring an archived business back, set its status to pending or approved
+from the admin edit form (or use the archived filter in the admin list).
 
 ### Clear all business descriptions
 

@@ -23,6 +23,9 @@ class BusinessStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    # Hidden from public listings and from the admin list unless explicitly
+    # filtered; see list_admin_businesses.
+    ARCHIVED = "archived"
 
 
 class Business(Base):

@@ -654,7 +654,7 @@ async def update_business_status(
     if business is None:
         raise AppError("not_found", "business_not_found", 404)
     status = payload.get("status")
-    if status not in ("approved", "rejected", "pending"):
+    if status not in ("approved", "rejected", "pending", "archived"):
         raise AppError("validation_error", "invalid_status", 422)
     before = {
         "status": business.status.value if hasattr(business.status, "value") else str(business.status),

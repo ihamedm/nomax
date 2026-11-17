@@ -240,13 +240,16 @@ async def list_admin_businesses(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     del actor
-    from app.models.business import Business
+    from app.models.business import Business, BusinessStatus
 
     page = max(1, page)
     per_page = min(100, max(1, per_page))
     conditions = [Business.deleted_at.is_not(None) if trash else Business.deleted_at.is_(None)]
     if status:
         conditions.append(Business.status == status)
+    else:
+        # Archived rows only appear when the archived filter is selected.
+        conditions.append(Business.status != BusinessStatus.ARCHIVED)
     if category_id:
         conditions.append(Business.category_id == category_id)
     if owner_id:

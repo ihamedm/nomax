@@ -82,7 +82,7 @@ export interface BusinessGeo {
 
 export type BusinessSort = "nearest" | "top" | "newest" | "urgent" | "visited";
 
-export type BusinessStatus = "pending" | "approved" | "rejected";
+export type BusinessStatus = "pending" | "approved" | "rejected" | "archived";
 
 export interface BusinessListItem {
   id: string;

@@ -14,6 +14,7 @@ const STATUS_META: Record<
   approved: { label: "تأییدشده", tone: "brand" },
   pending: { label: "در انتظار تأیید", tone: "amber" },
   rejected: { label: "ردشده", tone: "rose" },
+  archived: { label: "بایگانی‌شده", tone: "slate" },
 };
 
 export default function MeBusinessesPage() {

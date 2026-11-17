@@ -1,13 +1,13 @@
-"""Set every business of one owner back to pending (one-off maintenance).
+"""Archive every business of one owner (one-off maintenance).
 
 Usage (inside the API container):
 
     python /tmp/set_owner_businesses_pending.py           # dry run: count only
-    python /tmp/set_owner_businesses_pending.py --yes     # actually set pending
+    python /tmp/set_owner_businesses_pending.py --yes     # actually archive
 
-Looks the owner up by phone (default 09123456789) and updates all of their
-businesses, soft-deleted rows included. Resetting to pending clears
-``rejection_reason`` and ``pending_changes`` so the rows are consistent.
+Looks the owner up by phone (default 09123456789) and archives all of their
+businesses, soft-deleted rows included. Archived rows are hidden from public
+listings and from the admin list unless the archived filter is selected.
 """
 
 import argparse
@@ -22,7 +22,7 @@ from app.models.user import User
 DEFAULT_PHONE = "09123456789"
 
 
-async def set_pending(phone: str, apply: bool) -> None:
+async def archive(phone: str, apply: bool) -> None:
     async with AsyncSessionLocal() as session:
         owner_id = (
             await session.execute(sa.select(User.id).where(User.phone == phone))
@@ -40,29 +40,29 @@ async def set_pending(phone: str, apply: bool) -> None:
         ).scalar_one()
         print(f"owner {owner_id}: {total} businesses")
         if not apply:
-            print("dry run: nothing changed (pass --yes to set pending)")
+            print("dry run: nothing changed (pass --yes to archive)")
             return
 
         result = await session.execute(
             sa.update(Business)
             .where(
                 Business.owner_id == owner_id,
-                Business.status != BusinessStatus.PENDING,
+                Business.status != BusinessStatus.ARCHIVED,
             )
             .values(
-                status=BusinessStatus.PENDING,
+                status=BusinessStatus.ARCHIVED,
                 rejection_reason=None,
                 pending_changes=None,
             )
         )
         await session.commit()
-        print(f"set {result.rowcount} businesses to pending")
+        print(f"archived {result.rowcount} businesses")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="set-owner-businesses-pending",
-        description="Set every business of one owner to pending.",
+        prog="archive-owner-businesses",
+        description="Archive every business of one owner.",
     )
     parser.add_argument("--phone", default=DEFAULT_PHONE, help=f"owner phone (default {DEFAULT_PHONE})")
     parser.add_argument(
@@ -71,7 +71,7 @@ def main() -> None:
         help="actually write; without it the script only reports the row count",
     )
     args = parser.parse_args()
-    asyncio.run(set_pending(args.phone, args.yes))
+    asyncio.run(archive(args.phone, args.yes))
 
 
 if __name__ == "__main__":

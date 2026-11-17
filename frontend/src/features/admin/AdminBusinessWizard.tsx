@@ -19,7 +19,7 @@ import { MAX_PHOTOS } from "@/features/business/create/types";
 
 import { AdminModal } from "./AdminModal";
 
-type BusinessStatus = "pending" | "approved" | "rejected";
+type BusinessStatus = "pending" | "approved" | "rejected" | "archived";
 
 interface OwnerOption {
   id: string;
@@ -973,6 +973,7 @@ export function AdminBusinessWizard({
                   <option value="pending">در انتظار تأیید</option>
                   <option value="approved">تأییدشده</option>
                   <option value="rejected">ردشده</option>
+                  <option value="archived">بایگانی‌شده</option>
                 </select>
               </Field>
               <label className="flex items-center gap-2 self-end rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
