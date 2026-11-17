@@ -1,7 +1,7 @@
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import sqlalchemy as sa
@@ -25,6 +25,7 @@ from app.core.permissions import has_permission
 from app.db.session import get_db
 from app.models.bookmark import Bookmark
 from app.models.business import Business, BusinessImage, BusinessStatus
+from app.models.analytics import QuoteDelivery
 from app.models.business_like import BusinessLike
 from app.models.category import Category, Subcategory
 from app.models.admin import AuditLog
@@ -1581,6 +1582,117 @@ async def business_analytics(
         "is_verified": business.is_verified,
         "is_license_verified": business.is_license_verified,
     }}
+
+
+@me_router.get("/me/analytics")
+async def my_analytics(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Owner-wide summary for the dashboard analytics page.
+
+    Only a lifetime view counter exists, so the 30-day trend covers likes and
+    quote requests, which carry their own timestamps.
+    """
+    business_ids = list(
+        (
+            await session.execute(
+                sa.select(Business.id).where(
+                    Business.owner_id == user.id, Business.deleted_at.is_(None)
+                )
+            )
+        ).scalars()
+    )
+    if not business_ids:
+        return {
+            "data": {
+                "business_count": 0,
+                "view_count": 0,
+                "like_count": 0,
+                "rating_avg": 0.0,
+                "rating_count": 0,
+                "quote_requests": 0,
+                "quote_responded": 0,
+                "series": [],
+            }
+        }
+
+    views, likes, rating_count, weighted = (
+        await session.execute(
+            sa.select(
+                sa.func.coalesce(sa.func.sum(Business.view_count), 0),
+                sa.func.coalesce(sa.func.sum(Business.like_count), 0),
+                sa.func.coalesce(sa.func.sum(Business.rating_count), 0),
+                sa.func.coalesce(
+                    sa.func.sum(Business.rating_avg * Business.rating_count), 0
+                ),
+            ).where(Business.id.in_(business_ids))
+        )
+    ).one()
+    ratings = int(rating_count or 0)
+
+    quote_requests, quote_responded = (
+        await session.execute(
+            sa.select(
+                sa.func.count(QuoteDelivery.id),
+                sa.func.count(QuoteDelivery.responded_at),
+            ).where(QuoteDelivery.business_id.in_(business_ids))
+        )
+    ).one()
+
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=29)
+    since = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
+
+    def per_day(values: list[datetime]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for value in values:
+            key = value.date().isoformat()
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    like_times = (
+        await session.execute(
+            sa.select(BusinessLike.created_at).where(
+                BusinessLike.business_id.in_(business_ids),
+                BusinessLike.created_at >= since,
+            )
+        )
+    ).scalars().all()
+    quote_times = (
+        await session.execute(
+            sa.select(QuoteDelivery.sent_at).where(
+                QuoteDelivery.business_id.in_(business_ids),
+                QuoteDelivery.sent_at >= since,
+            )
+        )
+    ).scalars().all()
+    like_days = per_day(like_times)
+    quote_days = per_day(quote_times)
+
+    series = []
+    for offset in range(30):
+        key = (start + timedelta(days=offset)).isoformat()
+        series.append(
+            {
+                "date": key,
+                "likes": like_days.get(key, 0),
+                "quotes": quote_days.get(key, 0),
+            }
+        )
+
+    return {
+        "data": {
+            "business_count": len(business_ids),
+            "view_count": int(views or 0),
+            "like_count": int(likes or 0),
+            "rating_avg": round(float(weighted or 0) / ratings, 2) if ratings else 0.0,
+            "rating_count": ratings,
+            "quote_requests": int(quote_requests or 0),
+            "quote_responded": int(quote_responded or 0),
+            "series": series,
+        }
+    }
 
 
 @router.get("/{business_id}/qr")

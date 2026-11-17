@@ -9,9 +9,19 @@ interface BottomSheetProps {
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
+  /** Drop the extra gap under the footer so it sits on the viewport edge. */
+  flush?: boolean;
 }
 
-export function BottomSheet({ open, title, onClose, children, footer, className }: BottomSheetProps) {
+export function BottomSheet({
+  open,
+  title,
+  onClose,
+  children,
+  footer,
+  className,
+  flush = false,
+}: BottomSheetProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -39,7 +49,7 @@ export function BottomSheet({ open, title, onClose, children, footer, className 
       <div
         className={cn(
           "relative max-h-[88dvh] animate-sheet-in overflow-y-auto rounded-t-3xl bg-white shadow-sheet",
-          "safe-bottom",
+          !flush && "safe-bottom",
           className,
         )}
       >
@@ -56,7 +66,12 @@ export function BottomSheet({ open, title, onClose, children, footer, className 
         </div>
         <div className="px-5 pb-6 pt-1">{children}</div>
         {footer && (
-          <div className="sticky bottom-0 z-10 border-t border-slate-100 bg-white px-5 pb-3 pt-3">
+          <div
+            className={cn(
+              "sticky bottom-0 z-10 border-t border-slate-100 bg-white px-5 pt-3",
+              flush ? "pb-[env(safe-area-inset-bottom,0px)]" : "pb-3",
+            )}
+          >
             {footer}
           </div>
         )}

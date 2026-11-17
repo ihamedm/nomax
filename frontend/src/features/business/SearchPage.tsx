@@ -104,8 +104,7 @@ export function SearchPage() {
   const [locating, setLocating] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
-  const [draftCat, setDraftCat] = useState(catParam);
-  const [draftSubcat, setDraftSubcat] = useState(subcatParam);
+  const [draftRadius, setDraftRadius] = useState<number | null>(radius);
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -166,14 +165,6 @@ export function SearchPage() {
     { enabled: Boolean(selectedCategory) },
   );
   const activeSubcategories = activeSubcategoriesQuery.data?.items ?? [];
-
-  const draftCategory = categories.find((category) => category.slug === draftCat);
-  const sheetSubcategoriesQuery = useApi<{ items: Subcategory[] }>(
-    ["subcategories", draftCategory?.id],
-    `/categories/${draftCategory?.id}/subcategories`,
-    { enabled: Boolean(draftCategory) },
-  );
-  const sheetSubcategories = sheetSubcategoriesQuery.data?.items ?? [];
 
   const searchQuery = useInfiniteQuery({
     queryKey: ["businesses", { q: qParam, cat: catParam, subcat: subcatParam, sort, radius, lat: location.lat, lng: location.lng }],
@@ -332,21 +323,21 @@ export function SearchPage() {
   }
 
   function openFilters() {
-    setDraftCat(catParam);
-    setDraftSubcat(subcatParam);
+    setDraftRadius(radius);
     setFilterOpen(true);
   }
 
   function applyFilters() {
-    updateParams({ cat: draftCat, subcat: draftSubcat });
+    updateParams({ radius: draftRadius === null ? null : String(draftRadius) });
     setFilterOpen(false);
   }
 
-  function clearFilters() {
-    setDraftCat("");
-    setDraftSubcat("");
-    updateParams({ cat: null, subcat: null });
+  function cancelFilters() {
     setFilterOpen(false);
+  }
+
+  function resetFilters() {
+    updateParams({ cat: null, subcat: null, radius: null });
   }
 
   async function locateMe() {
@@ -554,7 +545,7 @@ export function SearchPage() {
                   عبارت دیگری را امتحان کنید یا دسته‌بندی را تغییر دهید. محدودیت فاصله
                   به‌صورت پیش‌فرض غیرفعال است.
                 </p>
-                <Button size="sm" variant="outline" className="mt-4" onClick={clearFilters}>
+                <Button size="sm" variant="outline" className="mt-4" onClick={resetFilters}>
                   حذف فیلترها
                 </Button>
               </div>
@@ -595,95 +586,21 @@ export function SearchPage() {
 
       <BottomSheet
         open={filterOpen}
-        title="دسته‌بندی و فاصله"
+        title="فیلترها"
         onClose={() => setFilterOpen(false)}
+        flush
         footer={
-          <div className="flex gap-2">
+          <div className="flex gap-2 pb-3">
             <Button className="flex-1" onClick={applyFilters}>
               اعمال فیلتر
             </Button>
-            <Button variant="ghost" onClick={clearFilters}>
-              حذف همه
+            <Button variant="ghost" onClick={cancelFilters}>
+              لغو
             </Button>
           </div>
         }
       >
         <div className="space-y-5">
-          <div>
-            <p className="mb-2 text-xs font-bold text-slate-400">دسته‌بندی</p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setDraftCat("");
-                  setDraftSubcat("");
-                }}
-                className={cn(
-                  "rounded-xl border px-3 py-2 text-xs",
-                  draftCat === "" ? "border-brand-400 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600",
-                )}
-              >
-                همه دسته‌ها
-              </button>
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  onClick={() => {
-                    setDraftCat(category.slug);
-                    setDraftSubcat("");
-                  }}
-                  className={cn(
-                    "rounded-xl border px-3 py-2 text-right text-xs",
-                    draftCat === category.slug
-                      ? "border-brand-400 bg-brand-50 text-brand-700"
-                      : "border-slate-200 text-slate-600",
-                  )}
-                >
-                  <span aria-hidden className="ml-1">
-                    {category.icon}
-                  </span>
-                  {category.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {draftCat && sheetSubcategories.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-bold text-slate-400">زیردسته</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDraftSubcat("")}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-[11px]",
-                    draftSubcat === ""
-                      ? "border-brand-400 bg-brand-50 text-brand-700"
-                      : "border-slate-200 text-slate-600",
-                  )}
-                >
-                  همه زیردسته‌ها
-                </button>
-                {sheetSubcategories.map((subcategory) => (
-                  <button
-                    key={subcategory.id}
-                    type="button"
-                    onClick={() => setDraftSubcat(subcategory.slug)}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-[11px]",
-                      draftSubcat === subcategory.slug
-                        ? "border-brand-400 bg-brand-50 text-brand-700"
-                        : "border-slate-200 text-slate-600",
-                    )}
-                  >
-                    {subcategory.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div>
             <p className="mb-2 text-xs font-bold text-slate-400">حداکثر فاصله</p>
             <p className="mb-2 text-[11px] leading-5 text-slate-500">
@@ -693,10 +610,10 @@ export function SearchPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => updateParams({ radius: null })}
+                onClick={() => setDraftRadius(null)}
                 className={cn(
                   "rounded-full border px-3 py-1.5 text-[11px]",
-                  radius === null
+                  draftRadius === null
                     ? "border-brand-400 bg-brand-50 text-brand-700"
                     : "border-slate-200 text-slate-600",
                 )}
@@ -707,10 +624,10 @@ export function SearchPage() {
                 <button
                   key={option}
                   type="button"
-                  onClick={() => updateParams({ radius: String(option) })}
+                  onClick={() => setDraftRadius(option)}
                   className={cn(
                     "rounded-full border px-3 py-1.5 text-[11px]",
-                    radius === option
+                    draftRadius === option
                       ? "border-brand-400 bg-brand-50 text-brand-700"
                       : "border-slate-200 text-slate-600",
                   )}

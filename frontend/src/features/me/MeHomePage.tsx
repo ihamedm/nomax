@@ -9,7 +9,6 @@ import { useOwnerReviewBadge } from "@/features/reviews/useOwnerReviewBadge";
 import { isActiveQuote } from "@/features/quote/quote-utils";
 import type { IncomingResponse, Quote } from "@/features/quote/types";
 import { fa, formatPhone, ROLE_LABELS } from "@/lib/format";
-import { formatJalali } from "@/lib/jalali";
 import { useApi } from "@/lib/query";
 import { isAdmin, useAuth } from "@/stores/auth";
 import type { BusinessListItem } from "@/types";
@@ -227,91 +226,69 @@ export default function MeHomePage() {
 
   return (
     <section className="mx-auto w-full max-w-4xl py-1 sm:py-3">
-      <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_70px_-50px_rgba(15,23,42,0.55)] md:grid md:grid-cols-[290px_minmax(0,1fr)]">
-        <aside className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 p-5 text-white md:p-6">
-          <span
-            aria-hidden
-            className="absolute -right-14 -top-20 h-52 w-52 rounded-full bg-brand-400/20 blur-3xl"
-          />
-          <span
-            aria-hidden
-            className="absolute -bottom-24 -left-16 h-48 w-48 rounded-full bg-emerald-300/10 blur-3xl"
-          />
-
-          <div className="relative flex h-full flex-col">
-            <div className="flex items-center gap-3.5">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-xl font-black text-brand-100 backdrop-blur">
-                {initial}
-              </span>
-              <div className="min-w-0">
-                <p className="text-[10px] font-medium text-white/45">حساب من</p>
-                <h1 className="mt-0.5 truncate text-xl font-black leading-7">{displayName}</h1>
-                <p dir="ltr" className="mt-0.5 text-[11px] font-medium text-white/55">
-                  {formatPhone(user.phone)}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1 text-[10px] font-medium text-white/75">
-                {ROLE_LABELS[user.role]}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1 text-[10px] font-medium text-white/75">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    user.is_verified ? "bg-emerald-400" : "bg-amber-300"
-                  }`}
-                />
-                {user.is_verified ? "حساب تأییدشده" : "حساب تأییدنشده"}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1 text-[10px] font-medium text-white/75">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    user.is_phone_verified ? "bg-emerald-400" : "bg-amber-300"
-                  }`}
-                />
-                {user.is_phone_verified ? "شماره تأییدشده" : "شماره تأییدنشده"}
-              </span>
-              {isAdmin(user) && (
-                <Link
-                  to="/admin"
-                  className="inline-flex items-center gap-1 rounded-full border border-brand-300/25 bg-brand-400/15 px-2.5 py-1 text-[10px] font-bold text-brand-100 transition hover:bg-brand-400/25"
-                >
-                  <AdminIcon className="h-3 w-3" />
-                  پنل مدیریت
-                </Link>
-              )}
-            </div>
-
-            <dl className="mt-5 grid grid-cols-3 divide-x divide-x-reverse divide-white/10 border-y border-white/10 py-4">
-              <div className="px-1 text-center">
-                <dt className="text-[9px] text-white/40">کسب‌وکار</dt>
-                <dd className="mt-1 text-lg font-black text-white">{countLabel(businessCount)}</dd>
-              </div>
-              <div className="px-1 text-center">
-                <dt className="text-[9px] text-white/40">درخواست فعال</dt>
-                <dd className="mt-1 text-lg font-black text-white">
-                  {countLabel(activeQuoteCount)}
-                </dd>
-              </div>
-              <div className="px-1 text-center">
-                <dt className="text-[9px] text-white/40">ذخیره‌شده</dt>
-                <dd className="mt-1 text-lg font-black text-white">{countLabel(savedCount)}</dd>
-              </div>
-            </dl>
-
-            {user.created_at && (
-              <p className="mt-3 text-[10px] leading-5 text-white/30">
-                عضو نومکس از {formatJalali(user.created_at)}
-              </p>
-            )}
-
-            <div className="mt-4 border-t border-white/10 pt-4 md:mt-auto">
-              <p className="text-[10px] leading-5 text-white/35">
-                بازار محلی کسب‌وکارها و خدمات بهبهان
+      <div className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-[0_24px_70px_-50px_rgba(15,23,42,0.55)] md:grid md:grid-cols-[270px_minmax(0,1fr)]">
+        <aside className="border-b border-slate-100 bg-brand-50/50 p-4 md:border-b-0 md:border-l md:p-5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-base font-black text-brand-700 ring-1 ring-brand-100">
+              {initial}
+            </span>
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-black text-slate-900">{displayName}</h1>
+              <p dir="ltr" className="mt-0.5 text-right text-[11px] text-slate-400">
+                {formatPhone(user.phone)}
               </p>
             </div>
           </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-white px-2 py-0.5 text-[9px] font-bold text-slate-500 ring-1 ring-slate-200/70">
+              {ROLE_LABELS[user.role]}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-0.5 text-[9px] text-slate-500 ring-1 ring-slate-200/70">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  user.is_verified ? "bg-brand-500" : "bg-amber-400"
+                }`}
+              />
+              {user.is_verified ? "حساب تأییدشده" : "حساب تأییدنشده"}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-0.5 text-[9px] text-slate-500 ring-1 ring-slate-200/70">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  user.is_phone_verified ? "bg-brand-500" : "bg-amber-400"
+                }`}
+              />
+              {user.is_phone_verified ? "شماره تأییدشده" : "شماره تأییدنشده"}
+            </span>
+            {isAdmin(user) && (
+              <Link
+                to="/admin"
+                className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-2 py-0.5 text-[9px] font-bold text-white transition hover:bg-brand-700"
+              >
+                <AdminIcon className="h-3 w-3" />
+                پنل مدیریت
+              </Link>
+            )}
+          </div>
+
+          <dl className="mt-4 grid grid-cols-3 divide-x divide-x-reverse divide-slate-200/60 rounded-xl bg-white py-2 ring-1 ring-slate-200/60">
+            <div className="px-1 text-center">
+              <dt className="text-[9px] text-slate-400">کسب‌وکار</dt>
+              <dd className="mt-0.5 text-sm font-black text-slate-900">
+                {countLabel(businessCount)}
+              </dd>
+            </div>
+            <div className="px-1 text-center">
+              <dt className="text-[9px] text-slate-400">درخواست فعال</dt>
+              <dd className="mt-0.5 text-sm font-black text-slate-900">
+                {countLabel(activeQuoteCount)}
+              </dd>
+            </div>
+            <div className="px-1 text-center">
+              <dt className="text-[9px] text-slate-400">ذخیره‌شده</dt>
+              <dd className="mt-0.5 text-sm font-black text-slate-900">{countLabel(savedCount)}</dd>
+            </div>
+          </dl>
         </aside>
 
         <div className="min-w-0 p-2 sm:p-3">
@@ -346,7 +323,7 @@ export default function MeHomePage() {
                 <DashboardRow
                   to="/me/analytics"
                   title="آمار کسب‌وکار"
-                  description="امتیاز، نظرات تأییدشده و وضعیت مجوز"
+                  description="بازدید، پسندها و استعلام‌های کسب‌وکارهای شما"
                   icon={<ChartIcon className="h-[18px] w-[18px]" />}
                 />
               )}
