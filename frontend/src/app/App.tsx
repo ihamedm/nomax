@@ -40,6 +40,7 @@ import AdminFilesPage from "@/features/admin/AdminFilesPage";
 import AdminNotificationsPage from "@/features/admin/AdminNotificationsPage";
 import AdminQuotesPage from "@/features/admin/AdminQuotesPage";
 import { HomePage } from "@/features/home/HomePage";
+import { useSeo } from "@/lib/seo";
 import { useAuth } from "@/stores/auth";
 
 const AdminAnalyticsPage = lazy(
@@ -74,6 +75,13 @@ function SessionBootstrap() {
 }
 
 function NotFoundPage() {
+  useSeo({
+    title: "صفحه پیدا نشد | نومکس",
+    description: "این نشانی در نومکس وجود ندارد یا حذف شده است.",
+    path: window.location.pathname,
+    noindex: true,
+  });
+
   return (
     <main className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-slate-50 px-6 text-center">
       <p className="text-5xl font-black text-brand-600">۴۰۴</p>

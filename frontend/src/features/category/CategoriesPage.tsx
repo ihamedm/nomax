@@ -3,10 +3,18 @@ import { Link } from "react-router-dom";
 import { Spinner } from "@/components/ui/button";
 import { errorMessage } from "@/lib/api";
 import { useApi } from "@/lib/query";
+import { useSeo } from "@/lib/seo";
 import type { Category } from "@/types";
 
 export default function CategoriesPage() {
   const { data, error, isLoading } = useApi<{ items: Category[] }>(["categories"], "/categories");
+
+  useSeo({
+    title: "دسته‌بندی کسب‌وکارها و خدمات بهبهان | نومکس",
+    description:
+      "فهرست دسته‌بندی‌های نومکس: تعمیرگاه، رستوران، آرایشگاه، پزشک، فروشگاه و دیگر خدمات محلی بهبهان.",
+    path: "/categories",
+  });
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-4">

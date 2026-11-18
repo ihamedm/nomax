@@ -22,6 +22,7 @@ from app.services.inapp_notifications import (
 from app.services import dashboard as dashboard_service
 from app.services import map_cache
 from app.services.otp_service import OtpService
+from app.services.slug import unique_business_slug
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 dev_router = APIRouter(prefix="/admin/dev", tags=["admin-dev"])
@@ -360,13 +361,13 @@ async def create_admin_business(
     if status_value not in [item.value for item in BusinessStatus]:
         raise AppError("validation_error", "invalid_status", 422)
 
-    slug_base = "".join(ch if ch.isalnum() else "-" for ch in name.lower()).strip("-") or "business"
+    slug = await unique_business_slug(session, name)
     business = Business(
         owner_id=owner.id,
         category_id=category.id,
         subcategory_id=subcategory.id if subcategory is not None else None,
         name=name,
-        slug=f"{slug_base}-{uuid.uuid4().hex[:6]}",
+        slug=slug,
         short_description=(payload.get("short_description") or "")[:120],
         description=payload.get("description"),
         phone_business=phone_business,

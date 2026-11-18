@@ -27,6 +27,7 @@ from app.api.v1.geo import router as geo_router
 from app.api.v1.health import router as health_router
 from app.api.v1.map import router as map_router
 from app.api.v1.settings import router as settings_router
+from app.api.v1.seo import router as seo_router
 from app.api.v1.cms import router as cms_router
 from app.api.v1.admin_data import router as admin_data_router
 from app.api.v1.admin_backups import router as admin_backups_router
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
     if settings.APP_ENV != "production" and settings.DEV_OTP_ENABLED:
         application.include_router(dev_router, prefix="/api/v1")
     application.include_router(health_router)
+    application.include_router(seo_router)
 
     # Local development fallback: serve files written under UPLOAD_DIR. In
     # production with ArvanCloud S3 these URLs are not used.

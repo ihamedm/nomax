@@ -676,3 +676,21 @@ async def test_edit_business_replaces_subcategory_set(client, db_session, create
         headers=auth(owner),
     )
     assert [item["id"] for item in untouched.json()["data"]["subcategories"]] == [third.id]
+
+
+async def test_business_slug_is_transliterated_and_deduplicated(client, db_session, create_user):
+    first_owner = await create_user("09160000031", UserRole.OWNER)
+    second_owner = await create_user("09160000032", UserRole.OWNER)
+    category, _ = await _catalog(db_session)
+    body = {"name": "کافه ستاره", "category_id": category.id, "address": "بهبهان"}
+
+    first = await client.post("/api/v1/businesses", json=body, headers=auth(first_owner))
+    second = await client.post("/api/v1/businesses", json=body, headers=auth(second_owner))
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["data"]["slug"] == "kafe-stare"
+    assert second.json()["data"]["slug"] == "kafe-stare-2"
+
+    detail = await client.get("/api/v1/businesses/kafe-stare-2", headers=auth(second_owner))
+    assert detail.status_code == 200
+    assert detail.json()["data"]["slug"] == "kafe-stare-2"

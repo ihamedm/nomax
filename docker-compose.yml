@@ -49,6 +49,7 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: ${APP_ENV:-local}
+      SITE_URL: ${SITE_URL:-http://localhost:8080}
       DATABASE_URL: postgresql+asyncpg://nomax:secret@db:5432/nomax
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-nomax-local-dev-secret-change-me-please-0123456789abcdef}

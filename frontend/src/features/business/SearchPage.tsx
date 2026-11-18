@@ -13,6 +13,7 @@ import { cn } from "@/lib/cn";
 import { fa } from "@/lib/format";
 import { getCurrentPosition, geolocationNeedsPrompt } from "@/lib/geolocation";
 import { useApi } from "@/lib/query";
+import { useSeo } from "@/lib/seo";
 import { BEHBAHAN_CENTER, DEFAULT_MAP_ZOOM, useUi } from "@/stores/ui";
 import { BusinessCard } from "@/features/business/BusinessCard";
 import { BEHBAHAN_BOUNDS, INITIAL_MAP_VIEWPORT } from "@/features/map/city";
@@ -232,6 +233,27 @@ export function SearchPage() {
     activeSubcategories.find((subcategory) => subcategory.slug === subcatParam)?.name ?? subcatParam;
 
   const sortLabel = SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "";
+
+  useSeo({
+    title: qParam
+      ? `جستجوی «${qParam}» | نومکس`
+      : selectedCategory
+        ? `${selectedCategory.name} در بهبهان | نومکس`
+        : "جستجوی کسب‌وکارها و خدمات بهبهان | نومکس",
+    description: qParam
+      ? `نتایج جستجوی «${qParam}» میان کسب‌وکارهای بهبهان: آدرس، شماره تماس، امتیاز و نظرات کاربران.`
+      : selectedCategory
+        ? `${selectedCategory.name}های بهبهان؛ آدرس، شماره تماس، نقشه و نظرات کاربران در نومکس.`
+        : "کسب‌وکارها و خدمات محلی بهبهان را با نام، دسته‌بندی و موقعیت مکانی جستجو کنید.",
+    // Free-text results are thin, duplicated pages: canonicalise them to the
+    // plain listing and keep them out of the index. Category pages can rank.
+    path: qParam
+      ? "/search"
+      : selectedCategory
+        ? `/search?cat=${encodeURIComponent(selectedCategory.slug)}`
+        : "/search",
+    noindex: Boolean(qParam),
+  });
 
   const mapPoints = useMemo(
     () =>
@@ -494,6 +516,13 @@ export function SearchPage() {
       )}
 
       <section className="px-4 py-4">
+        <h1 className="mb-2 text-base font-black text-slate-900">
+          {qParam
+            ? `نتایج جستجو برای «${qParam}»`
+            : selectedCategory
+              ? `${selectedCategory.name} در بهبهان`
+              : "کسب‌وکارها و خدمات بهبهان"}
+        </h1>
         {view === "map" ? (
           <div className="space-y-3">
             <div className="relative">

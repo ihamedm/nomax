@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "local"
     DEBUG: bool = False
 
+    # Public origin used in robots.txt and sitemap.xml absolute URLs.
+    SITE_URL: str = "http://localhost:8080"
+
     # Each owner may register this many active businesses. The profile hides
     # the "new business" action once the limit is reached.
     MAX_BUSINESSES_PER_OWNER: int = 1

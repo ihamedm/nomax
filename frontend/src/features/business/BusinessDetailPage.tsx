@@ -10,6 +10,7 @@ import { RatingStars } from "@/components/ui/stars";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { DEFAULT_DESCRIPTION, absoluteUrl, useSeo } from "@/lib/seo";
 import { fa, formatPhone, formatRating } from "@/lib/format";
 import { formatJalali, formatJalaliDateTime, formatRelative } from "@/lib/jalali";
 import { useApi } from "@/lib/query";
@@ -170,6 +171,102 @@ function telHref(phone: string | null | undefined) {
 
 function maskPhone(phone: string) {
   return phone.length > 4 ? `${phone.slice(0, -4)}****` : "****";
+}
+
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function instagramUrl(value: string) {
+  return value.startsWith("http") ? value : `https://instagram.com/${value.replace(/^@/, "")}`;
+}
+
+/** schema.org graph for the public business page: LocalBusiness + breadcrumbs. */
+function businessSchema(business: BusinessDetail) {
+  const url = absoluteUrl(`/businesses/${encodeURIComponent(business.slug)}`);
+  const images = [
+    business.profile_image_url,
+    business.avatar_url,
+    ...(business.images ?? []).map((image) => image.url),
+  ]
+    .filter((src, index, all): src is string => Boolean(src) && all.indexOf(src) === index)
+    .map((src) => (src.startsWith("http") ? src : absoluteUrl(src)));
+
+  const reviews = business.reviews
+    .filter((review) => review.rating > 0)
+    .slice(0, 5)
+    .map((review) => ({
+      "@type": "Review",
+      author: { "@type": "Person", name: review.author_name || "کاربر نومکس" },
+      reviewRating: { "@type": "Rating", ratingValue: review.rating, bestRating: 5 },
+      reviewBody: review.text || undefined,
+      datePublished: review.created_at || undefined,
+    }));
+
+  const localBusiness = {
+    "@context": "https://schema.org",
+    "@type": "LocalBusiness",
+    "@id": `${url}#business`,
+    name: business.name,
+    url,
+    description: business.description || business.short_description || undefined,
+    telephone: business.phone_business || undefined,
+    image: images.length ? images : undefined,
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: business.address || undefined,
+      addressLocality: "بهبهان",
+      addressRegion: "خوزستان",
+      addressCountry: "IR",
+    },
+    areaServed: { "@type": "City", name: "بهبهان" },
+    geo: business.geo
+      ? { "@type": "GeoCoordinates", latitude: business.geo.lat, longitude: business.geo.lng }
+      : undefined,
+    sameAs: business.instagram ? [instagramUrl(business.instagram)] : undefined,
+    openingHoursSpecification: business.is_24h
+      ? [
+          {
+            "@type": "OpeningHoursSpecification",
+            dayOfWeek: WEEKDAYS,
+            opens: "00:00",
+            closes: "23:59",
+          },
+        ]
+      : undefined,
+    aggregateRating:
+      business.rating_count > 0
+        ? {
+            "@type": "AggregateRating",
+            ratingValue: business.rating_avg,
+            reviewCount: business.rating_count,
+            bestRating: 5,
+            worstRating: 1,
+          }
+        : undefined,
+    review: reviews.length ? reviews : undefined,
+  };
+
+  const crumbs: Record<string, unknown>[] = [
+    { "@type": "ListItem", position: 1, name: "نومکس", item: absoluteUrl("/") },
+  ];
+  if (business.category) {
+    crumbs.push({
+      "@type": "ListItem",
+      position: crumbs.length + 1,
+      name: business.category.name,
+      item: absoluteUrl(`/search?cat=${encodeURIComponent(business.category.slug)}`),
+    });
+  }
+  crumbs.push({
+    "@type": "ListItem",
+    position: crumbs.length + 1,
+    name: business.name,
+    item: url,
+  });
+
+  return [
+    localBusiness,
+    { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: crumbs },
+  ];
 }
 
 type LoginPrompt = "review" | "save" | "like" | "phone" | "instagram" | "claim";
@@ -411,6 +508,24 @@ export function BusinessDetailPage() {
       ? [{ url: business.profile_image_url, is_main: true, sort_order: 0 }]
       : [];
   }, [business]);
+
+  useSeo({
+    title: business
+      ? `${business.name} | ${business.category?.name ?? "کسب‌وکار"} در بهبهان | نومکس`
+      : "کسب‌وکار | نومکس",
+    description: business
+      ? (
+          business.description?.trim() ||
+          business.short_description?.trim() ||
+          DEFAULT_DESCRIPTION
+        ).slice(0, 160)
+      : DEFAULT_DESCRIPTION,
+    path: `/businesses/${encodeURIComponent(business?.slug ?? slug ?? "")}`,
+    image: photos[0]?.url ?? business?.profile_image_url ?? null,
+    // Pending/rejected pages are owner previews, not public content.
+    noindex: !business || business.status !== "approved",
+    jsonLd: business ? businessSchema(business) : [],
+  });
 
   const instagramHandle = business?.instagram?.replace(/^@/, "").replace(/[^A-Za-z0-9._]/g, "");
   const owner = business?.owner ?? null;

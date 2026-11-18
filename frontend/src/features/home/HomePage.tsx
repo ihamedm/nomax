@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { SearchIcon } from "@/components/ui/icons";
 import { errorMessage } from "@/lib/api";
 import { useApi } from "@/lib/query";
+import { DEFAULT_DESCRIPTION, absoluteUrl, useSeo } from "@/lib/seo";
 import { BusinessCard } from "@/features/business/BusinessCard";
 import type { BusinessListItem, Category } from "@/types";
 
@@ -106,6 +107,40 @@ export function HomePage() {
   const categories = categoriesQuery.data?.items ?? [];
   const ads = adsQuery.data?.items ?? [];
   const homeBanner = ads[0];
+
+  const siteUrl = absoluteUrl("/");
+  useSeo({
+    title: "نومکس | بازار کسب‌وکارها و خدمات محلی بهبهان",
+    description: DEFAULT_DESCRIPTION,
+    path: "/",
+    jsonLd: [
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": `${siteUrl}#website`,
+        name: "نومکس",
+        url: siteUrl,
+        inLanguage: "fa-IR",
+        potentialAction: {
+          "@type": "SearchAction",
+          target: {
+            "@type": "EntryPoint",
+            urlTemplate: `${siteUrl}search?q={search_term_string}`,
+          },
+          "query-input": "required name=search_term_string",
+        },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "@id": `${siteUrl}#organization`,
+        name: "نومکس",
+        url: siteUrl,
+        logo: absoluteUrl("/favicon.svg"),
+        areaServed: { "@type": "City", name: "بهبهان" },
+      },
+    ],
+  });
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();

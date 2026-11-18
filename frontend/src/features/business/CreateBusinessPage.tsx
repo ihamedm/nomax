@@ -20,7 +20,6 @@ import { useAuth } from "@/stores/auth";
 import type { BusinessListItem, Category, Subcategory } from "@/types";
 
 import { CategoryPickerSheet } from "./create/CategoryPickerSheet";
-import { CategorySuggestionCard } from "./create/CategorySuggestionCard";
 import { MapPickerSheet } from "./create/MapPickerSheet";
 import { RulesSheet } from "./create/RulesSheet";
 import { useCategorySuggestion } from "./create/useCategorySuggestion";
@@ -118,6 +117,24 @@ function CheckIcon({ className }: { className?: string }) {
       aria-hidden
     >
       <path d="M5 12l5 5L20 7" />
+    </svg>
+  );
+}
+
+function SparkIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn("h-4 w-4", className)}
+      aria-hidden
+    >
+      <path d="M12 3l1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1L6.5 8.5l4.1-1.4L12 3Z" />
+      <path d="M18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" />
     </svg>
   );
 }
@@ -298,12 +315,6 @@ export default function CreateBusinessPage({
     setAutoApplied(false);
     lastAppliedSuggestion.current = null;
     applyCategory(category, subcategories);
-  }
-
-  function openManualCategoryPicker() {
-    setCategoryTouched(true);
-    setAutoApplied(false);
-    setCategoryOpen(true);
   }
 
   function next() {
@@ -577,35 +588,25 @@ export default function CreateBusinessPage({
                 )}
               </span>
               {data.category ? (
-                <CheckIcon className="shrink-0 text-brand-600" />
+                autoApplied ? (
+                  <SparkIcon className="shrink-0 text-brand-600" />
+                ) : (
+                  <CheckIcon className="shrink-0 text-brand-600" />
+                )
               ) : (
                 <ChevronLeft className="shrink-0 text-slate-400" />
               )}
             </button>
 
-            {!isEdit && !categoryTouched && (
-              <>
-                {categorySuggestion.loading && !categorySuggestion.result && (
-                  <p className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-400">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" />
-                    در حال بررسی نام و توضیحات برای پیشنهاد دسته…
-                  </p>
-                )}
-                {categorySuggestion.result && (
-                  <CategorySuggestionCard
-                    suggestions={categorySuggestion.result.suggestions}
-                    autoApplied={autoApplied}
-                    onApply={(suggestion) =>
-                      selectCategory(
-                        suggestion.category,
-                        suggestion.subcategory ? [suggestion.subcategory] : [],
-                      )
-                    }
-                    onChange={openManualCategoryPicker}
-                  />
-                )}
-              </>
-            )}
+            {!isEdit &&
+              !categoryTouched &&
+              categorySuggestion.loading &&
+              !categorySuggestion.result && (
+                <p className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-400">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" />
+                  در حال بررسی نام و توضیحات برای پیشنهاد دسته…
+                </p>
+              )}
           </div>
         </section>
       )}

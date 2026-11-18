@@ -40,6 +40,7 @@ from app.services.business_search import (
     decode_cursor,
     search_businesses,
 )
+from app.services.slug import unique_business_slug
 from app.services import map_cache
 from app.services.inapp_notifications import (
     notify_business_approved,
@@ -567,8 +568,7 @@ async def create_business(
 
     tags = _clean_tags(payload.get("tags"))
 
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or str(uuid.uuid4())[:8]
-    slug = f"{slug}-{str(uuid.uuid4())[:6]}"
+    slug = await unique_business_slug(session, name)
 
     business = Business(
         owner_id=user.id,
