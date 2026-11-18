@@ -325,7 +325,9 @@ diagnostics modal reports «Laya غیرفعال است». The implementation is 
 future development:
 
 - The API does not install PyTorch; it talks HTTP to a separate `laya-serve`
-  sidecar on `http://laya:8000`.
+  sidecar on `http://laya:8000`. The sidecar image is built from the upstream
+  self-hosted source (`github.com/NandhaKishorM/laya`, pinned to `v0.4.35` via
+  `LAYA_VERSION` in `deploy/laya/Dockerfile`), not from a hosted API.
 - To re-enable: `docker compose --profile laya up -d` (first start downloads
   the multilingual checkpoint), set `LAYA_ENABLED=true`, then recreate the API.
 - A small high-precision Persian alias layer resolves obvious

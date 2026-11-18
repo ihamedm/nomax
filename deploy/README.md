@@ -75,7 +75,10 @@ The business wizard can suggest a category and subcategory from the title and
 description. A high-precision Persian alias layer handles obvious cases; Laya
 votes on ambiguous categories and subcategories. Laya runs in a separate
 CPU-only container so the API image does not grow by PyTorch and the model.
-The first start downloads the multilingual checkpoint (about 650 MB) into the
+The image is built from the upstream self-hosted source
+(`github.com/NandhaKishorM/laya`) pinned to `v0.4.35` in
+`deploy/laya/Dockerfile`; bump `LAYA_VERSION` there to upgrade. The first
+start downloads the multilingual checkpoint (about 650 MB) into the
 `laya_models` volume.
 
 To re-enable it:

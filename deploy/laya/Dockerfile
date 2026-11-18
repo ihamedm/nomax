@@ -1,6 +1,12 @@
 # Laya is kept in its own image so the API and worker never install PyTorch.
-# The model is downloaded on first start and cached in /data/huggingface.
+# Built from the upstream self-hosted source (github.com/NandhaKishorM/laya) at
+# a pinned release instead of the published wheel, so this deployment runs its
+# own copy of the decision engine. The model is downloaded on first start and
+# cached in /data/huggingface.
 FROM python:3.12-slim
+
+ARG LAYA_VERSION=v0.4.35
+ARG TORCH_VERSION=2.14.0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -17,12 +23,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LAYA_THREADS=2 \
     LAYA_IDLE_UNLOAD_SECONDS=0
 
-# CPU-only torch keeps the optional model image much smaller than the default
-# Linux wheel, which bundles CUDA. Pinning transformers avoids a future major
-# release silently changing Laya's checkpoint loading path.
+# CPU-only torch keeps the image much smaller than the default Linux wheel,
+# which bundles CUDA. Laya's own dependencies (transformers 5.x, torch 2.14)
+# are resolved by the source install below.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install "laya[serve]==0.4.21" "transformers==4.57.1" "numpy<2"
+    pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu \
+    && pip install "laya[serve] @ https://github.com/NandhaKishorM/laya/archive/refs/tags/${LAYA_VERSION}.tar.gz"
 
 RUN mkdir -p /data/huggingface
 VOLUME ["/data/huggingface"]
