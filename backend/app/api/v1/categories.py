@@ -85,6 +85,7 @@ async def list_subcategories(
                     "icon": item["icon"],
                     "sort_order": item["sort_order"],
                     "standard_tags": item["standard_tags"],
+                    "visible_tags": item.get("visible_tags"),
                 }
                 for item in items
             ],

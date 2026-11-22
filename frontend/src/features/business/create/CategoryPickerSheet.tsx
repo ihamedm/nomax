@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { errorMessage } from "@/lib/api";
 import { useApi } from "@/lib/query";
+import { MAX_VISIBLE_TAGS } from "@/features/business/create/types";
 import type { Category, Subcategory } from "@/types";
 
 interface CategoryPickerSheetProps {
@@ -30,6 +31,12 @@ interface SubcategorySearchItem extends Subcategory {
     name: string;
     icon: string;
   };
+}
+
+function visibleTagCount(subcategory: Subcategory): number {
+  return (
+    subcategory.visible_tags ?? subcategory.standard_tags.slice(0, MAX_VISIBLE_TAGS)
+  ).length;
 }
 
 function normalize(value: string): string {
@@ -336,8 +343,8 @@ export function CategoryPickerSheet({
                         </span>
                         <span className="mt-0.5 block text-[10px] text-slate-400">
                           {subcategory.category.name}
-                          {subcategory.standard_tags.length > 0
-                            ? ` · ${subcategory.standard_tags.length} خدمت`
+                          {visibleTagCount(subcategory) > 0
+                            ? ` · ${visibleTagCount(subcategory)} خدمت`
                             : ""}
                         </span>
                       </span>
@@ -474,9 +481,9 @@ export function CategoryPickerSheet({
                   <span className="block truncate text-sm font-medium text-slate-800">
                     {subcategory.name}
                   </span>
-                  {subcategory.standard_tags.length > 0 && (
+                  {visibleTagCount(subcategory) > 0 && (
                     <span className="mt-0.5 block text-[11px] text-slate-400">
-                      {subcategory.standard_tags.length} خدمت پیشنهادی
+                      {visibleTagCount(subcategory)} خدمت پیشنهادی
                     </span>
                   )}
                 </span>

@@ -34,6 +34,7 @@ import {
   instagramId,
   mainPhotoUrl,
   validateStep,
+  visibleStandardTags,
   type WizardData,
   type WizardPhoto,
 } from "./create/types";
@@ -306,7 +307,7 @@ export default function CreateBusinessPage({
     patch({
       category,
       subcategories,
-      standardTags: Array.from(new Set(subcategories.flatMap((item) => item.standard_tags))),
+      standardTags: visibleStandardTags(subcategories),
     });
   }
 
@@ -516,9 +517,7 @@ export default function CreateBusinessPage({
     setCustomInput("");
   }
 
-  const standardTags = Array.from(
-    new Set(data.subcategories.flatMap((item) => item.standard_tags)),
-  );
+  const standardTags = visibleStandardTags(data.subcategories);
   const removedStandard = standardTags.filter(
     (tag) => !data.standardTags.includes(tag) && !data.customTags.includes(tag),
   );

@@ -44,6 +44,9 @@ class Subcategory(Base):
     icon: Mapped[str] = mapped_column(String(16), nullable=False, default="❓")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     standard_tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=sa.text("'[]'"))
+    # Subset of ``standard_tags`` shown in the add-business form. ``None`` means
+    # "not configured yet": the UI falls back to the first few standard tags.
+    visible_tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )

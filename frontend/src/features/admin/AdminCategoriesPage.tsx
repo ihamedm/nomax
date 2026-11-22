@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,8 @@ interface SubcategoryRow {
   slug: string;
   icon: string;
   sort_order: number;
+  standard_tags: string[];
+  visible_tags: string[] | null;
 }
 
 interface CategoryRow {
@@ -240,6 +243,18 @@ export default function AdminCategoriesPage() {
         <span className="text-xs text-slate-400" dir="ltr">
           {row.slug}
         </span>
+      ),
+    },
+    {
+      key: "tags",
+      header: "برچسب‌ها",
+      cell: (row) => (
+        <Link
+          to={`/admin/tags?subcategory_id=${row.id}`}
+          className="text-xs font-medium text-brand-700 hover:underline"
+        >
+          {row.standard_tags.length} برچسب
+        </Link>
       ),
     },
     {

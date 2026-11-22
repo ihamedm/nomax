@@ -3,9 +3,10 @@ import uuid
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import require_permissions
 from app.core.errors import AppError
 from app.core.redis import get_redis
@@ -22,6 +23,43 @@ router = APIRouter(tags=["cms"])
 
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def _clean_tag_list(raw: object) -> list[str]:
+    """Trim, de-duplicate and validate a tag list or comma-separated string."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raw = re.split(r"[,،\n]", raw)
+    if not isinstance(raw, (list, tuple, set)):
+        raise AppError("validation_error", "tags_must_be_a_list", 422)
+    names: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if not name or name in names:
+            continue
+        if len(name) > 60:
+            raise AppError("validation_error", "tag_too_long", 422)
+        names.append(name)
+    return names
+
+
+def _clean_visible_tags(raw: object, standard_tags: list[str]) -> list[str] | None:
+    """Keep only tags that exist on the subcategory and enforce the UI limit."""
+    if raw is None:
+        return None
+    allowed = set(standard_tags)
+    names = [name for name in _clean_tag_list(raw) if name in allowed]
+    if len(names) > settings.MAX_VISIBLE_SUBCATEGORY_TAGS:
+        raise AppError(
+            "validation_error",
+            "too_many_visible_tags",
+            422,
+            {"max": settings.MAX_VISIBLE_SUBCATEGORY_TAGS},
+        )
+    return names
 
 
 def _slug(prefix: str, payload: dict, *, required: bool = False) -> str:
@@ -77,6 +115,10 @@ def _category_item(category: Category, subcategories: list[Subcategory]) -> dict
                 "slug": sub.slug,
                 "icon": sub.icon,
                 "sort_order": sub.sort_order,
+                "standard_tags": list(sub.standard_tags or []),
+                "visible_tags": (
+                    list(sub.visible_tags) if sub.visible_tags is not None else None
+                ),
             }
             for sub in subcategories
         ],
@@ -215,13 +257,15 @@ async def create_subcategory(
         raise AppError("not_found", "category_not_found", 404)
     slug = _slug("subcategory", payload)
     await _ensure_subcategory_slug_free(session, slug, category.id)
+    standard_tags = _clean_tag_list(payload.get("standard_tags"))
     sub = Subcategory(
         category_id=category.id,
         name=name,
         slug=slug,
         icon=payload.get("icon") or "❓",
         sort_order=int(payload.get("sort_order") or 0),
-        standard_tags=payload.get("standard_tags") or [],
+        standard_tags=standard_tags,
+        visible_tags=_clean_visible_tags(payload.get("visible_tags"), standard_tags),
     )
     session.add(sub)
     await session.commit()
@@ -250,7 +294,17 @@ async def update_subcategory(
             int(payload.get("category_id") or sub.category_id),
             exclude_id=sub.id,
         )
-    for field in ("name", "slug", "icon", "sort_order", "standard_tags", "category_id"):
+    if "standard_tags" in payload:
+        payload["standard_tags"] = _clean_tag_list(payload["standard_tags"])
+        if "visible_tags" not in payload:
+            # Renaming/removing a tag must not leave it in the visible subset.
+            payload["visible_tags"] = _clean_visible_tags(
+                sub.visible_tags, payload["standard_tags"]
+            )
+    if "visible_tags" in payload:
+        standard = payload.get("standard_tags", sub.standard_tags or [])
+        payload["visible_tags"] = _clean_visible_tags(payload["visible_tags"], standard)
+    for field in ("name", "slug", "icon", "sort_order", "standard_tags", "visible_tags", "category_id"):
         if field in payload:
             setattr(sub, field, payload[field])
     await session.commit()
@@ -277,22 +331,51 @@ async def delete_subcategory(
 
 @router.get("/admin/tags")
 async def admin_list_tags(
+    q: str | None = None,
+    status: str | None = None,
+    is_custom: bool | None = None,
+    page: int = 1,
+    per_page: int = Query(20, ge=1, le=100),
     actor: User = Depends(require_permissions("category.read")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     del actor
-    counts = dict(
-        (
-            await session.execute(
-                sa.select(BusinessTag.tag_id, sa.func.count(BusinessTag.business_id)).group_by(BusinessTag.tag_id)
-            )
-        ).all()
+    page = max(1, page)
+    conditions = [Tag.deleted_at.is_(None)]
+    if status:
+        conditions.append(Tag.status == status)
+    if is_custom is not None:
+        conditions.append(Tag.is_custom.is_(is_custom))
+    if q and q.strip():
+        conditions.append(Tag.name.ilike(f"%{q.strip()}%"))
+
+    total = int(
+        (await session.execute(sa.select(sa.func.count(Tag.id)).where(*conditions))).scalar()
+        or 0
     )
     rows = (
         await session.execute(
-            sa.select(Tag).where(Tag.deleted_at.is_(None)).order_by(Tag.name)
+            sa.select(Tag)
+            .where(*conditions)
+            .order_by(Tag.name, Tag.id)
+            .offset((page - 1) * per_page)
+            .limit(per_page)
         )
     ).scalars().all()
+
+    counts: dict[int, int] = {}
+    tag_ids = [tag.id for tag in rows]
+    if tag_ids:
+        counts = dict(
+            (
+                await session.execute(
+                    sa.select(BusinessTag.tag_id, sa.func.count(BusinessTag.business_id))
+                    .where(BusinessTag.tag_id.in_(tag_ids))
+                    .group_by(BusinessTag.tag_id)
+                )
+            ).all()
+        )
+    pages = max(1, (total + per_page - 1) // per_page)
     return {
         "data": {
             "items": [
@@ -305,7 +388,8 @@ async def admin_list_tags(
                 }
                 for tag in rows
             ]
-        }
+        },
+        "meta": {"page": page, "per_page": per_page, "total": total, "pages": pages},
     }
 
 

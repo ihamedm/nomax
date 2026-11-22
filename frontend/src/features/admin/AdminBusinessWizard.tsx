@@ -15,7 +15,7 @@ import { useApi } from "@/lib/query";
 import type { Category, Coordinates, Subcategory } from "@/types";
 import { CategoryPickerSheet } from "@/features/business/create/CategoryPickerSheet";
 import { MapPickerSheet } from "@/features/business/create/MapPickerSheet";
-import { MAX_PHOTOS } from "@/features/business/create/types";
+import { MAX_PHOTOS, visibleStandardTags } from "@/features/business/create/types";
 
 import { AdminModal } from "./AdminModal";
 
@@ -217,13 +217,13 @@ export function AdminBusinessWizard({
   const avatarPreview =
     state.avatar_url || state.photos.find((photo) => photo.isMain)?.url || state.photos[0]?.url;
 
-  const suggestedTags = Array.from(
-    new Set(
-      state.subcategories.flatMap(
-        (picked) =>
-          subcategories.data?.items.find((item) => item.id === picked.id)?.standard_tags ?? [],
-      ),
-    ),
+  const catalogSubcategories = state.subcategories.flatMap((picked) => {
+    const item = subcategories.data?.items.find((entry) => entry.id === picked.id);
+    return item ? [item] : [];
+  });
+  const suggestedTags = visibleStandardTags(catalogSubcategories);
+  const allStandardTags = new Set(
+    catalogSubcategories.flatMap((item) => item.standard_tags),
   );
 
   function validate(current: number): string | null {
@@ -923,7 +923,7 @@ export function AdminBusinessWizard({
               )}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {state.tags
-                  .filter((tag) => !suggestedTags.includes(tag))
+                  .filter((tag) => !suggestedTags.includes(tag) && !allStandardTags.has(tag))
                   .map((tag) => (
                     <span
                       key={tag}
@@ -1054,7 +1054,7 @@ export function AdminBusinessWizard({
           patch({
             category,
             subcategories: picked,
-            tags: [...new Set([...state.tags, ...picked.flatMap((item) => item.standard_tags)])],
+            tags: [...new Set([...state.tags, ...visibleStandardTags(picked)])],
           })
         }
       />

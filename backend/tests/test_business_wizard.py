@@ -83,7 +83,8 @@ async def test_create_business_accepts_wizard_fields(client, db_session, create_
         )
     ).all()
     tags = {row.name: row for row in rows}
-    assert sorted(tags) == sorted([standard_tag, "کافه"])
+    hidden = set(subcategory.standard_tags[6:])
+    assert set(tags) == {standard_tag, "کافه"} | hidden
     assert tags[standard_tag].is_custom is False
     assert tags[standard_tag].status == "approved"
     assert tags["کافه"].is_custom is True
@@ -328,7 +329,9 @@ async def test_edit_business_accepts_full_wizard_payload(client, db_session, cre
     assert data["instagram"] == "https://instagram.com/edited"
     assert data["is_24h"] is True
     assert data["profile_image_url"] == "https://cdn.example.com/edited.jpg"
-    assert set(data["tags"]) == {standard_tag, "برچسب ویرایش"}
+    assert set(data["tags"]) == {standard_tag, "برچسب ویرایش"} | set(
+        subcategory.standard_tags[6:]
+    )
     assert standard_tag in data["subcategory"]["standard_tags"]
 
     business = await db_session.get(Business, __import__("uuid").UUID(business_id))

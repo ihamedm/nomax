@@ -84,7 +84,7 @@ async def seed_categories(session: AsyncSession) -> dict[str, int]:
                 subcategory.name = sub_item["name"]
                 subcategory.icon = sub_item["icon"]
                 subcategory.sort_order = sub_item["sort_order"]
-                subcategory.standard_tags = sub_item.get("standard_tags", [])
+                # Tags are managed in the dashboard; a reseed must not wipe them.
                 subcategory.deleted_at = None
                 subcategories_updated += 1
 

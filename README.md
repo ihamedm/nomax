@@ -111,7 +111,7 @@ live codes at <http://localhost:8080/admin/dev-otps>.
 | Quote dashboard | `/admin/quotes` | `quote.read` / `quote.manage`; stats, filters, search, dispatch waves, manual owner assignment, force-next-wave, detail and cancellation |
 | Messages & announcements | `/admin/notifications` | `notification.manage`; in-app messages to all users, owners, customers or one receiver |
 | Categories & subcategories | `/admin/categories` | `category.read` / `category.manage`; shared modular data table + CRUD |
-| Tags | `/admin/tags` | `category.read` / `category.manage`; shared modular data table + CRUD |
+| Tags | `/admin/tags` | `category.read` / `category.manage`; paginated tag CRUD plus per-subcategory bulk tag editing, and a visible/search-only split (max 6 shown in the wizard) |
 | Banners & ads | `/admin/ads` | `ad.manage`; shared modular data table + CRUD |
 | Settings | `/admin/settings` | `admin.settings.manage`; trending search terms and the quote dispatch strategy (`?tab=dispatch`) |
 | All remaining models | `/admin/data` | superadmin only; generic paginated CRUD over remaining tables |

@@ -2,7 +2,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { Spinner } from "@/components/ui/button";
 import CreateBusinessPage from "@/features/business/CreateBusinessPage";
-import type { WizardData } from "@/features/business/create/types";
+import { visibleStandardTags, type WizardData } from "@/features/business/create/types";
 import { errorMessage } from "@/lib/api";
 import { useApi } from "@/lib/query";
 import type { BusinessImage, Category, Subcategory } from "@/types";
@@ -28,6 +28,7 @@ interface EditableBusiness {
         name: string;
         icon: string;
         standard_tags?: string[];
+        visible_tags?: string[] | null;
       }
     | null;
   subcategories?: Array<{
@@ -36,6 +37,7 @@ interface EditableBusiness {
     name: string;
     icon: string;
     standard_tags?: string[];
+    visible_tags?: string[] | null;
   }>;
   tags: string[];
 }
@@ -82,6 +84,7 @@ export default function MeBusinessEditPage() {
           category_id: categoryId,
           sort_order: 0,
           standard_tags: item.standard_tags ?? [],
+          visible_tags: item.visible_tags ?? null,
         }));
 
   const category: Category | null = business.category
@@ -93,6 +96,7 @@ export default function MeBusinessEditPage() {
     : null;
 
   const standard = new Set(subcategories.flatMap((item) => item.standard_tags));
+  const visible = new Set(visibleStandardTags(subcategories));
   const tags = business.tags ?? [];
   const photos = (business.images?.length
     ? [...business.images].sort((a, b) => a.sort_order - b.sort_order)
@@ -119,7 +123,7 @@ export default function MeBusinessEditPage() {
     licenseEnabled: false,
     licenseNumber: "",
     licenseImage: "",
-    standardTags: tags.filter((tag) => standard.has(tag)),
+    standardTags: tags.filter((tag) => visible.has(tag)),
     customTags: tags.filter((tag) => !standard.has(tag)),
   };
 

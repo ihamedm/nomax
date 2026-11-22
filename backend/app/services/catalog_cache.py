@@ -18,7 +18,7 @@ from app.models.category import Category, Subcategory
 
 logger = logging.getLogger("nomax.catalog_cache")
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 CATEGORIES_KEY = f"catalog:v{CACHE_VERSION}:categories"
 SUBCATEGORIES_KEY = f"catalog:v{CACHE_VERSION}:subcategories"
 META_KEY = f"catalog:v{CACHE_VERSION}:meta"
@@ -71,6 +71,11 @@ async def build_catalog(session: AsyncSession) -> dict:
                 "icon": subcategory.icon,
                 "sort_order": subcategory.sort_order,
                 "standard_tags": list(subcategory.standard_tags or []),
+                "visible_tags": (
+                    list(subcategory.visible_tags)
+                    if subcategory.visible_tags is not None
+                    else None
+                ),
                 "category": {
                     "id": category.id,
                     "slug": category.slug,

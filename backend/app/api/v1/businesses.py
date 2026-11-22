@@ -150,6 +150,31 @@ def _standard_tag_names(subcategories: list[Subcategory]) -> set[str]:
     return names
 
 
+def _visible_tag_names(subcategories: list[Subcategory]) -> set[str]:
+    """Tags the wizard shows. An unset subset falls back to the first few."""
+    names: set[str] = set()
+    for subcategory in subcategories:
+        tags = list(subcategory.standard_tags or [])
+        visible = (
+            subcategory.visible_tags
+            if subcategory.visible_tags is not None
+            else tags[: settings.MAX_VISIBLE_SUBCATEGORY_TAGS]
+        )
+        names.update(visible)
+    return names
+
+
+def _with_hidden_standard_tags(
+    names: list[str], subcategories: list[Subcategory]
+) -> list[str]:
+    """Search-only tags are attached automatically; the owner never sees them.
+
+    Existing businesses pick these up on their next edit; there is no backfill.
+    """
+    hidden = _standard_tag_names(subcategories) - _visible_tag_names(subcategories)
+    return names + [name for name in hidden if name not in names]
+
+
 def _business_payload(hit: BusinessHit, *, detail: bool = False) -> dict:
     business = hit.business
     payload = {
@@ -594,11 +619,12 @@ async def create_business(
     if images:
         await _replace_business_images(session, business.id, images)
 
-    if tags:
+    tag_names = _with_hidden_standard_tags(tags, subcategories)
+    if tag_names:
         await _assign_tags(
             session,
             business.id,
-            tags,
+            tag_names,
             standard_names=_standard_tag_names(subcategories),
         )
 
@@ -1008,6 +1034,8 @@ async def update_business(
         profile_image_url = business.profile_image_url
 
     tags = _clean_tags(payload.get("tags")) if "tags" in payload else None
+    if tags is not None:
+        tags = _with_hidden_standard_tags(tags, selected_subcategories)
 
     short_description = (
         (payload.get("short_description") or "").strip()[:120]
@@ -1323,11 +1351,13 @@ async def my_business(
     payload = _business_payload(BusinessHit(business=business), detail=True)
     if payload["subcategory"] is not None and business.subcategory is not None:
         payload["subcategory"]["standard_tags"] = list(business.subcategory.standard_tags or [])
+        payload["subcategory"]["visible_tags"] = business.subcategory.visible_tags
     by_id = {row.id: row for row in business.subcategories}
     for item in payload["subcategories"]:
         row = by_id.get(item["id"])
         if row is not None:
             item["standard_tags"] = list(row.standard_tags or [])
+            item["visible_tags"] = row.visible_tags
 
     tags = (
         await session.execute(
@@ -1543,7 +1573,9 @@ async def set_business_tags(
     if business is None or business.owner_id != user.id:
         raise AppError("not_found", "business_not_found", 404)
     names = _clean_tags(payload.get("tags"))
-    standard_names = _standard_tag_names(_business_subcategories(business))
+    subcategories = _business_subcategories(business)
+    standard_names = _standard_tag_names(subcategories)
+    names = _with_hidden_standard_tags(names, subcategories)
     await _assign_tags(session, bid, names, standard_names=standard_names)
     await session.commit()
     return {"data": {"tags": names}}

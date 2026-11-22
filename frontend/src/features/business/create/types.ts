@@ -41,6 +41,19 @@ export const MAX_INTRO = 120;
 export const MAX_CUSTOM_TAGS = 4;
 export const MAX_TAG_LENGTH = 30;
 export const MAX_PHOTOS = 6;
+/** The wizard shows at most this many subcategory tags; the rest stay search-only. */
+export const MAX_VISIBLE_TAGS = 6;
+
+/** Tags the wizard offers for the chosen subcategories. */
+export function visibleStandardTags(subcategories: Subcategory[]): string[] {
+  return Array.from(
+    new Set(
+      subcategories.flatMap((item) =>
+        item.visible_tags ?? item.standard_tags.slice(0, MAX_VISIBLE_TAGS),
+      ),
+    ),
+  );
+}
 
 export function mainPhotoUrl(photos: WizardPhoto[]): string {
   return photos.find((photo) => photo.isMain)?.url ?? photos[0]?.url ?? "";

@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # `/me/businesses` so the UI and API stay in sync.
     MAX_BUSINESS_IMAGES: int = 6
 
+    # Only this many subcategory tags are shown in the add-business form; the
+    # rest stay search-only and are attached automatically.
+    MAX_VISIBLE_SUBCATEGORY_TAGS: int = 6
+
     DATABASE_URL: str = "postgresql+asyncpg://nomax:secret@localhost:5432/nomax"
     DATABASE_ECHO: bool = False
 

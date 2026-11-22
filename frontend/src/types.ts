@@ -60,6 +60,8 @@ export interface Subcategory {
   icon: string;
   sort_order: number;
   standard_tags: string[];
+  /** Subset shown in the wizard; null/undefined falls back to the first few. */
+  visible_tags?: string[] | null;
 }
 
 export interface LoginResult {

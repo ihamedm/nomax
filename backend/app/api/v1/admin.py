@@ -300,6 +300,7 @@ async def create_admin_business(
         _resolve_business_images,
         _resolve_subcategories,
         _standard_tag_names,
+        _with_hidden_standard_tags,
     )
     from app.models.business import Business, BusinessStatus
     from app.models.category import Category, Subcategory
@@ -389,11 +390,12 @@ async def create_admin_business(
 
     if images:
         await _replace_business_images(session, business.id, images)
-    if tags:
+    tag_names = _with_hidden_standard_tags(tags, subcategories)
+    if tag_names:
         await _assign_tags(
             session,
             business.id,
-            tags,
+            tag_names,
             standard_names=_standard_tag_names(subcategories),
         )
     await _write_audit(
@@ -560,6 +562,7 @@ async def update_admin_business(
         _resolve_business_images,
         _resolve_subcategories,
         _standard_tag_names,
+        _with_hidden_standard_tags,
     )
     from app.models.business import BusinessStatus
     from app.models.category import Category, Subcategory
@@ -671,7 +674,7 @@ async def update_admin_business(
         await _assign_tags(
             session,
             business.id,
-            tags,
+            _with_hidden_standard_tags(tags, selected_subcategories),
             standard_names=_standard_tag_names(selected_subcategories),
         )
 
