@@ -657,7 +657,7 @@ VITE_MAP_DEFAULT_ZOOM=13
 
 - سرور: VPS 8-core / 16GB RAM / 200GB SSD
 - OS: Ubuntu 22.04 LTS
-- Reverse proxy: Nginx 1.27 + Certbot (Let's Encrypt)
+- Reverse proxy: Nginx 1.30.7 + Certbot (Let's Encrypt)
 - Container runtime: Docker 24 + Compose v2
 - Process manager: Docker Compose (یا systemd در صورت عدم استفاده از Swarm)
 
