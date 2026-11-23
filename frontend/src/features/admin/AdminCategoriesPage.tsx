@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage, type ApiError } from "@/lib/api";
@@ -45,6 +46,7 @@ export default function AdminCategoriesPage() {
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [editing, setEditing] = useState<CategoryRow | null>(null);
   const [form, setForm] = useState(EMPTY_CATEGORY);
+  const [deleting, setDeleting] = useState<CategoryRow | null>(null);
   const [layaOpen, setLayaOpen] = useState(false);
 
   const items = data?.items ?? [];
@@ -81,6 +83,7 @@ export default function AdminCategoriesPage() {
     mutationFn: (id: number) => api(`/admin/categories/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       toast("دسته حذف شد.");
+      setDeleting(null);
       invalidate();
     },
     onError: (err: ApiError) => toast(errorMessage(err)),
@@ -169,10 +172,7 @@ export default function AdminCategoriesPage() {
             size="sm"
             variant="danger"
             disabled={deleteCategory.isPending}
-            onClick={() => {
-              if (!window.confirm(`دسته «${row.name}» و زیردسته‌هایش حذف شوند؟`)) return;
-              deleteCategory.mutate(row.id);
-            }}
+            onClick={() => setDeleting(row)}
           >
             حذف
           </Button>
@@ -277,6 +277,23 @@ export default function AdminCategoriesPage() {
           </form>
         </AdminModal>
       )}
+
+      <ConfirmSheet
+        open={deleting !== null}
+        title="حذف دسته"
+        description={
+          deleting
+            ? `دسته «${deleting.name}» و زیردسته‌هایش حذف شوند؟`
+            : ""
+        }
+        confirmLabel="حذف"
+        tone="rose"
+        loading={deleteCategory.isPending}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => {
+          if (deleting) deleteCategory.mutate(deleting.id);
+        }}
+      />
 
       {layaOpen && <LayaDiagnosticsModal onClose={() => setLayaOpen(false)} />}
     </div>

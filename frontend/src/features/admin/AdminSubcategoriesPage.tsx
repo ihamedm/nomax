@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button, Spinner } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage, type ApiError } from "@/lib/api";
@@ -36,6 +37,11 @@ interface CategoryRow {
 
 const EMPTY_SUB = { name: "", slug: "", icon: "❓", sort_order: 0 };
 
+type ConfirmAction =
+  | { kind: "delete"; subcategory: SubcategoryRow }
+  | { kind: "remove-tag"; subcategory: SubcategoryRow; tag: string }
+  | { kind: "sync"; subcategory: SubcategoryRow };
+
 function visibleTagsOf(subcategory: SubcategoryRow): string[] {
   return subcategory.visible_tags ?? subcategory.standard_tags.slice(0, MAX_VISIBLE_TAGS);
 }
@@ -66,6 +72,7 @@ export default function AdminSubcategoriesPage() {
   const [form, setForm] = useState(EMPTY_SUB);
   const [tagTargetId, setTagTargetId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
   const tagTarget =
     category?.subcategories.find((item) => item.id === tagTargetId) ?? null;
@@ -100,6 +107,7 @@ export default function AdminSubcategoriesPage() {
     mutationFn: (id: number) => api(`/admin/subcategories/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       toast("زیردسته حذف شد.");
+      setConfirmAction(null);
       invalidate();
     },
     onError: (err: ApiError) => toast(errorMessage(err)),
@@ -120,6 +128,7 @@ export default function AdminSubcategoriesPage() {
       }),
     onSuccess: (_data, variables) => {
       toast(variables.message);
+      setConfirmAction(null);
       invalidate();
     },
     onError: (err: ApiError) => toast(errorMessage(err)),
@@ -127,16 +136,21 @@ export default function AdminSubcategoriesPage() {
 
   const syncTags = useMutation({
     mutationFn: (id: number) =>
-      api<{ businesses: number; tags_added: number; tags_removed: number }>(
-        `/admin/subcategories/${id}/sync-tags`,
-        { method: "POST" },
-      ),
+      api<{
+        businesses: number;
+        changed: number;
+        tags_added: number;
+        tags_removed: number;
+      }>(`/admin/subcategories/${id}/sync-tags`, { method: "POST" }),
     onSuccess: (result) => {
       toast(
         result.businesses === 0
-          ? "همه کسب‌وکارها از قبل همگام بودند."
-          : `${result.businesses} کسب‌وکار همگام شد؛ ${result.tags_added} برچسب اضافه و ${result.tags_removed} برچسب حذف شد.`,
+          ? "کسب‌وکاری به این زیردسته وصل نیست."
+          : result.changed === 0
+            ? `${result.businesses} کسب‌وکار بررسی شد؛ همه از قبل همگام بودند.`
+            : `${result.changed} از ${result.businesses} کسب‌وکار همگام شد؛ ${result.tags_added} برچسب اضافه و ${result.tags_removed} برچسب حذف شد.`,
       );
+      setConfirmAction(null);
       invalidate();
       void queryClient.invalidateQueries({ queryKey: ["admin", "tags"] });
     },
@@ -206,28 +220,34 @@ export default function AdminSubcategoriesPage() {
     });
   }
 
-  function removeTag(tag: string) {
+  function askRemoveTag(tag: string) {
     if (!tagTarget) return;
-    if (!window.confirm(`برچسب «${tag}» از این زیردسته حذف شود؟`)) return;
-    updateTags.mutate({
-      id: tagTarget.id,
-      body: {
-        standard_tags: tagTarget.standard_tags.filter((item) => item !== tag),
-      },
-      message: "برچسب حذف شد.",
-    });
+    setConfirmAction({ kind: "remove-tag", subcategory: tagTarget, tag });
   }
 
-  function confirmSync() {
+  function askSync() {
     if (!tagTarget) return;
-    if (
-      !window.confirm(
-        `برچسب‌های «${tagTarget.name}» روی کسب‌وکارهای این زیردسته همگام شوند؟ برچسب‌های حذف‌شده از کسب‌وکارها برداشته می‌شوند.`,
-      )
-    ) {
-      return;
+    setConfirmAction({ kind: "sync", subcategory: tagTarget });
+  }
+
+  function runConfirm() {
+    const action = confirmAction;
+    if (!action) return;
+    if (action.kind === "delete") {
+      deleteSub.mutate(action.subcategory.id);
+    } else if (action.kind === "remove-tag") {
+      updateTags.mutate({
+        id: action.subcategory.id,
+        body: {
+          standard_tags: action.subcategory.standard_tags.filter(
+            (item) => item !== action.tag,
+          ),
+        },
+        message: "برچسب حذف شد.",
+      });
+    } else {
+      syncTags.mutate(action.subcategory.id);
     }
-    syncTags.mutate(tagTarget.id);
   }
 
   const columns: DataColumn<SubcategoryRow>[] = [
@@ -283,10 +303,7 @@ export default function AdminSubcategoriesPage() {
             size="sm"
             variant="danger"
             disabled={deleteSub.isPending}
-            onClick={() => {
-              if (!window.confirm(`زیردسته «${row.name}» حذف شود؟`)) return;
-              deleteSub.mutate(row.id);
-            }}
+            onClick={() => setConfirmAction({ kind: "delete", subcategory: row })}
           >
             حذف
           </Button>
@@ -323,6 +340,22 @@ export default function AdminSubcategoriesPage() {
   }
 
   const visibleTags = tagTarget ? visibleTagsOf(tagTarget) : [];
+  const confirmLoading =
+    deleteSub.isPending || updateTags.isPending || syncTags.isPending;
+  const confirmTitle =
+    confirmAction?.kind === "delete"
+      ? "حذف زیردسته"
+      : confirmAction?.kind === "remove-tag"
+        ? "حذف برچسب"
+        : "همگام‌سازی برچسب‌ها";
+  const confirmDescription =
+    confirmAction?.kind === "delete"
+      ? `آیا زیردسته «${confirmAction.subcategory.name}» حذف شود؟`
+      : confirmAction?.kind === "remove-tag"
+        ? `برچسب «${confirmAction.tag}» از این زیردسته حذف شود؟`
+        : confirmAction?.kind === "sync"
+          ? `برچسب‌های «${confirmAction.subcategory.name}» روی کسب‌وکارهای این زیردسته همگام شوند؟ برچسب‌های حذف‌شده از کسب‌وکارها برداشته می‌شوند.`
+          : "";
 
   return (
     <div className="space-y-3">
@@ -424,7 +457,7 @@ export default function AdminSubcategoriesPage() {
                 variant="outline"
                 loading={syncTags.isPending}
                 disabled={updateTags.isPending}
-                onClick={confirmSync}
+                onClick={askSync}
                 className="shrink-0"
               >
                 همگام‌سازی با کسب‌وکارها
@@ -499,7 +532,7 @@ export default function AdminSubcategoriesPage() {
                       <span className="font-medium">{tag}</span>
                       <button
                         type="button"
-                        onClick={() => removeTag(tag)}
+                        onClick={() => askRemoveTag(tag)}
                         disabled={updateTags.isPending}
                         aria-label={`حذف ${tag}`}
                         title={`حذف ${tag}`}
@@ -521,6 +554,17 @@ export default function AdminSubcategoriesPage() {
           </div>
         )}
       </BottomSheet>
+
+      <ConfirmSheet
+        open={confirmAction !== null}
+        title={confirmTitle}
+        description={confirmDescription}
+        confirmLabel={confirmAction?.kind === "sync" ? "همگام‌سازی" : "حذف"}
+        tone={confirmAction?.kind === "delete" ? "rose" : "brand"}
+        loading={confirmLoading}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={runConfirm}
+      />
     </div>
   );
 }

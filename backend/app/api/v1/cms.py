@@ -318,7 +318,7 @@ async def sync_subcategory_tags(
     actor: User = Depends(require_permissions("category.manage")),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Re-apply a subcategory's tag catalog to the businesses that serve it."""
+    """Sync a subcategory's search-only tags with the businesses that serve it."""
     del actor
     sub = await session.get(Subcategory, subcategory_id)
     if sub is None or sub.deleted_at is not None:
@@ -347,11 +347,12 @@ async def sync_subcategory_tags(
         ).scalars()
     )
 
-    changed = added = removed = 0
+    changed = added = removed = processed = 0
     for business_id in business_ids:
         business = await session.get(Business, business_id)
         if business is None or business.deleted_at is not None:
             continue
+        processed += 1
 
         subcategory_ids = set(
             (
@@ -373,20 +374,18 @@ async def sync_subcategory_tags(
             )
         ).scalars().all()
 
-        catalog: list[str] = []
-        hidden_catalog: set[str] = set()
+        # Keep tags still used by any of the business's subcategories.
+        allowed_catalog: set[str] = set()
         for row in related:
-            standard = list(row.standard_tags or [])
-            for name in standard:
-                if name not in catalog:
-                    catalog.append(name)
-            visible = (
-                row.visible_tags
-                if row.visible_tags is not None
-                else standard[: settings.MAX_VISIBLE_SUBCATEGORY_TAGS]
-            )
-            visible_set = set(visible)
-            hidden_catalog.update(name for name in standard if name not in visible_set)
+            allowed_catalog.update(row.standard_tags or [])
+
+        selected_standard = list(sub.standard_tags or [])
+        selected_visible = (
+            sub.visible_tags
+            if sub.visible_tags is not None
+            else selected_standard[: settings.MAX_VISIBLE_SUBCATEGORY_TAGS]
+        )
+        selected_hidden = set(selected_standard) - set(selected_visible)
 
         current = (
             await session.execute(
@@ -398,15 +397,14 @@ async def sync_subcategory_tags(
                 )
             )
         ).all()
-        catalog_set = set(catalog)
         names: list[str] = []
         # Keep the owner's custom tags and the visible tags they picked.
         for name, is_custom in current:
-            if (is_custom or name in catalog_set) and name not in names:
+            if (is_custom or name in allowed_catalog) and name not in names:
                 names.append(name)
-        # Search-only catalog tags are attached automatically.
-        for name in catalog:
-            if name in hidden_catalog and name not in names:
+        # Attach only this subcategory's search-only tags.
+        for name in selected_standard:
+            if name in selected_hidden and name not in names:
                 names.append(name)
 
         before = {name for name, _ in current}
@@ -415,10 +413,17 @@ async def sync_subcategory_tags(
             changed += 1
             added += len(after - before)
             removed += len(before - after)
-        await _assign_tags(session, business_id, names, standard_names=set(catalog))
+        await _assign_tags(session, business_id, names, standard_names=allowed_catalog)
 
     await session.commit()
-    return {"data": {"businesses": changed, "tags_added": added, "tags_removed": removed}}
+    return {
+        "data": {
+            "businesses": processed,
+            "changed": changed,
+            "tags_added": added,
+            "tags_removed": removed,
+        }
+    }
 
 
 @router.delete("/admin/subcategories/{subcategory_id}")

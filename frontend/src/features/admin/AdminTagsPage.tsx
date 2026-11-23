@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage, type ApiError } from "@/lib/api";
@@ -42,6 +43,7 @@ export default function AdminTagsPage() {
   const [mode, setMode] = useState<"create" | "edit" | null>(null);
   const [editing, setEditing] = useState<TagRow | null>(null);
   const [form, setForm] = useState(EMPTY);
+  const [deleting, setDeleting] = useState<TagRow | null>(null);
 
   const query = new URLSearchParams({ page: String(page), per_page: "20" });
   if (status) query.set("status", status);
@@ -99,6 +101,7 @@ export default function AdminTagsPage() {
     mutationFn: (id: number) => api(`/admin/tags/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       toast("برچسب حذف شد.");
+      setDeleting(null);
       invalidateTags();
     },
     onError: (err: ApiError) => toast(errorMessage(err)),
@@ -153,10 +156,7 @@ export default function AdminTagsPage() {
           <Button
             size="sm"
             variant="danger"
-            onClick={() => {
-              if (!window.confirm(`برچسب «${row.name}» حذف شود؟`)) return;
-              remove.mutate(row.id);
-            }}
+            onClick={() => setDeleting(row)}
           >
             حذف
           </Button>
@@ -272,6 +272,20 @@ export default function AdminTagsPage() {
           </form>
         </AdminModal>
       )}
+      <ConfirmSheet
+        open={deleting !== null}
+        title="حذف برچسب"
+        description={
+          deleting ? `برچسب «${deleting.name}» حذف شود؟` : ""
+        }
+        confirmLabel="حذف"
+        tone="rose"
+        loading={remove.isPending}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => {
+          if (deleting) remove.mutate(deleting.id);
+        }}
+      />
     </div>
   );
 }

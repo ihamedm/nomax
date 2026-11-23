@@ -4,7 +4,7 @@ import sqlalchemy as sa
 
 from app.core.security import create_access_token
 from app.db.seed import seed_categories
-from app.models.business import Business
+from app.models.business import Business, BusinessSubcategory
 from app.models.category import Subcategory
 from app.models.tag import BusinessTag, Tag
 from app.models.user import UserRole
@@ -207,6 +207,7 @@ async def test_sync_subcategory_tags_updates_assigned_businesses(
     assert synced.status_code == 200
     result = synced.json()["data"]
     assert result["businesses"] == 1
+    assert result["changed"] == 1
     assert result["tags_added"] == 1
     assert result["tags_removed"] == len(attached_before) - 2
 
@@ -223,3 +224,82 @@ async def test_sync_subcategory_tags_updates_assigned_businesses(
     # visible tag they did not pick stays off the business.
     assert attached == {original[0], new_tag, custom}
     assert original[1] not in attached
+
+
+async def test_sync_only_applies_the_selected_subcategory_tags(
+    client, db_session, create_user
+):
+    admin = await _admin(create_user, phone="09160000025")
+    await seed_categories(db_session)
+    await db_session.commit()
+    rows = (await db_session.execute(sa.select(Subcategory))).scalars().all()
+    category_id = rows[0].category_id
+    pair = [row for row in rows if row.category_id == category_id][:2]
+    assert len(pair) == 2
+    first, second = pair
+    first.standard_tags = ["a-visible", "a-hidden"]
+    first.visible_tags = ["a-visible"]
+    second.standard_tags = ["b-visible", "b-hidden"]
+    second.visible_tags = ["b-visible"]
+    await db_session.commit()
+
+    owner = await create_user("09160000026", UserRole.OWNER)
+    created = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "کسب‌وکار دو زیردسته",
+            "category_id": category_id,
+            "subcategory_ids": [first.id],
+            "address": "بهبهان",
+            "tags": ["a-visible"],
+        },
+        headers=auth(owner),
+    )
+    assert created.status_code == 200
+
+    business = (
+        await db_session.execute(
+            sa.select(Business).where(Business.slug == created.json()["data"]["slug"])
+        )
+    ).scalars().one()
+    db_session.add(
+        BusinessSubcategory(business_id=business.id, subcategory_id=second.id)
+    )
+    await db_session.commit()
+
+    first_sync = await client.post(
+        f"/api/v1/admin/subcategories/{first.id}/sync-tags",
+        headers=auth(admin),
+    )
+    assert first_sync.status_code == 200
+    assert first_sync.json()["data"]["changed"] == 0
+
+    attached = set(
+        (
+            await db_session.execute(
+                sa.select(Tag.name)
+                .join(BusinessTag, BusinessTag.tag_id == Tag.id)
+                .where(BusinessTag.business_id == business.id)
+            )
+        ).scalars()
+    )
+    assert "b-hidden" not in attached
+
+    second_sync = await client.post(
+        f"/api/v1/admin/subcategories/{second.id}/sync-tags",
+        headers=auth(admin),
+    )
+    assert second_sync.status_code == 200
+    assert second_sync.json()["data"]["tags_added"] == 1
+
+    attached = set(
+        (
+            await db_session.execute(
+                sa.select(Tag.name)
+                .join(BusinessTag, BusinessTag.tag_id == Tag.id)
+                .where(BusinessTag.business_id == business.id)
+            )
+        ).scalars()
+    )
+    assert {"a-visible", "a-hidden", "b-hidden"} <= attached
+    assert "b-visible" not in attached
