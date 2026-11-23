@@ -2,12 +2,11 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { Button, Spinner } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage, type ApiError } from "@/lib/api";
-import { useApi, useApiWithMeta } from "@/lib/query";
-import { MAX_VISIBLE_TAGS } from "@/features/business/create/types";
+import { useApiWithMeta } from "@/lib/query";
 import { AdminModal } from "@/features/admin/AdminModal";
 import { DataTable, type DataColumn, type PageMeta } from "@/features/admin/data-table";
 
@@ -19,28 +18,6 @@ interface TagRow {
   usage_count: number;
 }
 
-interface SubcategoryRow {
-  id: number;
-  category_id: number;
-  name: string;
-  slug: string;
-  icon: string;
-  standard_tags: string[];
-  visible_tags: string[] | null;
-}
-
-interface CategoryRow {
-  id: number;
-  name: string;
-  icon: string;
-  subcategories: SubcategoryRow[];
-}
-
-interface SubcategoryOption extends SubcategoryRow {
-  category_name: string;
-  category_icon: string;
-}
-
 const FILTERS = [
   { label: "همه", value: "" },
   { label: "تأییدشده", value: "approved" },
@@ -50,28 +27,11 @@ const FILTERS = [
 
 const EMPTY = { name: "", status: "approved", is_custom: true };
 
-/** Mirrors the backend fallback: an unset subset shows the first few tags. */
-function visibleTagsOf(subcategory: SubcategoryRow): string[] {
-  return subcategory.visible_tags ?? subcategory.standard_tags.slice(0, MAX_VISIBLE_TAGS);
-}
-
-function parseTags(value: string): string[] {
-  return Array.from(
-    new Set(
-      value
-        .split(/[,،\n]/)
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
 export default function AdminTagsPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
 
-  const subcategoryId = params.get("subcategory_id") ?? "";
   const status = params.get("status") ?? "";
   const qParam = params.get("q") ?? "";
   const page = Math.max(1, Number(params.get("page") ?? "1") || 1);
@@ -82,22 +42,6 @@ export default function AdminTagsPage() {
   const [mode, setMode] = useState<"create" | "edit" | null>(null);
   const [editing, setEditing] = useState<TagRow | null>(null);
   const [form, setForm] = useState(EMPTY);
-  const [bulk, setBulk] = useState("");
-
-  const categories = useApi<{ items: CategoryRow[] }>(
-    ["admin", "categories"],
-    "/admin/categories",
-  );
-  const subcategories: SubcategoryOption[] = (categories.data?.items ?? []).flatMap(
-    (category) =>
-      category.subcategories.map((sub) => ({
-        ...sub,
-        category_name: category.name,
-        category_icon: category.icon,
-      })),
-  );
-  const selected =
-    subcategories.find((item) => String(item.id) === subcategoryId) ?? null;
 
   const query = new URLSearchParams({ page: String(page), per_page: "20" });
   if (status) query.set("status", status);
@@ -106,7 +50,6 @@ export default function AdminTagsPage() {
   const tags = useApiWithMeta<{ items: TagRow[] }, PageMeta>(
     ["admin", "tags", status, qParam, page],
     `/admin/tags?${query.toString()}`,
-    { enabled: !subcategoryId },
   );
 
   const items = tags.data?.data.items ?? [];
@@ -138,11 +81,6 @@ export default function AdminTagsPage() {
     void queryClient.invalidateQueries({ queryKey: ["admin", "tags"] });
   }
 
-  function invalidateCatalog() {
-    void queryClient.invalidateQueries({ queryKey: ["admin", "categories"] });
-    void queryClient.invalidateQueries({ queryKey: ["categories"] });
-  }
-
   const save = useMutation({
     mutationFn: () =>
       mode === "create"
@@ -166,75 +104,9 @@ export default function AdminTagsPage() {
     onError: (err: ApiError) => toast(errorMessage(err)),
   });
 
-  const updateSubcategory = useMutation({
-    mutationFn: ({
-      id,
-      body,
-    }: {
-      id: number;
-      body: Record<string, unknown>;
-      message: string;
-    }) =>
-      api(`/admin/subcategories/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: (_data, variables) => {
-      toast(variables.message);
-      invalidateCatalog();
-    },
-    onError: (err: ApiError) => toast(errorMessage(err)),
-  });
-
   function submit(event: FormEvent) {
     event.preventDefault();
     save.mutate();
-  }
-
-  function addBulkTags(event: FormEvent) {
-    event.preventDefault();
-    if (!selected) return;
-    const names = parseTags(bulk);
-    if (names.length === 0) {
-      toast("برچسبی برای افزودن وارد نشده است.");
-      return;
-    }
-    const standard = Array.from(new Set([...selected.standard_tags, ...names]));
-    updateSubcategory.mutate({
-      id: selected.id,
-      body: { standard_tags: standard },
-      message: `${names.length} برچسب اضافه شد.`,
-    });
-    setBulk("");
-  }
-
-  function toggleVisible(tag: string) {
-    if (!selected) return;
-    const current = visibleTagsOf(selected);
-    const next = current.includes(tag)
-      ? current.filter((item) => item !== tag)
-      : [...current, tag];
-    if (next.length > MAX_VISIBLE_TAGS) {
-      toast(`حداکثر ${MAX_VISIBLE_TAGS} برچسب می‌تواند به کاربر نمایش داده شود.`);
-      return;
-    }
-    updateSubcategory.mutate({
-      id: selected.id,
-      body: { visible_tags: next },
-      message: "تنظیم نمایش برچسب ذخیره شد.",
-    });
-  }
-
-  function removeSubcategoryTag(tag: string) {
-    if (!selected) return;
-    updateSubcategory.mutate({
-      id: selected.id,
-      body: {
-        standard_tags: selected.standard_tags.filter((item) => item !== tag),
-        visible_tags: visibleTagsOf(selected).filter((item) => item !== tag),
-      },
-      message: "برچسب حذف شد.",
-    });
   }
 
   const columns: DataColumn<TagRow>[] = [
@@ -293,81 +165,22 @@ export default function AdminTagsPage() {
     },
   ];
 
-  if (subcategoryId && categories.isLoading) {
-    return (
-      <div className="flex justify-center py-12 text-brand-600">
-        <Spinner />
-      </div>
-    );
-  }
-  if (subcategoryId && !selected) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-600">
-        زیردسته انتخاب‌شده پیدا نشد.{" "}
-        <Link to="/admin/tags" className="font-medium text-brand-700 hover:underline">
-          بازگشت به فهرست برچسب‌ها
-        </Link>
-      </div>
-    );
-  }
-
-  const visibleTags = selected ? visibleTagsOf(selected) : [];
-  const subcategoryColumns: DataColumn<string>[] = [    {
-      key: "name",
-      header: "برچسب",
-      cell: (tag) => <span className="font-bold text-slate-900">{tag}</span>,
-    },
-    {
-      key: "visibility",
-      header: "نمایش در فرم",
-      cell: (tag) => (
-        <span
-          className={
-            visibleTags.includes(tag)
-              ? "rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700"
-              : "rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500"
-          }
-        >
-          {visibleTags.includes(tag) ? "نمایش به کاربر" : "فقط جستجو"}
-        </span>
-      ),
-    },
-    {
-      key: "actions",
-      header: "عملیات",
-      className: "text-left",
-      cell: (tag) => (
-        <div className="flex justify-end gap-1">
-          <Button size="sm" variant="outline" onClick={() => toggleVisible(tag)}>
-            {visibleTags.includes(tag) ? "پنهان کردن" : "نمایش دادن"}
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={() => {
-              if (!window.confirm(`برچسب «${tag}» از این زیردسته حذف شود؟`)) return;
-              removeSubcategoryTag(tag);
-            }}
-          >
-            حذف
-          </Button>
-        </div>
-      ),
-    },
-  ];
-
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-black text-slate-900">برچسب‌ها</h1>
           <p className="mt-1 text-xs text-slate-500">
-            {selected
-              ? `برچسب‌های ${selected.icon} ${selected.name} — ${selected.category_name}`
-              : "برچسب‌های خدمت و برچسب‌های سفارشی کسب‌وکارها"}
+            برچسب‌های خدمت و برچسب‌های سفارشی کسب‌وکارها
           </p>
         </div>
-        {!selected && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/admin/categories"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:border-brand-300 hover:text-brand-700"
+          >
+            مدیریت برچسب‌های زیردسته‌ها
+          </Link>
           <Button
             onClick={() => {
               setForm(EMPTY);
@@ -377,135 +190,45 @@ export default function AdminTagsPage() {
           >
             افزودن برچسب
           </Button>
-        )}
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2.5">
-        <span className="text-xs text-slate-500">زیردسته:</span>
-        <select
-          value={subcategoryId}
-          onChange={(event) =>
-            updateParams({
-              subcategory_id: event.target.value || null,
-              page: null,
-            })
-          }
-          className="h-10 min-w-[220px] flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800"
-          aria-label="انتخاب زیردسته"
-        >
-          <option value="">همه برچسب‌ها (کسب‌وکارها)</option>
-          {(categories.data?.items ?? []).map((category) => (
-            <optgroup key={category.id} label={`${category.icon} ${category.name}`}>
-              {category.subcategories.map((sub) => (
-                <option key={sub.id} value={sub.id}>
-                  {sub.icon} {sub.name}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <Link
-          to="/admin/categories"
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:border-brand-300 hover:text-brand-700"
-        >
-          مدیریت دسته‌بندی‌ها
-        </Link>
-      </div>
-
-      {selected ? (
-        <>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-3">
-              <p className="text-[11px] text-slate-400">کل برچسب‌ها</p>
-              <p className="mt-1 text-lg font-black text-slate-900">
-                {selected.standard_tags.length}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3">
-              <p className="text-[11px] text-emerald-700">نمایش به کاربر</p>
-              <p className="mt-1 text-lg font-black text-emerald-800">
-                {visibleTags.length} از {MAX_VISIBLE_TAGS}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-3">
-              <p className="text-[11px] text-slate-400">فقط جستجو</p>
-              <p className="mt-1 text-lg font-black text-slate-900">
-                {Math.max(0, selected.standard_tags.length - visibleTags.length)}
-              </p>
-            </div>
-          </div>
-
-          <form
-            onSubmit={addBulkTags}
-            className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row"
-          >
-            <Input
-              value={bulk}
-              onChange={(event) => setBulk(event.target.value)}
-              placeholder="برچسب‌ها را با کاما جدا کنید: تعمیر یخچال، تعمیر لباسشویی"
-              aria-label="افزودن گروهی برچسب"
-            />
-            <Button type="submit" loading={updateSubcategory.isPending} className="shrink-0">
-              افزودن گروهی
-            </Button>
-          </form>
-          <p className="-mt-1 text-[11px] leading-5 text-slate-500">
-            برچسب‌های جدید ابتدا فقط برای جستجو ثبت می‌شوند. حداکثر{" "}
-            {MAX_VISIBLE_TAGS} برچسب را می‌توانید برای نمایش در فرم افزودن کسب‌وکار انتخاب
-            کنید؛ بقیه به‌صورت خودکار به کسب‌وکارها وصل می‌شوند و فقط در جستجو استفاده
-            می‌شوند.
-          </p>
-
-          <DataTable
-            columns={subcategoryColumns}
-            rows={selected.standard_tags}
-            rowKey={(tag) => tag}
-            loading={categories.isLoading}
-            error={categories.error ? errorMessage(categories.error) : null}
-            empty="برای این زیردسته برچسبی ثبت نشده است."
-            minWidthClassName="min-w-[640px]"
-          />
-        </>
-      ) : (
-        <>
-          <div className="flex flex-wrap gap-2">
-            {FILTERS.map((item) => (
-              <button
-                key={item.value || "all"}
-                type="button"
-                onClick={() => updateParams({ status: item.value || null, page: null })}
-                className={
-                  status === item.value
-                    ? "rounded-full bg-brand-600 px-3 py-1 text-xs text-white"
-                    : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
-                }
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <DataTable
-            columns={columns}
-            rows={items}
-            rowKey={(row) => row.id}
-            loading={tags.isLoading}
-            error={tags.error ? errorMessage(tags.error) : null}
-            empty="برچسبی پیدا نشد."
-            minWidthClassName="min-w-[700px]"
-            meta={meta ? { page: meta.page, pages: meta.pages, total: meta.total } : undefined}
-            onPageChange={(nextPage) => updateParams({ page: String(nextPage) })}
-            toolbar={
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="جستجوی برچسب…"
-                aria-label="جستجوی برچسب"
-              />
+      <div className="flex flex-wrap gap-2">
+        {FILTERS.map((item) => (
+          <button
+            key={item.value || "all"}
+            type="button"
+            onClick={() => updateParams({ status: item.value || null, page: null })}
+            className={
+              status === item.value
+                ? "rounded-full bg-brand-600 px-3 py-1 text-xs text-white"
+                : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
             }
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={items}
+        rowKey={(row) => row.id}
+        loading={tags.isLoading}
+        error={tags.error ? errorMessage(tags.error) : null}
+        empty="برچسبی پیدا نشد."
+        minWidthClassName="min-w-[700px]"
+        meta={meta ? { page: meta.page, pages: meta.pages, total: meta.total } : undefined}
+        onPageChange={(nextPage) => updateParams({ page: String(nextPage) })}
+        toolbar={
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="جستجوی برچسب…"
+            aria-label="جستجوی برچسب"
           />
-        </>
-      )}
+        }
+      />
 
       {mode && (
         <AdminModal title={mode === "create" ? "افزودن برچسب" : "ویرایش برچسب"} onClose={() => setMode(null)}>

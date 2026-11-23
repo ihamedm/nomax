@@ -150,3 +150,76 @@ async def test_bulk_tag_string_and_hidden_tags_attach_to_business(
     # The visible pick plus every search-only tag from the subcategory.
     assert attached == {visible[0], *hidden}
     assert set(hidden) <= attached
+
+
+async def test_sync_subcategory_tags_updates_assigned_businesses(
+    client, db_session, create_user
+):
+    admin = await _admin(create_user, phone="09160000023")
+    subcategory = await _subcategory_with_many_tags(db_session)
+    original = list(subcategory.standard_tags)
+    custom = "برچسب سفارشی همگام‌سازی"
+    new_tag = "برچسب تازه همگام‌سازی"
+
+    owner = await create_user("09160000024", UserRole.OWNER)
+    created = await client.post(
+        "/api/v1/businesses",
+        json={
+            "name": "کسب‌وکار همگام‌سازی",
+            "category_id": subcategory.category_id,
+            "subcategory_id": subcategory.id,
+            "address": "بهبهان",
+            "tags": [original[0], custom],
+        },
+        headers=auth(owner),
+    )
+    assert created.status_code == 200
+
+    business = (
+        await db_session.execute(
+            sa.select(Business).where(Business.slug == created.json()["data"]["slug"])
+        )
+    ).scalars().one()
+    attached_before = set(
+        (
+            await db_session.execute(
+                sa.select(Tag.name)
+                .join(BusinessTag, BusinessTag.tag_id == Tag.id)
+                .where(BusinessTag.business_id == business.id)
+            )
+        ).scalars()
+    )
+
+    patched = await client.patch(
+        f"/api/v1/admin/subcategories/{subcategory.id}",
+        json={
+            "standard_tags": [original[0], original[1], new_tag],
+            "visible_tags": [original[0], original[1]],
+        },
+        headers=auth(admin),
+    )
+    assert patched.status_code == 200
+
+    synced = await client.post(
+        f"/api/v1/admin/subcategories/{subcategory.id}/sync-tags",
+        headers=auth(admin),
+    )
+    assert synced.status_code == 200
+    result = synced.json()["data"]
+    assert result["businesses"] == 1
+    assert result["tags_added"] == 1
+    assert result["tags_removed"] == len(attached_before) - 2
+
+    attached = set(
+        (
+            await db_session.execute(
+                sa.select(Tag.name)
+                .join(BusinessTag, BusinessTag.tag_id == Tag.id)
+                .where(BusinessTag.business_id == business.id)
+            )
+        ).scalars()
+    )
+    # Catalog tags follow the subcategory; the owner's custom tag survives and a
+    # visible tag they did not pick stays off the business.
+    assert attached == {original[0], new_tag, custom}
+    assert original[1] not in attached

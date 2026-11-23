@@ -29,6 +29,7 @@ import QuoteDetailPage from "@/features/quote/QuoteDetailPage";
 import AdminBusinessesPage from "@/features/admin/AdminBusinessesPage";
 import AdminReviewsPage from "@/features/admin/AdminReviewsPage";
 import AdminCategoriesPage from "@/features/admin/AdminCategoriesPage";
+import AdminSubcategoriesPage from "@/features/admin/AdminSubcategoriesPage";
 import AdminTagsPage from "@/features/admin/AdminTagsPage";
 import AdminAdsPage from "@/features/admin/AdminAdsPage";
 import AdminSettingsPage from "@/features/admin/AdminSettingsPage";
@@ -183,6 +184,10 @@ export function App() {
             }
           />
           <Route path="categories" element={<AdminCategoriesPage />} />
+          <Route
+            path="categories/:categoryId/subcategories"
+            element={<AdminSubcategoriesPage />}
+          />
           <Route path="tags" element={<AdminTagsPage />} />
           <Route path="ads" element={<AdminAdsPage />} />
           <Route path="settings" element={<AdminSettingsPage />} />

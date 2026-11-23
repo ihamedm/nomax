@@ -45,9 +45,6 @@ export default function AdminCategoriesPage() {
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [editing, setEditing] = useState<CategoryRow | null>(null);
   const [form, setForm] = useState(EMPTY_CATEGORY);
-  const [subCategory, setSubCategory] = useState<CategoryRow | null>(null);
-  const [subEditingId, setSubEditingId] = useState<number | null>(null);
-  const [subForm, setSubForm] = useState({ name: "", slug: "", icon: "❓", sort_order: 0 });
   const [layaOpen, setLayaOpen] = useState(false);
 
   const items = data?.items ?? [];
@@ -84,43 +81,6 @@ export default function AdminCategoriesPage() {
     mutationFn: (id: number) => api(`/admin/categories/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       toast("دسته حذف شد.");
-      invalidate();
-    },
-    onError: (err: ApiError) => toast(errorMessage(err)),
-  });
-
-  const saveSub = useMutation({
-    mutationFn: () =>
-      subEditingId
-        ? api(`/admin/subcategories/${subEditingId}`, {
-            method: "PATCH",
-            body: JSON.stringify(subForm),
-          })
-        : api("/admin/subcategories", {
-            method: "POST",
-            body: JSON.stringify({ ...subForm, category_id: subCategory?.id }),
-          }),
-    onSuccess: async () => {
-      toast(subEditingId ? "زیردسته ذخیره شد." : "زیردسته ساخته شد.");
-      setSubEditingId(null);
-      setSubForm({ name: "", slug: "", icon: "❓", sort_order: 0 });
-      invalidate();
-      if (subCategory) {
-        const refreshed = await queryClient.fetchQuery<{ items: CategoryRow[] }>({
-          queryKey: ["admin", "categories"],
-          queryFn: () => api<{ items: CategoryRow[] }>("/admin/categories"),
-        });
-        const current = refreshed.items.find((item) => item.id === subCategory.id);
-        if (current) setSubCategory(current);
-      }
-    },
-    onError: (err: ApiError) => toast(errorMessage(err)),
-  });
-
-  const deleteSub = useMutation({
-    mutationFn: (id: number) => api(`/admin/subcategories/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      toast("زیردسته حذف شد.");
       invalidate();
     },
     onError: (err: ApiError) => toast(errorMessage(err)),
@@ -196,17 +156,12 @@ export default function AdminCategoriesPage() {
       className: "text-left",
       cell: (row) => (
         <div className="flex flex-wrap justify-end gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setSubCategory(row);
-              setSubEditingId(null);
-              setSubForm({ name: "", slug: "", icon: "❓", sort_order: 0 });
-            }}
+          <Link
+            to={`/admin/categories/${row.id}/subcategories`}
+            className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 transition-colors hover:bg-slate-50"
           >
             زیردسته‌ها
-          </Button>
+          </Link>
           <Button size="sm" onClick={() => openEdit(row)}>
             ویرایش
           </Button>
@@ -217,73 +172,6 @@ export default function AdminCategoriesPage() {
             onClick={() => {
               if (!window.confirm(`دسته «${row.name}» و زیردسته‌هایش حذف شوند؟`)) return;
               deleteCategory.mutate(row.id);
-            }}
-          >
-            حذف
-          </Button>
-        </div>
-      ),
-    },
-  ];
-
-  const subColumns: DataColumn<SubcategoryRow>[] = [
-    {
-      key: "name",
-      header: "زیردسته",
-      cell: (row) => (
-        <span className="text-sm text-slate-800">
-          {row.icon} {row.name}
-        </span>
-      ),
-    },
-    {
-      key: "slug",
-      header: "شناسه",
-      cell: (row) => (
-        <span className="text-xs text-slate-400" dir="ltr">
-          {row.slug}
-        </span>
-      ),
-    },
-    {
-      key: "tags",
-      header: "برچسب‌ها",
-      cell: (row) => (
-        <Link
-          to={`/admin/tags?subcategory_id=${row.id}`}
-          className="text-xs font-medium text-brand-700 hover:underline"
-        >
-          {row.standard_tags.length} برچسب
-        </Link>
-      ),
-    },
-    {
-      key: "actions",
-      header: "عملیات",
-      className: "text-left",
-      cell: (row) => (
-        <div className="flex justify-end gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setSubEditingId(row.id);
-              setSubForm({
-                name: row.name,
-                slug: row.slug,
-                icon: row.icon,
-                sort_order: row.sort_order,
-              });
-            }}
-          >
-            ویرایش
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={() => {
-              if (!window.confirm(`زیردسته «${row.name}» حذف شود؟`)) return;
-              deleteSub.mutate(row.id);
             }}
           >
             حذف
@@ -387,62 +275,6 @@ export default function AdminCategoriesPage() {
               </Button>
             </div>
           </form>
-        </AdminModal>
-      )}
-
-      {subCategory && (
-        <AdminModal
-          title={`زیردسته‌های ${subCategory.name}`}
-          onClose={() => setSubCategory(null)}
-          className="max-w-4xl"
-        >
-          <form
-            className="mb-4 grid gap-2 sm:grid-cols-[1fr_1fr_6rem_6rem_auto]"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveSub.mutate();
-            }}
-          >
-            <Input
-              required
-              placeholder="نام زیردسته"
-              value={subForm.name}
-              onChange={(event) => setSubForm({ ...subForm, name: event.target.value })}
-            />
-            <Input
-              required
-              dir="ltr"
-              className="text-left"
-              placeholder="slug"
-              pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
-              title="فقط حروف انگلیسی کوچک، عدد و خط تیره"
-              value={subForm.slug}
-              onChange={(event) => setSubForm({ ...subForm, slug: event.target.value.toLowerCase() })}
-            />
-            <Input
-              placeholder="آیکن"
-              value={subForm.icon}
-              onChange={(event) => setSubForm({ ...subForm, icon: event.target.value })}
-            />
-            <Input
-              type="number"
-              placeholder="ترتیب"
-              value={subForm.sort_order}
-              onChange={(event) =>
-                setSubForm({ ...subForm, sort_order: Number(event.target.value) })
-              }
-            />
-            <Button type="submit" loading={saveSub.isPending}>
-              {subEditingId ? "ذخیره" : "افزودن"}
-            </Button>
-          </form>
-          <DataTable
-            columns={subColumns}
-            rows={subCategory.subcategories}
-            rowKey={(row) => row.id}
-            empty="زیردسته‌ای ثبت نشده است."
-            minWidthClassName="min-w-[500px]"
-          />
         </AdminModal>
       )}
 

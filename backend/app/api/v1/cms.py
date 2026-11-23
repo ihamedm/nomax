@@ -312,6 +312,115 @@ async def update_subcategory(
     return {"data": {"id": sub.id, "category_id": sub.category_id, "name": sub.name, "slug": sub.slug}}
 
 
+@router.post("/admin/subcategories/{subcategory_id}/sync-tags")
+async def sync_subcategory_tags(
+    subcategory_id: int,
+    actor: User = Depends(require_permissions("category.manage")),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Re-apply a subcategory's tag catalog to the businesses that serve it."""
+    del actor
+    sub = await session.get(Subcategory, subcategory_id)
+    if sub is None or sub.deleted_at is not None:
+        raise AppError("not_found", "subcategory_not_found", 404)
+
+    from app.api.v1.businesses import _assign_tags
+    from app.models.business import Business, BusinessSubcategory
+
+    business_ids = set(
+        (
+            await session.execute(
+                sa.select(BusinessSubcategory.business_id).where(
+                    BusinessSubcategory.subcategory_id == subcategory_id
+                )
+            )
+        ).scalars()
+    )
+    business_ids.update(
+        (
+            await session.execute(
+                sa.select(Business.id).where(
+                    Business.subcategory_id == subcategory_id,
+                    Business.deleted_at.is_(None),
+                )
+            )
+        ).scalars()
+    )
+
+    changed = added = removed = 0
+    for business_id in business_ids:
+        business = await session.get(Business, business_id)
+        if business is None or business.deleted_at is not None:
+            continue
+
+        subcategory_ids = set(
+            (
+                await session.execute(
+                    sa.select(BusinessSubcategory.subcategory_id).where(
+                        BusinessSubcategory.business_id == business_id
+                    )
+                )
+            ).scalars()
+        )
+        if business.subcategory_id is not None:
+            subcategory_ids.add(business.subcategory_id)
+        related = (
+            await session.execute(
+                sa.select(Subcategory).where(
+                    Subcategory.id.in_(subcategory_ids),
+                    Subcategory.deleted_at.is_(None),
+                )
+            )
+        ).scalars().all()
+
+        catalog: list[str] = []
+        hidden_catalog: set[str] = set()
+        for row in related:
+            standard = list(row.standard_tags or [])
+            for name in standard:
+                if name not in catalog:
+                    catalog.append(name)
+            visible = (
+                row.visible_tags
+                if row.visible_tags is not None
+                else standard[: settings.MAX_VISIBLE_SUBCATEGORY_TAGS]
+            )
+            visible_set = set(visible)
+            hidden_catalog.update(name for name in standard if name not in visible_set)
+
+        current = (
+            await session.execute(
+                sa.select(Tag.name, Tag.is_custom)
+                .join(BusinessTag, BusinessTag.tag_id == Tag.id)
+                .where(
+                    BusinessTag.business_id == business_id,
+                    Tag.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        catalog_set = set(catalog)
+        names: list[str] = []
+        # Keep the owner's custom tags and the visible tags they picked.
+        for name, is_custom in current:
+            if (is_custom or name in catalog_set) and name not in names:
+                names.append(name)
+        # Search-only catalog tags are attached automatically.
+        for name in catalog:
+            if name in hidden_catalog and name not in names:
+                names.append(name)
+
+        before = {name for name, _ in current}
+        after = set(names)
+        if after != before:
+            changed += 1
+            added += len(after - before)
+            removed += len(before - after)
+        await _assign_tags(session, business_id, names, standard_names=set(catalog))
+
+    await session.commit()
+    return {"data": {"businesses": changed, "tags_added": added, "tags_removed": removed}}
+
+
 @router.delete("/admin/subcategories/{subcategory_id}")
 async def delete_subcategory(
     subcategory_id: int,
