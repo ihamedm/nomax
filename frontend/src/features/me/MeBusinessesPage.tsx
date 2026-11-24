@@ -59,14 +59,14 @@ export default function MeBusinessesPage() {
             key={business.id}
             className={
               status === "rejected"
-                ? "rounded-2xl border border-rose-200 bg-white p-4"
-                : "rounded-2xl border border-slate-200 bg-white p-4"
+                ? "min-w-0 overflow-hidden rounded-2xl border border-rose-200 bg-white p-4"
+                : "min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4"
             }
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-slate-900">{business.name}</p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 truncate text-xs text-slate-500">
                   {business.category?.name ?? "بدون دسته"} · {business.address}
                 </p>
               </div>

@@ -129,7 +129,7 @@ function OfferLine({ offer }: { offer: QuoteOffer }) {
   return (
     <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2.5">
       <div className="min-w-0">
-        <p className="text-xs font-bold text-slate-800">
+        <p className="truncate text-xs font-bold text-slate-800">
           {offer.business?.name ?? "کسب‌وکار"}
           {offer.business?.phone_business && (
             <span className="mr-2 font-normal text-slate-400" dir="ltr">

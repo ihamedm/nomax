@@ -414,9 +414,9 @@ export default function AdminBusinessesPage() {
             <button
               type="button"
               onClick={() => setDetail(business)}
-              className="flex max-w-64 items-center gap-1 text-right font-bold text-slate-900 transition-colors hover:text-brand-600"
+              className="flex min-w-0 max-w-full items-center gap-1 text-right font-bold text-slate-900 transition-colors hover:text-brand-600 md:max-w-64"
             >
-              <span className="truncate">{business.name}</span>
+              <span className="min-w-0 truncate">{business.name}</span>
               {business.is_license_verified && <BlueTick />}
             </button>
             <p className="mt-0.5 hidden text-[11px] text-slate-400 md:block" dir="ltr">
@@ -693,8 +693,8 @@ export default function AdminBusinessesPage() {
               )}
             </div>
             <div className="min-w-0">
-              <p className="flex items-center gap-1 font-bold text-slate-900">
-                <span>{detail.name}</span>
+              <p className="flex min-w-0 items-center gap-1 break-words font-bold text-slate-900">
+                <span className="min-w-0 break-words">{detail.name}</span>
                 {detail.is_license_verified && <BlueTick />}
               </p>
               <p className="mt-0.5 text-[11px] text-slate-400" dir="ltr">

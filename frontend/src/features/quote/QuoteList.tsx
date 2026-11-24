@@ -150,7 +150,7 @@ function HistoryQuoteCard({ quote }: { quote: Quote }) {
           <QuoteStatusBadge quote={quote} />
           {quote.is_urgent && <Badge tone="amber">فوری</Badge>}
           {quote.accepted_offer && (
-            <span className="text-[10px] text-slate-400">
+            <span className="min-w-0 max-w-full truncate text-[10px] text-slate-400">
               {quote.accepted_offer.business?.name}
             </span>
           )}

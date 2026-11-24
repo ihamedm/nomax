@@ -141,9 +141,9 @@ export default function AdminReviewsPage() {
       key: "business",
       header: "کسب‌وکار / نویسنده",
       cell: (row) => (
-        <div>
-          <p className="text-sm font-bold text-slate-800">{row.business_name || "—"}</p>
-          <p className="mt-0.5 text-[11px] text-slate-500">{row.author_name || "کاربر نومکس"}</p>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-slate-800">{row.business_name || "—"}</p>
+          <p className="mt-0.5 truncate text-[11px] text-slate-500">{row.author_name || "کاربر نومکس"}</p>
         </div>
       ),
     },

@@ -31,9 +31,9 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
   return (
     <Link
       to={`/businesses/${business.slug}`}
-      className="flex h-full w-full flex-col rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 active:bg-brand-50/40"
+      className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-brand-300 active:bg-brand-50/40"
     >
-      <div className="flex gap-3">
+      <div className="flex min-w-0 gap-3">
         <div className="flex w-16 shrink-0 flex-col items-center">
           <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 border-slate-200 bg-brand-50 text-2xl">
             {avatar ? (
@@ -57,18 +57,20 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="flex min-w-0 items-center gap-1 text-sm font-bold text-slate-900">
-              <span className="truncate">{business.name}</span>
+            <h3 className="flex min-w-0 flex-1 items-center gap-1 text-sm font-bold text-slate-900">
+              <span className="min-w-0 truncate">{business.name}</span>
               {business.is_license_verified && <LicenseTick />}
             </h3>
           </div>
 
-          <p className="mt-0.5 text-[11px] text-slate-400">
+          <p className="mt-0.5 truncate text-[11px] text-slate-400">
             {business.category?.name ?? "دسته‌بندی نشده"}
             {subcategories.map((item) => ` · ${item.name}`).join("")}
           </p>
 
-          <p className="mt-1 line-clamp-1 text-xs text-slate-500">{business.short_description}</p>
+          <p className="mt-1 line-clamp-1 break-words text-xs text-slate-500">
+            {business.short_description}
+          </p>
 
           <div className="mt-2 flex flex-wrap gap-1.5">
             {business.is_24h && <Badge tone="amber">۲۴ ساعته</Badge>}
@@ -78,7 +80,7 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
             )}
           </div>
 
-          <p className="mt-2 line-clamp-1 text-[11px] text-slate-400">{business.address}</p>
+          <p className="mt-2 line-clamp-1 break-words text-[11px] text-slate-400">{business.address}</p>
 
           {business.updated_at && (
             <p className="mt-1.5 text-[10px] text-slate-400">
@@ -93,7 +95,7 @@ export function BusinessCard({ business }: { business: BusinessListItem }) {
           )}
 
           {business.bookmark_note && (
-            <p className="mt-2 line-clamp-3 rounded-lg bg-amber-50 px-2 py-1 text-[11px] leading-5 text-amber-800">
+            <p className="mt-2 line-clamp-3 break-words rounded-lg bg-amber-50 px-2 py-1 text-[11px] leading-5 text-amber-800">
               📝 {business.bookmark_note}
             </p>
           )}

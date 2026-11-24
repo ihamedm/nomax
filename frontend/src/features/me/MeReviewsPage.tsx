@@ -74,11 +74,13 @@ function OwnerReviewCard({ review }: { review: OwnerReview }) {
         <div className="min-w-0">
           <Link
             to={`/businesses/${review.business_slug}`}
-            className="truncate text-sm font-bold text-slate-900 hover:text-brand-600"
+            className="block truncate text-sm font-bold text-slate-900 hover:text-brand-600"
           >
             {review.business_name}
           </Link>
-          <p className="mt-1 text-[11px] text-slate-500">{review.author_name || "کاربر نومکس"}</p>
+          <p className="mt-1 truncate text-[11px] text-slate-500">
+            {review.author_name || "کاربر نومکس"}
+          </p>
         </div>
         <Badge tone={meta.tone}>{meta.label}</Badge>
       </div>

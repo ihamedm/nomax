@@ -277,9 +277,11 @@ export default function QuoteDetailPage() {
           <p className="mt-1 text-[11px] leading-6 text-brand-700/80">
             شماره تماس شما فقط برای این کسب‌وکار نمایش داده می‌شود.
           </p>
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-white p-3">
-            <div>
-              <p className="text-sm font-bold text-slate-900">{accepted.business?.name}</p>
+          <div className="mt-3 flex min-w-0 items-center justify-between gap-3 rounded-xl bg-white p-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-900">
+                {accepted.business?.name}
+              </p>
               <p className="mt-0.5 text-xs text-slate-500">{formatToman(accepted.price)}</p>
               {accepted.business?.phone_business && (
                 <p className="mt-1 text-[11px] font-bold text-slate-600" dir="ltr">
@@ -290,7 +292,7 @@ export default function QuoteDetailPage() {
             {accepted.business?.phone_business && (
               <a
                 href={`tel:${accepted.business.phone_business}`}
-                className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-brand-600 px-3 text-xs font-bold text-white"
+                className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-brand-600 px-3 text-xs font-bold text-white"
               >
                 <PhoneIcon className="h-4 w-4" />
                 تماس

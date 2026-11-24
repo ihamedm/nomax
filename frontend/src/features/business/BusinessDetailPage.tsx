@@ -643,7 +643,7 @@ export function BusinessDetailPage() {
 
             <div className="px-5 pb-5 pt-4">
               <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 text-[11px] font-medium text-slate-400">
+                <p className="line-clamp-2 min-w-0 break-words text-[11px] font-medium text-slate-400">
                   {business.category?.icon} {business.category?.name}
                   {(business.subcategories?.length
                     ? business.subcategories
@@ -662,8 +662,8 @@ export function BusinessDetailPage() {
                 )}
               </div>
 
-              <h1 className="mt-1.5 flex items-center gap-1.5 text-2xl font-black leading-9 tracking-tight text-slate-900 sm:text-3xl sm:leading-10">
-                <span>{business.name}</span>
+              <h1 className="mt-1.5 flex min-w-0 items-center gap-1.5 text-2xl font-black leading-9 tracking-tight text-slate-900 sm:text-3xl sm:leading-10">
+                <span className="min-w-0 break-words">{business.name}</span>
                 {business.is_license_verified && <LicenseTick />}
               </h1>
 
