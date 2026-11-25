@@ -438,13 +438,21 @@ export function AdminBusinessWizard({
   }
 
   function addCustomTag() {
-    const tag = customTag.trim().replace(/^#/, "");
-    if (!tag) return;
-    if (state.tags.includes(tag)) {
+    const names = Array.from(
+      new Set(
+        customTag
+          .split(/[,،\n]/)
+          .map((tag) => tag.trim().replace(/^#/, "").slice(0, 30))
+          .filter(Boolean),
+      ),
+    );
+    if (!names.length) return;
+    const fresh = names.filter((tag) => !state.tags.includes(tag));
+    if (!fresh.length) {
       toast("این برچسب قبلاً اضافه شده است.");
       return;
     }
-    patch({ tags: [...state.tags, tag] });
+    patch({ tags: [...state.tags, ...fresh] });
     setCustomTag("");
   }
 
@@ -943,7 +951,6 @@ export function AdminBusinessWizard({
               <div className="mt-2 flex gap-2">
                 <Input
                   value={customTag}
-                  maxLength={30}
                   onChange={(event) => setCustomTag(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
@@ -951,7 +958,7 @@ export function AdminBusinessWizard({
                       addCustomTag();
                     }
                   }}
-                  placeholder="برچسب دلخواه…"
+                  placeholder="برچسب‌ها با ویرگول جدا کنید…"
                 />
                 <Button type="button" variant="outline" className="shrink-0" onClick={addCustomTag}>
                   افزودن
