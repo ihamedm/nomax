@@ -451,12 +451,13 @@ async def _business_images_payload(
     return []
 
 
-def _clean_tags(raw: object) -> list[str]:
+def _clean_tags(raw: object, *, max_tags: int | None = MAX_TAGS) -> list[str]:
     """Validate and de-duplicate the tag names sent by the wizard.
 
     Standard tags (from the chosen subcategory) and owner-supplied tags share
     the same table, so the API caps the combined list; the UI is responsible
-    for limiting custom tags to four.
+    for limiting custom tags to four. Admin edits pass ``max_tags=None``: the
+    system may attach more standard tags than an owner is allowed to add.
     """
 
     if raw is None:
@@ -476,7 +477,7 @@ def _clean_tags(raw: object) -> list[str]:
         if name not in names:
             names.append(name)
 
-    if len(names) > MAX_TAGS:
+    if max_tags is not None and len(names) > max_tags:
         raise AppError("validation_error", "too_many_tags", 422)
     return names
 

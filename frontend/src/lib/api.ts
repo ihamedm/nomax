@@ -20,6 +20,17 @@ interface ErrorBody {
   error?: { code?: string; message?: string; details?: unknown };
 }
 
+/** Dev builds are verbose; production can opt in from the console:
+ * localStorage.setItem("nomax:debug", "1"). */
+function debugEnabled(): boolean {
+  if (import.meta.env.DEV) return true;
+  try {
+    return localStorage.getItem("nomax:debug") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function expireSession(): void {
   tokens.clear();
   window.dispatchEvent(new Event("nomax:session-expired"));
@@ -90,6 +101,12 @@ async function request<T, M>(
     | null;
   if (!response.ok || !body || body.data === undefined) {
     const error = body?.error;
+    if (debugEnabled()) {
+      console.error(
+        `[api] ${init.method ?? "GET"} ${path} → ${response.status}`,
+        error ?? body ?? "(no JSON body)",
+      );
+    }
     throw new ApiError(
       error?.code ?? "http_error",
       error?.message ?? `http_${response.status}`,
@@ -131,6 +148,17 @@ const MESSAGES: Record<string, string> = {
   shahkar_invalid_input: "اطلاعات واردشده در سامانه شاهکار معتبر تشخیص داده نشد.",
   shahkar_unavailable: "بررسی شاهکار در حال حاضر ممکن نیست. کمی بعد تلاش کنید.",
   validation_error: "اطلاعات وارد شده معتبر نیست.",
+  too_many_tags: "تعداد برچسب‌های این کسب‌وکار بیش از حد مجاز است.",
+  tag_too_long: "طول یکی از برچسب‌ها بیش از حد مجاز است.",
+  tags_must_be_a_list: "فهرست برچسب‌ها معتبر نیست.",
+  too_many_visible_tags: "تعداد برچسب‌های نمایش‌داده‌شده بیش از حد مجاز است.",
+  invalid_subcategory_ids: "زیردسته‌های انتخاب‌شده معتبر نیستند.",
+  invalid_subcategory_id: "زیردسته انتخاب‌شده معتبر نیست.",
+  subcategory_not_found: "زیردسته انتخاب‌شده پیدا نشد.",
+  invalid_status: "وضعیت انتخاب‌شده معتبر نیست.",
+  invalid_owner_id: "شناسه مالک معتبر نیست.",
+  lat_and_lng_required_together: "عرض و طول جغرافیایی باید با هم وارد شوند.",
+  instagram_too_long: "نشانی اینستاگرام بیش از حد مجاز است.",
   forbidden: "شما دسترسی لازم برای این کار را ندارید.",
   auth_unauthorized: "لطفاً دوباره وارد شوید.",
   token_revoked: "نشست شما منقضی شده است. دوباره وارد شوید.",
@@ -186,8 +214,13 @@ const MESSAGES: Record<string, string> = {
 };
 
 export function errorMessage(error: unknown): string {
-  // Backend errors often carry a broad code ("conflict") plus a specific one as
-  // the message ("user_has_businesses"); fall back to the specific one.
-  if (error instanceof ApiError) return MESSAGES[error.code] ?? MESSAGES[error.message] ?? error.message;
+  // Backend errors often carry a broad code ("validation_error") plus a
+  // specific one as the message ("too_many_tags"); prefer the specific one.
+  if (error instanceof ApiError) {
+    const message = MESSAGES[error.message] ?? MESSAGES[error.code] ?? error.message;
+    if (!debugEnabled()) return message;
+    const details = error.details === undefined ? "" : ` | ${JSON.stringify(error.details)}`;
+    return `${message} [${error.status} ${error.code}/${error.message}]${details}`;
+  }
   return "خطای غیرمنتظره‌ای رخ داد.";
 }

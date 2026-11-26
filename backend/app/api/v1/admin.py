@@ -356,7 +356,7 @@ async def create_admin_business(
         raise AppError("validation_error", "instagram_too_long", 422)
 
     images, profile_image_url = _resolve_business_images(payload)
-    tags = _clean_tags(payload.get("tags"))
+    tags = _clean_tags(payload.get("tags"), max_tags=None)
 
     status_value = payload.get("status") or BusinessStatus.PENDING.value
     if status_value not in [item.value for item in BusinessStatus]:
@@ -655,7 +655,7 @@ async def update_admin_business(
     business.profile_image_url = profile_image_url
     if "avatar_url" in payload:
         business.avatar_url = _clean_image_url(payload.get("avatar_url"))
-    tags = _clean_tags(payload.get("tags")) if "tags" in payload else None
+    tags = _clean_tags(payload.get("tags"), max_tags=None) if "tags" in payload else None
 
     if "rejection_reason" in payload:
         business.rejection_reason = (payload.get("rejection_reason") or "").strip() or None

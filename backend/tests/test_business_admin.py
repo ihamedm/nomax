@@ -112,6 +112,23 @@ async def test_tag_list_accepts_four_and_caps_total(client, db_session, create_u
     assert too_many.status_code == 422
 
 
+async def test_admin_can_save_more_tags_than_owner_cap(client, db_session, create_user):
+    _, business = await _setup(db_session, create_user)
+    admin = await create_user(
+        "09140000131",
+        UserRole.ADMIN,
+        permissions=["business.update"],
+    )
+    tags = [f"tag-{index}" for index in range(31)]
+    response = await client.patch(
+        f"/api/v1/admin/businesses/{business.id}",
+        json={"tags": tags},
+        headers=auth(admin),
+    )
+    assert response.status_code == 200
+    assert set(response.json()["data"]["tags"]) == set(tags)
+
+
 async def test_admin_business_cms_crud_and_pagination(client, db_session, create_user):
     owner, existing = await _setup(db_session, create_user)
     cms_owner = await create_user("9140000008", UserRole.OWNER)
